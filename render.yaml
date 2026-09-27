@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: botarca
+    runtime: docker
+    plan: free
+    region: ohio
+    branch: main
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: APP_SECRET
+        generateValue: true
+      - key: KEEP_ALIVE_ENABLED
+        value: "true"
+      - key: KEEP_ALIVE_INTERVAL_MINUTES
+        value: "10"
+      - key: HEADLESS_MODE
+        value: "true"
+      - key: SLOW_MO_MS
+        value: "50"
+      - key: AUTO_SYNC_CRON
+        value: "0 9 * * *"
+      - key: RENDER_EXTERNAL_URL
+        sync: false

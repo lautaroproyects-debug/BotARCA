@@ -1,0 +1,48 @@
+{
+  "name": "botarca",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Bot automatizado para gestión de ARCA (ex-AFIP) mediante emulación de sesión HTTP y Playwright headless con interfaz web y keep-alive.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc && npm run copy-assets",
+    "copy-assets": "node -e \"const fs=require('fs'); fs.cpSync('src/public', 'dist/public', {recursive: true});\"",
+    "start": "node dist/index.js",
+    "install-browsers": "npx playwright install --with-deps chromium"
+  },
+  "keywords": [
+    "arca",
+    "afip",
+    "bot",
+    "facturacion",
+    "comprobantes",
+    "render",
+    "playwright",
+    "headless"
+  ],
+  "author": "BotArca Team",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
+    "axios": "^1.7.9",
+    "bcryptjs": "^3.0.3",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3",
+    "node-cron": "^3.0.3",
+    "playwright": "^1.50.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.13.5",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

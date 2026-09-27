@@ -31,6 +31,8 @@ export interface AppDatabase {
     externalUrl: string;
     autoSyncEnabled: boolean;
     autoSyncCron: string;
+    uptimeRobotApiKey?: string;
+    uptimeRobotMonitorId?: string;
   };
   tasks: TaskRecord[];
   sessionCookies: any[];
@@ -67,6 +69,7 @@ class DatabaseManager {
         externalUrl: config.keepAlive.externalUrl,
         autoSyncEnabled: false,
         autoSyncCron: config.scheduler.cronExpression,
+        uptimeRobotApiKey: config.uptimeRobotApiKey,
       },
       tasks: [],
       sessionCookies: [],

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { keepAliveService } from '../services/keepAlive.js';
+import { uptimeRobotService } from '../services/uptimeRobot.js';
 import { db } from '../database.js';
 import { logger } from '../services/logger.js';
 
@@ -25,7 +26,7 @@ router.get('/health', (req: Request, res: Response) => {
 
 // Guardar configuración de Keep-Alive
 router.post('/config', (req: Request, res: Response) => {
-  const { keepAliveEnabled, keepAliveIntervalMinutes, externalUrl, autoSyncEnabled, autoSyncCron } = req.body;
+  const { keepAliveEnabled, keepAliveIntervalMinutes, externalUrl, autoSyncEnabled, autoSyncCron, uptimeRobotApiKey } = req.body;
 
   const current = db.getSettings();
   const updated = {
@@ -34,6 +35,7 @@ router.post('/config', (req: Request, res: Response) => {
     externalUrl: externalUrl !== undefined ? String(externalUrl).trim() : current.externalUrl,
     autoSyncEnabled: autoSyncEnabled !== undefined ? Boolean(autoSyncEnabled) : current.autoSyncEnabled,
     autoSyncCron: autoSyncCron !== undefined ? String(autoSyncCron).trim() : current.autoSyncCron,
+    uptimeRobotApiKey: uptimeRobotApiKey !== undefined ? String(uptimeRobotApiKey).trim() : current.uptimeRobotApiKey,
   };
 
   db.updateSettings(updated);
@@ -52,6 +54,21 @@ router.post('/config', (req: Request, res: Response) => {
 // Ejecutar un ping manual ahora
 router.post('/trigger', async (req: Request, res: Response) => {
   const result = await keepAliveService.executePing('manual_ui');
+  res.json(result);
+});
+
+// --- Integración con UptimeRobot ---
+
+// Obtener estado de monitores en UptimeRobot
+router.get('/uptimerobot/status', async (req: Request, res: Response) => {
+  const result = await uptimeRobotService.getMonitors();
+  res.json(result);
+});
+
+// Sincronizar o crear monitor automáticamente en UptimeRobot
+router.post('/uptimerobot/sync', async (req: Request, res: Response) => {
+  const { targetUrl } = req.body;
+  const result = await uptimeRobotService.syncOrRegisterMonitor(targetUrl);
   res.json(result);
 });
 

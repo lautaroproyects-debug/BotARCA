@@ -15,6 +15,7 @@ export const config = {
     intervalMinutes: parseInt(process.env.KEEP_ALIVE_INTERVAL_MINUTES || '10', 10),
     externalUrl: process.env.RENDER_EXTERNAL_URL || '',
   },
+  uptimeRobotApiKey: process.env.UPTIMEROBOT_API_KEY || 'u3807259-da5acf1c8d7f897703ff3f2b',
   engine: {
     headless: process.env.HEADLESS_MODE !== 'false',
     slowMo: parseInt(process.env.SLOW_MO_MS || '50', 10),

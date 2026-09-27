@@ -959,6 +959,7 @@ async function handleSaveKeepAlive(e) {
   const enabled = document.getElementById('cfgKeepAliveEnabled').checked;
   const interval = document.getElementById('cfgKeepAliveInterval').value;
   const url = document.getElementById('cfgExternalUrl').value;
+  const uptimeRobotKey = document.getElementById('cfgUptimeRobotKey').value;
 
   try {
     const res = await fetchWithAuth('/api/keepalive/config', {
@@ -967,11 +968,13 @@ async function handleSaveKeepAlive(e) {
         keepAliveEnabled: enabled,
         keepAliveIntervalMinutes: parseInt(interval, 10),
         externalUrl: url,
+        uptimeRobotApiKey: uptimeRobotKey,
       }),
     });
     const data = await res.json();
     if (data.success) {
-      showToast('Configuración de Keep-Alive actualizada.', 'success');
+      showToast('Configuración de Keep-Alive y UptimeRobot actualizada.', 'success');
+      await checkUptimeRobotStatus();
     }
   } catch (err) {
     showToast('Error al guardar Keep-Alive.', 'error');
@@ -986,11 +989,98 @@ async function loadKeepAliveSettings() {
       const chk = document.getElementById('cfgKeepAliveEnabled');
       const intInput = document.getElementById('cfgKeepAliveInterval');
       const urlInput = document.getElementById('cfgExternalUrl');
+      const uptimeKeyInput = document.getElementById('cfgUptimeRobotKey');
       if (chk) chk.checked = data.settings.keepAliveEnabled;
       if (intInput) intInput.value = data.settings.keepAliveIntervalMinutes;
       if (urlInput) urlInput.value = data.settings.externalUrl || '';
+      if (uptimeKeyInput && data.settings.uptimeRobotApiKey) uptimeKeyInput.value = data.settings.uptimeRobotApiKey;
     }
+    await checkUptimeRobotStatus();
   } catch (e) {}
+}
+
+async function checkUptimeRobotStatus() {
+  const detailsEl = document.getElementById('uptimeRobotDetails');
+  const badgeText = document.getElementById('uptimeRobotStatusText');
+  const liveBadge = document.getElementById('uptimeRobotLiveBadge');
+  if (!detailsEl) return;
+
+  try {
+    detailsEl.innerHTML = '<span class="text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Consultando API de UptimeRobot...</span>';
+    const res = await fetchWithAuth('/api/keepalive/uptimerobot/status');
+    const data = await res.json();
+
+    if (data.success && data.monitors && data.monitors.length > 0) {
+      if (liveBadge) liveBadge.classList.remove('hidden');
+      if (badgeText) badgeText.innerText = `UptimeRobot: ${data.monitors.length} Monitor(es)`;
+
+      detailsEl.innerHTML = `
+        <div class="space-y-2">
+          ${data.monitors.map(m => {
+            let statusColor = 'text-emerald-400 bg-emerald-950/80 border-emerald-800';
+            let statusLabel = 'OPERATIVO (UP)';
+            if (m.status === 0) {
+              statusColor = 'text-amber-400 bg-amber-950/80 border-amber-800';
+              statusLabel = 'PAUSADO';
+            } else if (m.status === 8 || m.status === 9) {
+              statusColor = 'text-rose-400 bg-rose-950/80 border-rose-800';
+              statusLabel = 'CAÍDO (DOWN)';
+            }
+
+            return `
+              <div class="flex items-center justify-between p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
+                <div class="space-y-0.5">
+                  <div class="flex items-center space-x-2">
+                    <strong class="text-slate-200 text-xs">${escapeHtml(m.friendly_name)}</strong>
+                    <span class="px-2 py-0.5 text-[10px] font-mono border rounded-full ${statusColor}">${statusLabel}</span>
+                  </div>
+                  <div class="text-[11px] text-slate-400 font-mono truncate max-w-md">${escapeHtml(m.url)}</div>
+                </div>
+                <div class="text-right">
+                  <div class="text-xs font-bold text-emerald-400">${m.all_time_uptime_ratio || '100'}% Uptime</div>
+                  <div class="text-[10px] text-slate-500 font-mono">ID: ${m.id}</div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    } else if (data.success && (!data.monitors || data.monitors.length === 0)) {
+      if (badgeText) badgeText.innerText = 'UptimeRobot: Sin monitores';
+      detailsEl.innerHTML = `
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400">API Key conectada correctamente, pero aún no hay monitores registrados para esta URL.</span>
+          <button type="button" onclick="syncUptimeRobotMonitor()" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition">Crear Monitor Ahora</button>
+        </div>
+      `;
+    } else {
+      if (badgeText) badgeText.innerText = 'UptimeRobot: Pendiente';
+      detailsEl.innerHTML = `<span class="text-amber-400/90"><i class="fa-solid fa-triangle-exclamation mr-1"></i> ${escapeHtml(data.error || 'No se pudo conectar con UptimeRobot.')}</span>`;
+    }
+  } catch (err) {
+    if (detailsEl) detailsEl.innerHTML = '<span class="text-rose-400">Error al consultar UptimeRobot.</span>';
+  }
+}
+
+async function syncUptimeRobotMonitor() {
+  const url = document.getElementById('cfgExternalUrl')?.value;
+  showToast('Registrando monitor en UptimeRobot...', 'info');
+
+  try {
+    const res = await fetchWithAuth('/api/keepalive/uptimerobot/sync', {
+      method: 'POST',
+      body: JSON.stringify({ targetUrl: url }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(data.message, 'success');
+      await checkUptimeRobotStatus();
+    } else {
+      showToast(data.message, 'warn');
+    }
+  } catch (e) {
+    showToast('Error al sincronizar con UptimeRobot.', 'error');
+  }
 }
 
 async function triggerManualPing() {

@@ -3,20 +3,14 @@ import { db } from '../database.js';
 import { arcaSession } from '../engine/arcaSession.js';
 import { userService } from '../services/auth/userService.js';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth.middleware.js';
+import { validateLogin, validateRegister, validateCredentials } from '../middleware/validation.middleware.js';
 import { logger } from '../services/logger.js';
 
 const router = Router();
 
 // Login de usuario al panel web
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', validateLogin, async (req: Request, res: Response) => {
   const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({
-      success: false,
-      message: 'Por favor ingresa usuario y contraseña.',
-    });
-  }
 
   const result = await userService.authenticate(username, password);
   if (result.success) {
@@ -27,7 +21,7 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // Registro público de usuario (con notificación por Brevo / Resend)
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', validateRegister, async (req: Request, res: Response) => {
   const { name, username, email, password } = req.body;
 
   if (!name || !username || !email || !password) {

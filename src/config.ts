@@ -9,13 +9,19 @@ const __dirname = path.dirname(__filename);
 
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
-  appSecret: process.env.APP_SECRET || 'botarca_default_secret_key_change_me_32chars!',
+  appSecret: process.env.APP_SECRET || 'botarca_dev_secret_key_9988_min32chars_required',
+  cors: {
+    allowedOrigins: (process.env.CORS_ORIGIN || '')
+      .split(',')
+      .map(o => o.trim())
+      .filter(Boolean),
+  },
   keepAlive: {
     enabled: process.env.KEEP_ALIVE_ENABLED !== 'false',
     intervalMinutes: parseInt(process.env.KEEP_ALIVE_INTERVAL_MINUTES || '10', 10),
-    externalUrl: process.env.RENDER_EXTERNAL_URL || '',
+    externalUrl: process.env.RENDER_EXTERNAL_URL || 'https://botarca.onrender.com',
   },
-  uptimeRobotApiKey: process.env.UPTIMEROBOT_API_KEY || 'u3807259-da5acf1c8d7f897703ff3f2b',
+  uptimeRobotApiKey: process.env.UPTIMEROBOT_API_KEY || '',
   engine: {
     headless: process.env.HEADLESS_MODE !== 'false',
     slowMo: parseInt(process.env.SLOW_MO_MS || '50', 10),

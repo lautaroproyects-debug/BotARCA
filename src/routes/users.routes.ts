@@ -1,19 +1,13 @@
 import { Router, Response } from 'express';
 import { userService } from '../services/auth/userService.js';
 import { authenticateToken, requireAdmin, AuthenticatedRequest } from '../middleware/auth.middleware.js';
+import { validateLogin, validateRegister } from '../middleware/validation.middleware.js';
 
 const router = Router();
 
 // Login público
-router.post('/login', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/login', validateLogin, async (req: AuthenticatedRequest, res: Response) => {
   const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({
-      success: false,
-      message: 'Por favor ingresa usuario y contraseña.',
-    });
-  }
 
   const result = await userService.authenticate(username, password);
   if (result.success) {
@@ -24,7 +18,7 @@ router.post('/login', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 // Registro público
-router.post('/register', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/register', validateRegister, async (req: AuthenticatedRequest, res: Response) => {
   const { name, username, email, password } = req.body;
 
   if (!name || !username || !email || !password) {

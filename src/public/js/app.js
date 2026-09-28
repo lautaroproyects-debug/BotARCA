@@ -1,982 +1,615 @@
-// BotArca ERP & Headless Automation Frontend Application Logic
-let sseSource = null;
-let logCount = 0;
-let crmClientsList = [];
-let catalogProductsList = [];
-let liveDolares = [];
-let currentUser = null;
-let cotizacionOficialVenta = 1060;
+/**
+ * BotArca Frontend Core Engine
+ * Minimalist, high-reliability controller for ARCA headless automation and invoicing
+ */
 
-document.addEventListener('DOMContentLoaded', () => {
-  initApp();
+let authToken = localStorage.getItem('botarca_token') || '';
+let currentUser = null;
+let allClients = [];
+let allComprobantes = [];
+let sseSource = null;
+
+// --- INITIALIZATION ---
+document.addEventListener('DOMContentLoaded', async () => {
+  if (authToken) {
+    hideLoginOverlay();
+    await initApp();
+  } else {
+    showLoginOverlay();
+  }
 });
 
-// Helper de peticiones autenticadas con JWT
-async function fetchWithAuth(url, options = {}) {
-  const token = localStorage.getItem('botarca_token');
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(options.headers || {}),
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(url, { ...options, headers });
-
-  if (response.status === 401) {
-    // No autenticado o sesión vencida
-    currentUser = null;
-    localStorage.removeItem('botarca_token');
-    document.getElementById('loginOverlay').classList.remove('hidden');
-    throw new Error('Sesión no autorizada o expirada.');
-  }
-
-  return response;
-}
-
 async function initApp() {
-  initDates();
-
-  // Verificar si hay sesión guardada
-  const token = localStorage.getItem('botarca_token');
-  if (!token) {
-    document.getElementById('loginOverlay').classList.remove('hidden');
-    return;
-  }
-
-  const authenticated = await loadCurrentUserProfile();
-  if (!authenticated) {
-    document.getElementById('loginOverlay').classList.remove('hidden');
-    return;
-  }
-
-  document.getElementById('loginOverlay').classList.add('hidden');
-  setupSSELogs();
+  await loadCurrentUser();
+  await loadFinancialTicker();
   await loadAuthStatus();
-  await loadFinanzasData();
   await loadCRMClientes();
-  await loadCatalogProducts();
-  await loadDashboardStats();
-  await loadTaskHistory();
+  await loadComprobantesList();
+  await loadMonotributoStats();
   await loadKeepAliveSettings();
-  await loadSupabaseStatus();
-  await loadMonotributoStatus();
-  await loadNotificacionesDFE();
+  connectLogsSSE();
 
-  if (currentUser && currentUser.role === 'admin') {
-    await loadUsersList();
-  }
-
-  // Polling de cotizaciones y stats cada 20 segundos
-  setInterval(() => {
-    if (currentUser) {
-      loadFinanzasData();
-      loadDashboardStats();
-      loadTaskHistory();
-    }
-  }, 20000);
+  // Polling discreto de cotizaciones financieras cada 60 segundos
+  setInterval(loadFinancialTicker, 60000);
 }
 
-// --- AUTENTICACIÓN DE USUARIOS & SESIÓN ---
+// --- AUTHENTICATION & LOGIN ---
+function showLoginOverlay() {
+  document.getElementById('loginOverlay')?.classList.remove('hidden');
+}
+
+function hideLoginOverlay() {
+  document.getElementById('loginOverlay')?.classList.add('hidden');
+}
+
 async function handleUserLogin(e) {
   e.preventDefault();
-  const username = document.getElementById('loginUsername').value;
+  const username = document.getElementById('loginUsername').value.trim();
   const password = document.getElementById('loginPassword').value;
   const btn = document.getElementById('btnLoginSubmit');
 
   btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Verificando...';
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Verificando...';
 
   try {
-    const res = await fetch('/api/users/login', {
+    const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password })
     });
 
     const data = await res.json();
     if (data.success && data.token) {
-      localStorage.setItem('botarca_token', data.token);
+      authToken = data.token;
+      localStorage.setItem('botarca_token', authToken);
       currentUser = data.user;
-      updateUserHeaderProfile();
-      document.getElementById('loginOverlay').classList.add('hidden');
-      showToast(`¡Bienvenido/a, ${currentUser.name}!`, 'success');
+      hideLoginOverlay();
+      showToast(`¡Bienvenido, ${data.user.name || data.user.username}!`, 'success');
       await initApp();
     } else {
-      showToast(data.message || 'Usuario o contraseña incorrectos.', 'error');
+      showToast(data.message || 'Credenciales incorrectas.', 'error');
     }
   } catch (err) {
-    showToast(`Error de conexión al autenticar: ${err.message}`, 'error');
+    showToast('Error de conexión con el servidor.', 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span>Ingresar al Sistema</span><i class="fa-solid fa-arrow-right text-xs ml-2"></i>';
-  }
-}
-
-async function loadCurrentUserProfile() {
-  try {
-    const res = await fetchWithAuth('/api/users/me');
-    const data = await res.json();
-    if (data.success && data.user) {
-      currentUser = data.user;
-      updateUserHeaderProfile();
-      return true;
-    }
-  } catch (e) {}
-  return false;
-}
-
-function updateUserHeaderProfile() {
-  if (!currentUser) return;
-
-  const nameEl = document.getElementById('headerUserName');
-  const roleEl = document.getElementById('headerUserRole');
-  const letterEl = document.getElementById('userAvatarLetter');
-  const tabUsersBtn = document.getElementById('tabBtnUsers');
-
-  if (nameEl) nameEl.innerText = currentUser.name || currentUser.username;
-  if (roleEl) roleEl.innerText = currentUser.role;
-  if (letterEl) letterEl.innerText = (currentUser.name || currentUser.username).charAt(0).toUpperCase();
-
-  // Mostrar u ocultar pestaña de administración de usuarios
-  if (tabUsersBtn) {
-    if (currentUser.role === 'admin') {
-      tabUsersBtn.classList.remove('hidden');
-    } else {
-      tabUsersBtn.classList.add('hidden');
-    }
+    btn.innerHTML = '<span>Iniciar Sesión</span> <i class="fa-solid fa-arrow-right text-xs"></i>';
   }
 }
 
 function handleUserLogout() {
   localStorage.removeItem('botarca_token');
+  authToken = '';
   currentUser = null;
-  document.getElementById('loginOverlay').classList.remove('hidden');
-  showToast('Has cerrado sesión correctamente.', 'info');
+  if (sseSource) sseSource.close();
+  showLoginOverlay();
+  showToast('Sesión cerrada.', 'info');
 }
 
-// --- GESTIÓN DE USUARIOS (SOLO ADMIN) ---
-async function loadUsersList() {
-  if (!currentUser || currentUser.role !== 'admin') return;
-
+async function loadCurrentUser() {
   try {
-    const res = await fetchWithAuth('/api/users');
-    const data = await res.json();
-    const tbody = document.getElementById('usersTableBody');
-    if (!tbody) return;
-
-    if (!data.success || !data.users || data.users.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-500">No hay otros usuarios registrados.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = data.users.map(u => {
-      let roleBadge = '<span class="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 font-semibold uppercase text-[10px]">Operador</span>';
-      if (u.role === 'admin') roleBadge = '<span class="px-2 py-0.5 rounded bg-violet-950 text-violet-300 font-semibold uppercase text-[10px]">Administrador</span>';
-      if (u.role === 'viewer') roleBadge = '<span class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-semibold uppercase text-[10px]">Solo Lectura</span>';
-
-      const statusBadge = u.active
-        ? '<span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-semibold text-[10px]">Activo</span>'
-        : '<span class="px-2 py-0.5 rounded bg-rose-950 text-rose-300 font-semibold text-[10px]">Inactivo</span>';
-
-      const lastLogin = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString('es-AR') + ' ' + new Date(u.lastLoginAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : 'Nunca';
-
-      const isSelf = currentUser && currentUser.id === u.id;
-
-      return `
-        <tr class="hover:bg-slate-800/40 transition">
-          <td class="py-3 px-3">
-            <div class="font-semibold text-slate-100">${escapeHtml(u.name)}</div>
-            <div class="text-[11px] text-indigo-400 font-mono">@${escapeHtml(u.username)}</div>
-          </td>
-          <td class="py-3 px-3 text-slate-300">${escapeHtml(u.email)}</td>
-          <td class="py-3 px-3">${roleBadge}</td>
-          <td class="py-3 px-3">${statusBadge}</td>
-          <td class="py-3 px-3 text-slate-400 text-[11px] font-mono">${lastLogin}</td>
-          <td class="py-3 px-3 text-right space-x-2">
-            <button onclick="openResetPasswordModal('${u.id}', '${u.username}')" class="px-2.5 py-1 bg-amber-600/30 hover:bg-amber-600 text-amber-200 rounded text-[11px] font-bold transition">
-              <i class="fa-solid fa-key mr-1"></i> Clave
-            </button>
-            ${!isSelf ? `
-              <button onclick="toggleUserActive('${u.id}', ${!u.active})" class="px-2.5 py-1 ${u.active ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-emerald-600 hover:bg-emerald-500 text-white'} rounded text-[11px] font-bold transition">
-                ${u.active ? 'Desactivar' : 'Activar'}
-              </button>
-              <button onclick="deleteUser('${u.id}')" class="text-slate-500 hover:text-red-400 transition text-sm">
-                <i class="fa-solid fa-trash-can"></i>
-              </button>
-            ` : '<span class="text-[10px] text-slate-500 italic">(Tu cuenta)</span>'}
-          </td>
-        </tr>
-      `;
-    }).join('');
-
-  } catch (e) {
-    console.error('Error cargando lista de usuarios:', e);
-  }
-}
-
-function openNewUserModal() {
-  document.getElementById('userModal').classList.remove('hidden');
-}
-
-function closeUserModal() {
-  document.getElementById('userModal').classList.add('hidden');
-}
-
-async function handleSaveUser(e) {
-  e.preventDefault();
-  const name = document.getElementById('usrName').value;
-  const username = document.getElementById('usrUsername').value;
-  const email = document.getElementById('usrEmail').value;
-  const password = document.getElementById('usrPassword').value;
-  const role = document.getElementById('usrRole').value;
-
-  try {
-    const res = await fetchWithAuth('/api/users', {
-      method: 'POST',
-      body: JSON.stringify({ name, username, email, password, role }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Usuario creado correctamente.', 'success');
-      closeUserModal();
-      await loadUsersList();
-    } else {
-      showToast(data.message, 'error');
-    }
-  } catch (err) {
-    showToast('Error al crear usuario.', 'error');
-  }
-}
-
-function openResetPasswordModal(id, username) {
-  document.getElementById('resetUserId').value = id;
-  document.getElementById('resetUserLabel').innerText = `@${username}`;
-  document.getElementById('resetNewPassword').value = '';
-  document.getElementById('resetPassModal').classList.remove('hidden');
-}
-
-function closeResetPassModal() {
-  document.getElementById('resetPassModal').classList.add('hidden');
-}
-
-async function handleResetPasswordSubmit(e) {
-  e.preventDefault();
-  const id = document.getElementById('resetUserId').value;
-  const newPassword = document.getElementById('resetNewPassword').value;
-
-  try {
-    const res = await fetchWithAuth(`/api/users/${id}/reset-password`, {
-      method: 'PUT',
-      body: JSON.stringify({ newPassword }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Contraseña restablecida con éxito.', 'success');
-      closeResetPassModal();
-    } else {
-      showToast(data.message, 'error');
-    }
-  } catch (err) {
-    showToast('Error al restablecer contraseña.', 'error');
-  }
-}
-
-async function toggleUserActive(id, active) {
-  try {
-    const res = await fetchWithAuth(`/api/users/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ active }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast(`Usuario ${active ? 'activado' : 'desactivado'}.`, 'info');
-      await loadUsersList();
+    const res = await fetchWithAuth('/api/users/me');
+    if (res.ok) {
+      const data = await res.json();
+      currentUser = data.user;
+      const el = document.getElementById('headerUserName');
+      if (el) el.innerText = currentUser.username;
     }
   } catch (e) {}
 }
 
-async function deleteUser(id) {
-  if (!confirm('¿Seguro que deseas eliminar este usuario permanentemente?')) return;
-  try {
-    const res = await fetchWithAuth(`/api/users/${id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Usuario eliminado.', 'info');
-      await loadUsersList();
-    } else {
-      showToast(data.message, 'error');
-    }
-  } catch (e) {}
-}
+async function fetchWithAuth(url, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+    ...(options.headers || {})
+  };
 
-// Inicializar fechas por defecto
-function initDates() {
-  const now = new Date();
-  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-  const today = now.toISOString().split('T')[0];
-
-  const desdeInput = document.getElementById('compFilterDesde');
-  const hastaInput = document.getElementById('compFilterHasta');
-  if (desdeInput) desdeInput.value = firstDay;
-  if (hastaInput) hastaInput.value = today;
-}
-
-// Conectar con flujo de logs en tiempo real (Server-Sent Events)
-function setupSSELogs() {
-  if (sseSource) {
-    sseSource.close();
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401 || response.status === 403) {
+    handleUserLogout();
+    throw new Error('Sesión expirada');
   }
-
-  const terminal = document.getElementById('terminalScreen');
-  sseSource = new EventSource('/api/logs/stream');
-
-  sseSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      if (data.type === 'history') {
-        terminal.innerHTML = '';
-        data.logs.forEach(entry => appendLogEntry(entry));
-      } else if (data.type === 'log') {
-        appendLogEntry(data.entry);
-      }
-    } catch (e) {
-      console.error('Error parseando mensaje SSE:', e);
-    }
-  };
-
-  sseSource.onerror = () => {
-    console.warn('Conexión SSE perdida. Reintentando automáticamente...');
-  };
+  return response;
 }
 
-function appendLogEntry(entry) {
-  const terminal = document.getElementById('terminalScreen');
-  if (!terminal) return;
-
-  logCount++;
-  const badge = document.getElementById('logBadgeCount');
-  if (badge) badge.innerText = logCount > 99 ? '99+' : logCount;
-
-  const div = document.createElement('div');
-  div.className = 'py-0.5 leading-relaxed';
-
-  let levelColor = 'text-sky-400';
-  if (entry.level === 'success') levelColor = 'text-emerald-400';
-  if (entry.level === 'warn') levelColor = 'text-amber-400';
-  if (entry.level === 'error') levelColor = 'text-rose-400 font-bold';
-
-  div.innerHTML = `
-    <span class="text-slate-500">[${entry.timestamp}]</span>
-    <span class="text-indigo-400 font-semibold">[${entry.category}]</span>
-    <span class="${levelColor}">[${entry.level.toUpperCase()}]</span>
-    <span class="text-slate-200">${escapeHtml(entry.message)}</span>
-  `;
-
-  terminal.appendChild(div);
-  terminal.scrollTop = terminal.scrollHeight;
-}
-
-function clearLogsConsole() {
-  const terminal = document.getElementById('terminalScreen');
-  if (terminal) terminal.innerHTML = '<div class="text-slate-500">[SISTEMA] Consola limpiada. Esperando nuevos eventos...</div>';
-  logCount = 0;
-  const badge = document.getElementById('logBadgeCount');
-  if (badge) badge.innerText = '0';
-}
-
-function reconnectLogsSSE() {
-  setupSSELogs();
-}
-
-// Cambio de pestaña
+// --- NAVIGATION TABS ---
 function switchTab(tabId) {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
-  });
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.nav-tab-btn').forEach(el => el.classList.remove('active'));
 
-  document.querySelectorAll('.tab-content').forEach(content => {
-    content.classList.add('hidden');
-  });
+  const targetSection = document.getElementById(`tab-${tabId}`);
+  if (targetSection) targetSection.classList.remove('hidden');
 
-  const activeContent = document.getElementById(`tab-${tabId}`);
-  if (activeContent) {
-    activeContent.classList.remove('hidden');
-  }
+  const targetBtn = document.querySelector(`.nav-tab-btn[data-tab="${tabId}"]`);
+  if (targetBtn) targetBtn.classList.add('active');
+
+  if (tabId === 'comprobantes') loadComprobantesList();
+  if (tabId === 'crm') loadCRMClientes();
+  if (tabId === 'monotributo') loadMonotributoStats();
+  if (tabId === 'settings') loadKeepAliveSettings();
 }
 
-// --- FINANZAS & ARGENTINADATOS ---
-async function loadFinanzasData() {
+// --- DISCRETE FINANCIAL TICKER (ArgentinaDatos) ---
+async function loadFinancialTicker() {
   try {
-    const res = await fetchWithAuth('/api/finanzas/indicadores');
+    const res = await fetch('/api/finanzas/resumen');
+    if (!res.ok) return;
     const data = await res.json();
 
-    if (data.success) {
-      liveDolares = data.dolares || [];
-      
-      const oficial = liveDolares.find(d => d.casa === 'oficial') || liveDolares[0];
-      const blue = liveDolares.find(d => d.casa === 'blue');
-      const mep = liveDolares.find(d => d.casa === 'bolsa');
-      const ccl = liveDolares.find(d => d.casa === 'contadoconliqui');
-
-      if (oficial) {
-        cotizacionOficialVenta = oficial.venta || 1060;
-        document.getElementById('tickOficial').innerText = `C: $${oficial.compra} / V: $${oficial.venta}`;
-        const cotizDisplay = document.getElementById('invCotizDolarDisplay');
-        if (cotizDisplay) cotizDisplay.innerText = `$${oficial.venta.toLocaleString('es-AR')}`;
-      }
-      if (blue) document.getElementById('tickBlue').innerText = `C: $${blue.compra} / V: $${blue.venta}`;
-      if (mep) document.getElementById('tickMep').innerText = `$${mep.venta}`;
-      if (ccl) document.getElementById('tickCcl').innerText = `$${ccl.venta}`;
-
-      if (data.inflacionMensual && data.inflacionMensual.length > 0) {
-        const lastIpc = data.inflacionMensual[data.inflacionMensual.length - 1];
-        document.getElementById('tickIpc').innerText = `${lastIpc.valor}% (${lastIpc.fecha})`;
-      }
-
-      if (data.uva && data.uva.length > 0) {
-        const lastUva = data.uva[data.uva.length - 1];
-        document.getElementById('tickUva').innerText = `$${lastUva.valor}`;
-      }
-
-      document.getElementById('tickerUpdated').innerText = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-
-      renderDolaresCards();
-      handleConvertCurrency();
+    const d = data.dolares || {};
+    if (d.oficial) {
+      document.getElementById('tickOficial').innerText = `$${d.oficial.compra} / $${d.oficial.venta}`;
     }
-  } catch (err) {}
-}
+    if (d.blue) {
+      document.getElementById('tickBlue').innerText = `$${d.blue.venta}`;
+    }
+    if (d.mep) {
+      document.getElementById('tickMep').innerText = `$${d.mep.venta || d.mep.compra}`;
+    }
+    if (d.ccl) {
+      document.getElementById('tickCcl').innerText = `$${d.ccl.venta || d.ccl.compra}`;
+    }
+    if (data.inflacion && data.inflacion.ultimoIpc) {
+      document.getElementById('tickIpc').innerText = `${data.inflacion.ultimoIpc.valor}%`;
+    }
+    if (data.uva && data.uva.ultimoValor) {
+      document.getElementById('tickUva').innerText = `$${data.uva.ultimoValor.valor}`;
+    }
 
-function renderDolaresCards() {
-  const container = document.getElementById('dolaresCardsGrid');
-  if (!container || !liveDolares.length) return;
-
-  container.innerHTML = liveDolares.map(d => {
-    let badgeColor = 'bg-indigo-950 text-indigo-300 border-indigo-800';
-    if (d.casa === 'blue') badgeColor = 'bg-emerald-950 text-emerald-300 border-emerald-800';
-    if (d.casa === 'bolsa') badgeColor = 'bg-cyan-950 text-cyan-300 border-cyan-800';
-
-    return `
-      <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-2 hover:border-slate-700 transition">
-        <div class="flex items-center justify-between">
-          <span class="font-bold text-slate-100 text-sm">${d.nombre || d.casa}</span>
-          <span class="text-[10px] px-2 py-0.5 rounded-full border ${badgeColor} uppercase font-semibold">${d.casa}</span>
-        </div>
-        <div class="grid grid-cols-2 gap-2 pt-1 text-xs">
-          <div>
-            <span class="text-slate-400 text-[10px]">Compra</span>
-            <p class="font-bold text-slate-200 font-mono text-sm">$${(d.compra || 0).toLocaleString('es-AR')}</p>
-          </div>
-          <div>
-            <span class="text-slate-400 text-[10px]">Venta</span>
-            <p class="font-black text-emerald-400 font-mono text-base">$${(d.venta || 0).toLocaleString('es-AR')}</p>
-          </div>
-        </div>
-        <span class="text-[9px] text-slate-500 block font-mono">Actualizado: ${d.fechaActualizacion ? d.fechaActualizacion.slice(0, 10) : 'Hoy'}</span>
-      </div>
-    `;
-  }).join('');
-}
-
-async function handleConvertCurrency() {
-  const amount = parseFloat(document.getElementById('calcAmount')?.value || '0');
-  const from = document.getElementById('calcFrom')?.value || 'USD';
-  const to = document.getElementById('calcTo')?.value || 'ARS';
-  const tipoDolar = document.getElementById('calcTipoDolar')?.value || 'oficial';
-
-  const resDisplay = document.getElementById('calcResultDisplay');
-  const tasaDisplay = document.getElementById('calcTasaDisplay');
-  if (!resDisplay) return;
-
-  if (amount <= 0) {
-    resDisplay.innerText = '$ 0,00';
-    return;
-  }
-
-  try {
-    const res = await fetchWithAuth('/api/finanzas/convert', {
-      method: 'POST',
-      body: JSON.stringify({ amount, from, to, tipoDolar }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      const sym = to === 'USD' ? 'USD $' : '$';
-      resDisplay.innerText = `${sym} ${data.result.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      tasaDisplay.innerText = `Tipo de cambio (${data.casa}): 1 USD = $${data.tipoCambio.toLocaleString('es-AR')}`;
+    const updatedEl = document.getElementById('tickerUpdated');
+    if (updatedEl) {
+      updatedEl.innerText = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
     }
   } catch (e) {}
 }
 
-// --- CRM CLIENTES ---
-async function loadCRMClientes() {
-  try {
-    const res = await fetchWithAuth('/api/erp/clientes');
-    const data = await res.json();
-    if (data.success && data.clientes) {
-      crmClientsList = data.clientes;
-      renderClientsTable();
-      populateQuickClientDropdown();
-    }
-  } catch (e) {}
-}
-
-function renderClientsTable() {
-  const tbody = document.getElementById('clientsTableBody');
-  if (!tbody) return;
-
-  if (crmClientsList.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-slate-500">No hay clientes registrados aún. Haz click en "Nuevo Cliente".</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = crmClientsList.map(c => `
-    <tr class="hover:bg-slate-800/40 transition">
-      <td class="py-3 px-3 font-semibold text-slate-100">${escapeHtml(c.razonSocial)}</td>
-      <td class="py-3 px-3 font-mono text-indigo-300">${formatCuit(c.cuit)} (${c.tipoDoc})</td>
-      <td class="py-3 px-3"><span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-semibold">${c.condicionIva}</span></td>
-      <td class="py-3 px-3 text-slate-400">${escapeHtml(c.email || c.telefono || '-')}</td>
-      <td class="py-3 px-3 text-right space-x-2">
-        <button onclick="selectClientForInvoiceById('${c.id}')" class="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 rounded text-[11px] font-bold transition">
-          <i class="fa-solid fa-file-invoice mr-1"></i> Facturar
-        </button>
-        <button onclick="deleteClient('${c.id}')" class="text-slate-500 hover:text-red-400 transition text-sm">
-          <i class="fa-solid fa-trash-can"></i>
-        </button>
-      </td>
-    </tr>
-  `).join('');
-}
-
-function populateQuickClientDropdown() {
-  const select = document.getElementById('quickClientSelect');
-  if (!select) return;
-
-  select.innerHTML = '<option value="">👤 Cargar Cliente del CRM...</option>' +
-    crmClientsList.map(c => `<option value="${c.id}">${c.razonSocial} (${formatCuit(c.cuit)})</option>`).join('');
-}
-
-function handleSelectClientForInvoice(clientId) {
-  if (!clientId) return;
-  selectClientForInvoiceById(clientId);
-}
-
-function selectClientForInvoiceById(clientId) {
-  const c = crmClientsList.find(x => x.id === clientId);
-  if (!c) return;
-
-  switchTab('facturacion');
-  document.getElementById('facDocTipo').value = c.tipoDoc || 'CUIT';
-  document.getElementById('facDocNro').value = c.cuit;
-  document.getElementById('facRazonSocial').value = c.razonSocial;
-  document.getElementById('facCondIva').value = c.condicionIva || 'Consumidor Final';
-
-  showToast(`Cliente "${c.razonSocial}" cargado en el facturador.`, 'info');
-}
-
-function openNewClientModal() {
-  document.getElementById('clientModal').classList.remove('hidden');
-}
-
-function closeClientModal() {
-  document.getElementById('clientModal').classList.add('hidden');
-}
-
-async function handleSaveClient(e) {
-  e.preventDefault();
-  const razonSocial = document.getElementById('crmRazonSocial').value;
-  const cuit = document.getElementById('crmCuit').value;
-  const tipoDoc = document.getElementById('crmTipoDoc').value;
-  const condicionIva = document.getElementById('crmCondIva').value;
-  const email = document.getElementById('crmEmail').value;
-  const domicilio = document.getElementById('crmDomicilio').value;
-
-  try {
-    const res = await fetchWithAuth('/api/erp/clientes', {
-      method: 'POST',
-      body: JSON.stringify({ razonSocial, cuit, tipoDoc, condicionIva, email, domicilio }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Cliente guardado con éxito.', 'success');
-      closeClientModal();
-      await loadCRMClientes();
-    } else {
-      showToast(data.message, 'error');
-    }
-  } catch (err) {
-    showToast('Error al guardar cliente.', 'error');
-  }
-}
-
-async function deleteClient(id) {
-  if (!confirm('¿Deseas eliminar este cliente?')) return;
-  try {
-    const res = await fetchWithAuth(`/api/erp/clientes/${id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Cliente eliminado.', 'info');
-      await loadCRMClientes();
-    }
-  } catch (e) {}
-}
-
-async function saveCurrentInvoiceClientToCRM() {
-  const razonSocial = document.getElementById('facRazonSocial').value;
-  const cuit = document.getElementById('facDocNro').value;
-  const tipoDoc = document.getElementById('facDocTipo').value;
-  const condicionIva = document.getElementById('facCondIva').value;
-
-  if (!cuit || !razonSocial) {
-    showToast('Completa el CUIT y la Razón Social para guardar en CRM.', 'warn');
-    return;
-  }
-
-  try {
-    const res = await fetchWithAuth('/api/erp/clientes', {
-      method: 'POST',
-      body: JSON.stringify({ razonSocial, cuit, tipoDoc, condicionIva }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Cliente guardado en CRM.', 'success');
-      await loadCRMClientes();
-    }
-  } catch (e) {}
-}
-
-// --- CATÁLOGO DE PRODUCTOS & SERVICIOS ---
-async function loadCatalogProducts() {
-  try {
-    const res = await fetchWithAuth('/api/erp/productos');
-    const data = await res.json();
-    if (data.success && data.productos) {
-      catalogProductsList = data.productos;
-      renderProductsTable();
-      populateQuickProductDropdown();
-    }
-  } catch (e) {}
-}
-
-function renderProductsTable() {
-  const tbody = document.getElementById('productsTableBody');
-  if (!tbody) return;
-
-  if (catalogProductsList.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-500">No hay productos en catálogo. Haz click en "Nuevo Producto/Servicio".</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = catalogProductsList.map(p => `
-    <tr class="hover:bg-slate-800/40 transition">
-      <td class="py-3 px-3 font-mono font-bold text-indigo-300">${p.codigo}</td>
-      <td class="py-3 px-3 font-medium text-slate-100">${escapeHtml(p.nombre)}</td>
-      <td class="py-3 px-3 text-slate-400 text-xs">${p.categoria}</td>
-      <td class="py-3 px-3 text-right font-mono text-slate-300">USD $${p.precioUsd.toFixed(2)}</td>
-      <td class="py-3 px-3 text-right font-mono font-bold text-emerald-400">$ ${p.precioArs.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
-      <td class="py-3 px-3 text-right space-x-2">
-        <button onclick="insertProductIntoInvoice('${p.id}')" class="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 rounded text-[11px] font-bold transition">
-          <i class="fa-solid fa-plus mr-1"></i> Facturar
-        </button>
-        <button onclick="deleteProduct('${p.id}')" class="text-slate-500 hover:text-red-400 transition text-sm">
-          <i class="fa-solid fa-trash-can"></i>
-        </button>
-      </td>
-    </tr>
-  `).join('');
-}
-
-function populateQuickProductDropdown() {
-  const select = document.getElementById('quickProductSelect');
-  if (!select) return;
-
-  select.innerHTML = '<option value="">📦 Insertar desde Catálogo...</option>' +
-    catalogProductsList.map(p => `<option value="${p.id}">${p.nombre} - $${p.precioArs.toLocaleString('es-AR')}</option>`).join('');
-}
-
-function handleSelectProductForInvoice(productId) {
-  if (!productId) return;
-  insertProductIntoInvoice(productId);
-}
-
-function insertProductIntoInvoice(productId) {
-  const p = catalogProductsList.find(x => x.id === productId);
-  if (!p) return;
-
-  const moneda = document.getElementById('facMoneda')?.value || 'ARS';
-  const unitPrice = moneda === 'USD' ? p.precioUsd : p.precioArs;
-
+// --- FAST INVOICING (Facturador Rápido) ---
+function addInvoiceItem() {
   const container = document.getElementById('invoiceItemsContainer');
   const div = document.createElement('div');
-  div.className = 'invoice-item-row grid grid-cols-12 gap-2 items-center bg-slate-950/40 p-3 rounded-xl border border-slate-800/80';
+  div.className = 'invoice-item-row grid grid-cols-12 gap-2 items-center bg-obsidian-850 p-2.5 rounded border border-obsidian-700';
   div.innerHTML = `
-    <div class="col-span-12 md:col-span-6">
-      <input type="text" class="item-desc input-dark text-xs" placeholder="Descripción..." value="${escapeHtml(p.nombre)}" required>
+    <div class="col-span-12 sm:col-span-6">
+      <input type="text" class="item-desc input-field text-xs" placeholder="Descripción del servicio o producto..." required>
     </div>
-    <div class="col-span-4 md:col-span-2">
-      <input type="number" class="item-qty input-dark text-xs" placeholder="Cant." value="1" min="1" step="1" oninput="calculateInvoiceTotals()" required>
+    <div class="col-span-3 sm:col-span-2">
+      <input type="number" class="item-qty input-field font-mono text-xs text-center" placeholder="Cant." value="1" min="1" step="1" oninput="calculateInvoiceTotals()" required>
     </div>
-    <div class="col-span-6 md:col-span-3">
-      <input type="number" class="item-price input-dark text-xs" placeholder="Precio" value="${unitPrice}" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
+    <div class="col-span-7 sm:col-span-3">
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 pl-2 flex items-center text-slate-500 font-mono text-xs">$</span>
+        <input type="number" class="item-price input-field font-mono text-xs !pl-6" placeholder="Precio" value="0" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
+      </div>
     </div>
-    <div class="col-span-2 md:col-span-1 text-center">
-      <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-500 hover:text-red-400 text-sm">
+    <div class="col-span-2 sm:col-span-1 text-center">
+      <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-500 hover:text-rose-400 transition text-sm">
         <i class="fa-solid fa-trash-can"></i>
       </button>
     </div>
   `;
   container.appendChild(div);
   calculateInvoiceTotals();
-  showToast(`Producto "${p.nombre}" añadido a la factura.`, 'info');
 }
 
-function openNewProductModal() {
-  document.getElementById('productModal').classList.remove('hidden');
+function removeInvoiceItem(btn) {
+  const row = btn.closest('.invoice-item-row');
+  const container = document.getElementById('invoiceItemsContainer');
+  if (container.children.length > 1) {
+    row.remove();
+    calculateInvoiceTotals();
+  } else {
+    showToast('El comprobante debe tener al menos un concepto.', 'warn');
+  }
 }
 
-function closeProductModal() {
-  document.getElementById('productModal').classList.add('hidden');
+function setQuickItemDesc(desc) {
+  const firstDesc = document.querySelector('.invoice-item-row .item-desc');
+  if (firstDesc) {
+    firstDesc.value = desc;
+  }
 }
 
-async function handleSaveProduct(e) {
+function calculateInvoiceTotals() {
+  const rows = document.querySelectorAll('.invoice-item-row');
+  let total = 0;
+  rows.forEach(r => {
+    const qty = parseFloat(r.querySelector('.item-qty')?.value || '0');
+    const price = parseFloat(r.querySelector('.item-price')?.value || '0');
+    total += (qty * price);
+  });
+
+  const displayEl = document.getElementById('facTotalDisplay');
+  if (displayEl) {
+    displayEl.innerText = `$${total.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  return total;
+}
+
+function formatInputCuit(input) {
+  let val = input.value.replace(/\D/g, '');
+  if (val.length === 11) {
+    input.value = `${val.substring(0, 2)}-${val.substring(2, 10)}-${val.substring(10, 11)}`;
+  }
+}
+
+async function handleEmitirFactura(e) {
   e.preventDefault();
-  const codigo = document.getElementById('prodCodigo').value;
-  const nombre = document.getElementById('prodNombre').value;
-  const precioUsd = parseFloat(document.getElementById('prodPrecioUsd').value || '0');
-  const precioArs = parseFloat(document.getElementById('prodPrecioArs').value || '0');
-  const autoAjusteDolar = document.getElementById('prodAutoAjusteDolar').checked;
+  const tipoComprobante = document.getElementById('facTipo').value;
+  const puntoVenta = parseInt(document.getElementById('facPuntoVenta').value || '1', 10);
+  const concepto = parseInt(document.getElementById('facConcepto').value || '2', 10);
+  const tipoDoc = document.getElementById('facTipoDoc').value;
+  const nroDoc = document.getElementById('facNroDoc').value.replace(/\D/g, '');
+  const razonSocial = document.getElementById('facRazonSocial').value.trim();
+  const condicionIva = document.getElementById('facCondIva').value;
+  const condicionVenta = document.getElementById('facCondVenta').value;
+
+  const rows = document.querySelectorAll('.invoice-item-row');
+  const items = [];
+  rows.forEach(r => {
+    const descripcion = r.querySelector('.item-desc').value.trim();
+    const cantidad = parseFloat(r.querySelector('.item-qty').value || '1');
+    const precioUnitario = parseFloat(r.querySelector('.item-price').value || '0');
+    items.push({
+      descripcion,
+      cantidad,
+      precioUnitario,
+      subtotal: cantidad * precioUnitario
+    });
+  });
+
+  if (items.length === 0 || items[0].subtotal <= 0) {
+    showToast('Ingresa un importe válido para el comprobante.', 'warn');
+    return;
+  }
+
+  const payload = {
+    tipoComprobante,
+    puntoVenta,
+    concepto,
+    condicionVenta,
+    receptor: {
+      tipoDoc,
+      nroDoc,
+      razonSocial,
+      condicionIva
+    },
+    items
+  };
+
+  const btn = document.getElementById('btnEmitirComprobante');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Conectando con ARCA...';
+  showToast('Iniciando navegador headless y autorizando con ARCA...', 'info');
 
   try {
-    const res = await fetchWithAuth('/api/erp/productos', {
+    const res = await fetchWithAuth('/api/erp/facturacion/emitir', {
       method: 'POST',
-      body: JSON.stringify({ codigo, nombre, precioUsd, precioArs, autoAjusteDolar }),
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast('¡Factura autorizada con éxito en ARCA!', 'success');
+      
+      // Update glance & modal
+      document.getElementById('lastCaeNumber').innerText = data.cae || '-';
+      document.getElementById('lastCaeVto').innerText = data.caeVencimiento || '-';
+      document.getElementById('lastComprobanteNro').innerText = data.comprobanteNro || '-';
+      document.getElementById('caeStatusDot').className = 'w-2 h-2 rounded-full bg-emerald-400';
+
+      openCaeSuccessModal(data);
+      loadComprobantesList();
+    } else {
+      showToast(`Error de emisión: ${data.message}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Fallo en la comunicación: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs"></i> <span>EMITIR EN ARCA</span>';
+  }
+}
+
+function openCaeSuccessModal(data) {
+  document.getElementById('modalCaeNumber').innerText = data.cae || '-';
+  document.getElementById('modalCaeVto').innerText = data.caeVencimiento || '-';
+  document.getElementById('modalComprobanteNro').innerText = data.comprobanteNro || '-';
+  document.getElementById('modalTotalImporte').innerText = `$${(data.totalImporte || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+  document.getElementById('caeSuccessModal').classList.remove('hidden');
+}
+
+function closeCaeSuccessModal() {
+  document.getElementById('caeSuccessModal').classList.add('hidden');
+}
+
+// --- COMPROBANTES HISTORIAL ---
+async function loadComprobantesList() {
+  try {
+    const res = await fetchWithAuth('/api/erp/comprobantes');
+    const data = await res.json();
+    allComprobantes = data.comprobantes || [];
+    renderComprobantesTable(allComprobantes);
+  } catch (e) {}
+}
+
+function renderComprobantesTable(list) {
+  const tbody = document.getElementById('comprobantesTableBody');
+  if (!tbody) return;
+
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="py-6 text-center text-slate-500">No hay comprobantes emitidos aún.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map(c => {
+    const total = (c.importeTotal || c.importe_total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 });
+    const cuit = c.cuitReceptor || c.cuit_receptor || '-';
+    const razon = c.razonSocialReceptor || c.razon_social_receptor || 'Consumidor Final';
+    const tipo = c.tipoComprobante || c.tipo_comprobante || 'Factura C';
+    const pto = String(c.puntoVenta || c.punto_venta || 1).padStart(4, '0');
+    const nro = String(c.numero || 1).padStart(8, '0');
+    const cae = c.cae || '-';
+
+    return `
+      <tr class="hover:bg-obsidian-850/60 transition">
+        <td class="py-2.5 px-3 text-slate-400">${c.fechaEmision || c.fecha_emision || '-'}</td>
+        <td class="py-2.5 px-3">
+          <strong class="text-amber-400 font-semibold">${escapeHtml(tipo)}</strong>
+          <span class="text-slate-500 ml-1 font-mono">${pto}-${nro}</span>
+        </td>
+        <td class="py-2.5 px-3">
+          <div class="text-slate-200 font-semibold truncate max-w-[200px]">${escapeHtml(razon)}</div>
+          <div class="text-[10px] text-slate-500 font-mono">CUIT: ${cuit}</div>
+        </td>
+        <td class="py-2.5 px-3 text-right font-bold text-slate-100">$${total}</td>
+        <td class="py-2.5 px-3">
+          <span class="px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800 text-[10px] font-bold">CAE: ${cae}</span>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filterComprobantesTable(query) {
+  const q = query.toLowerCase();
+  const filtered = allComprobantes.filter(c => 
+    (c.cae && c.cae.includes(q)) ||
+    (c.cuitReceptor && c.cuitReceptor.includes(q)) ||
+    (c.razonSocialReceptor && c.razonSocialReceptor.toLowerCase().includes(q))
+  );
+  renderComprobantesTable(filtered);
+}
+
+// --- CLIENTES CRM LIGERO ---
+async function loadCRMClientes() {
+  try {
+    const res = await fetchWithAuth('/api/erp/clientes');
+    const data = await res.json();
+    allClients = data.clientes || [];
+    renderClientsGrid(allClients);
+    populateQuickClientSelector(allClients);
+  } catch (e) {}
+}
+
+function renderClientsGrid(clients) {
+  const container = document.getElementById('clientsGrid');
+  if (!container) return;
+
+  if (clients.length === 0) {
+    container.innerHTML = '<div class="col-span-full py-6 text-center text-slate-500 font-mono text-xs">No hay clientes frecuentes registrados.</div>';
+    return;
+  }
+
+  container.innerHTML = clients.map(c => `
+    <div class="p-3.5 bg-obsidian-850 border border-obsidian-700 rounded space-y-2 font-mono text-xs hover:border-obsidian-600 transition">
+      <div class="flex items-start justify-between">
+        <div class="truncate">
+          <strong class="text-slate-200 text-[13px] font-bold block truncate">${escapeHtml(c.razonSocial)}</strong>
+          <span class="text-slate-500 text-[11px]">CUIT: ${c.cuit}</span>
+        </div>
+        <button onclick="deleteClient('${c.id}')" title="Eliminar" class="text-slate-600 hover:text-rose-400 transition p-1">
+          <i class="fa-solid fa-trash-can text-xs"></i>
+        </button>
+      </div>
+
+      <div class="text-[11px] text-slate-400">Condición: <span class="text-amber-400/90">${c.condicionIva}</span></div>
+
+      <div class="pt-1 border-t border-obsidian-700 flex justify-end">
+        <button onclick="selectClientAndInvoice('${c.id}')" class="text-[11px] text-amber-400 hover:text-amber-300 font-bold flex items-center space-x-1">
+          <span>Facturar a este cliente</span>
+          <i class="fa-solid fa-arrow-right text-[10px]"></i>
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function populateQuickClientSelector(clients) {
+  const select = document.getElementById('facQuickClientSelect');
+  if (!select) return;
+
+  select.innerHTML = '<option value="">-- Cargar de Clientes --</option>' +
+    clients.map(c => `<option value="${c.id}">${escapeHtml(c.razonSocial)} (${c.cuit})</option>`).join('');
+}
+
+function applySelectedClientToInvoice(clientId) {
+  if (!clientId) return;
+  const client = allClients.find(c => c.id === clientId);
+  if (!client) return;
+
+  document.getElementById('facRazonSocial').value = client.razonSocial;
+  document.getElementById('facNroDoc').value = client.cuit;
+  document.getElementById('facCondIva').value = client.condicionIva || 'Consumidor Final';
+  showToast(`Datos de ${client.razonSocial} cargados.`, 'info');
+}
+
+function selectClientAndInvoice(clientId) {
+  switchTab('facturacion');
+  const select = document.getElementById('facQuickClientSelect');
+  if (select) select.value = clientId;
+  applySelectedClientToInvoice(clientId);
+}
+
+function openClientModal() {
+  document.getElementById('clientModal')?.classList.remove('hidden');
+}
+
+function closeClientModal() {
+  document.getElementById('clientModal')?.classList.add('hidden');
+}
+
+async function handleSaveClient(e) {
+  e.preventDefault();
+  const razonSocial = document.getElementById('crmRazonSocial').value.trim();
+  const tipoDoc = document.getElementById('crmTipoDoc').value;
+  const cuit = document.getElementById('crmCuit').value.replace(/\D/g, '');
+  const condicionIva = document.getElementById('crmCondIva').value;
+
+  try {
+    const res = await fetchWithAuth('/api/erp/clientes', {
+      method: 'POST',
+      body: JSON.stringify({ razonSocial, tipoDoc, cuit, condicionIva })
     });
     const data = await res.json();
     if (data.success) {
-      showToast('Producto guardado en catálogo.', 'success');
-      closeProductModal();
-      await loadCatalogProducts();
+      showToast('Cliente guardado.', 'success');
+      closeClientModal();
+      await loadCRMClientes();
     } else {
       showToast(data.message, 'error');
     }
-  } catch (err) {
-    showToast('Error al guardar producto.', 'error');
+  } catch (e) {
+    showToast('Error al guardar cliente.', 'error');
   }
 }
 
-async function deleteProduct(id) {
-  if (!confirm('¿Deseas eliminar este producto?')) return;
+async function deleteClient(id) {
+  if (!confirm('¿Eliminar cliente?')) return;
   try {
-    const res = await fetchWithAuth(`/api/erp/productos/${id}`, { method: 'DELETE' });
+    await fetchWithAuth(`/api/erp/clientes/${id}`, { method: 'DELETE' });
+    showToast('Cliente eliminado.', 'info');
+    await loadCRMClientes();
+  } catch (e) {}
+}
+
+// --- MONOTRIBUTO & DFE VIEW ---
+async function loadMonotributoStats() {
+  try {
+    const res = await fetchWithAuth('/api/erp/monotributo/status');
     const data = await res.json();
-    if (data.success) {
-      showToast('Producto eliminado.', 'info');
-      await loadCatalogProducts();
+    if (data.categoria) {
+      document.getElementById('glanceCategoria').innerText = `Cat ${data.categoria} (${data.tipoActividad || 'Servicios'})`;
+      document.getElementById('monoCategoriaBadge').innerText = `Categoría ${data.categoria} (${data.tipoActividad || 'Servicios'})`;
     }
   } catch (e) {}
 }
 
-// --- SUPABASE SYNC ---
-async function loadSupabaseStatus() {
+async function loadDfeNotifications() {
   try {
-    const res = await fetchWithAuth('/api/erp/supabase/status');
+    const res = await fetchWithAuth('/api/erp/dfe/notificaciones');
     const data = await res.json();
+    const list = data.notificaciones || [];
+    const container = document.getElementById('dfeInboxList');
+    if (!container) return;
 
-    const badge = document.getElementById('supaStatusText');
-    const formBadge = document.getElementById('supaStatusBadgeForm');
-
-    if (data.connected) {
-      if (badge) badge.innerText = 'Supabase: Conectado';
-      if (formBadge) formBadge.innerText = 'Estado: Conectado a la nube';
-    } else if (data.enabled) {
-      if (badge) badge.innerText = 'Supabase: Configurado';
-      if (formBadge) formBadge.innerText = 'Estado: Configurado';
-    } else {
-      if (badge) badge.innerText = 'Supabase: Local';
-      if (formBadge) formBadge.innerText = 'Estado: Almacenamiento local';
+    if (list.length === 0) {
+      container.innerHTML = '<div class="p-3 text-center text-slate-500 text-xs">Sin notificaciones pendientes en ARCA.</div>';
+      return;
     }
+
+    container.innerHTML = list.map(n => `
+      <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 space-y-1">
+        <div class="flex justify-between text-[10px] text-slate-500">
+          <span>${escapeHtml(n.organismo || 'ARCA')}</span>
+          <span>${n.fecha || '-'}</span>
+        </div>
+        <div class="text-slate-200 font-semibold text-[11px]">${escapeHtml(n.asunto || 'Notificación Oficial')}</div>
+        <p class="text-[10px] text-slate-400">${escapeHtml(n.resumen || '')}</p>
+      </div>
+    `).join('');
   } catch (e) {}
 }
 
-async function handleSaveSupabase(e) {
-  e.preventDefault();
-  const url = document.getElementById('cfgSupaUrl').value;
-  const key = document.getElementById('cfgSupaKey').value;
-
-  try {
-    const res = await fetchWithAuth('/api/erp/supabase/connect', {
-      method: 'POST',
-      body: JSON.stringify({ url, key }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('¡Supabase conectado y verificado exitosamente!', 'success');
-      loadSupabaseStatus();
-      loadCRMClientes();
-      loadCatalogProducts();
-      if (currentUser && currentUser.role === 'admin') loadUsersList();
-    } else {
-      showToast(`Supabase: ${data.message}`, 'warn');
-    }
-  } catch (err) {
-    showToast('Error conectando con Supabase.', 'error');
-  }
-}
-
-function openSchemaSqlModal() {
-  document.getElementById('schemaSqlModal').classList.remove('hidden');
-}
-
-function closeSchemaSqlModal() {
-  document.getElementById('schemaSqlModal').classList.add('hidden');
-}
-
-// --- AUTH & ARCA CONNECTION ---
+// --- CONFIG & CREDENTIALS ---
 async function loadAuthStatus() {
   try {
     const res = await fetchWithAuth('/api/auth/status');
     const data = await res.json();
 
-    const alertBox = document.getElementById('unconfiguredAlert');
-    const dashTitular = document.getElementById('dashTitular');
-    const dashCuit = document.getElementById('dashCuit');
-    const cfgCuit = document.getElementById('cfgCuit');
-    const cfgPuntoVenta = document.getElementById('cfgPuntoVenta');
-    const facPuntoVenta = document.getElementById('facPuntoVenta');
-    const facPtoVtaBadge = document.getElementById('facPtoVtaBadge');
+    const titularHeader = document.getElementById('arcaTitularHeader');
+    const statusDot = document.getElementById('arcaStatusDot');
+    const unconfiguredAlert = document.getElementById('unconfiguredAlert');
 
     if (data.cuit) {
-      if (alertBox) alertBox.classList.add('hidden');
-      if (cfgCuit) cfgCuit.value = data.cuit;
-      if (cfgPuntoVenta) cfgPuntoVenta.value = data.puntoVentaDefault || 1;
-      if (facPuntoVenta) facPuntoVenta.value = data.puntoVentaDefault || 1;
-      if (facPtoVtaBadge) facPtoVtaBadge.innerText = data.puntoVentaDefault || 1;
-
-      dashCuit.innerText = `CUIT: ${formatCuit(data.cuit)}`;
-      dashTitular.innerText = data.razonSocial || 'Conectado';
+      document.getElementById('cfgCuit').value = data.cuit;
+      document.getElementById('cfgPuntoVenta').value = data.puntoVentaDefault || 1;
+      document.getElementById('facPuntoVenta').value = data.puntoVentaDefault || 1;
+      if (titularHeader) titularHeader.innerText = data.razonSocial || `CUIT: ${data.cuit}`;
+      if (statusDot) statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+      if (unconfiguredAlert) unconfiguredAlert.classList.add('hidden');
     } else {
-      if (alertBox) alertBox.classList.remove('hidden');
-      dashTitular.innerText = 'Sin configurar';
-      dashCuit.innerText = 'Configura CUIT y Clave';
+      if (titularHeader) titularHeader.innerText = 'ARCA: Sin CUIT';
+      if (statusDot) statusDot.className = 'w-2 h-2 rounded-full bg-amber-400';
+      if (unconfiguredAlert) unconfiguredAlert.classList.remove('hidden');
     }
-  } catch (err) {}
-}
-
-async function loadDashboardStats() {
-  try {
-    const res = await fetchWithAuth('/api/keepalive/health');
-    const data = await res.json();
-
-    const uptimeEl = document.getElementById('dashUptime');
-    const pingsEl = document.getElementById('dashPings');
-    const keepAliveText = document.getElementById('keepAliveText');
-
-    if (uptimeEl) uptimeEl.innerText = data.uptimeFormatted;
-    if (pingsEl) pingsEl.innerText = `${data.totalPings} pings de actividad`;
-    if (keepAliveText) keepAliveText.innerText = `Keep-Alive: ${data.uptimeFormatted}`;
-
-  } catch (err) {}
-}
-
-async function loadTaskHistory() {
-  try {
-    const res = await fetchWithAuth('/api/tasks/history?limit=10');
-    const data = await res.json();
-    const tbody = document.getElementById('taskHistoryTableBody');
-    if (!tbody) return;
-
-    if (!data.tasks || data.tasks.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-slate-500">No hay ejecuciones registradas aún.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = data.tasks.map(t => {
-      let statusBadge = '<span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 font-semibold">En curso</span>';
-      if (t.status === 'success') {
-        statusBadge = '<span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-semibold">Éxito</span>';
-      } else if (t.status === 'failed') {
-        statusBadge = '<span class="px-2 py-0.5 rounded bg-rose-950 text-rose-300 font-semibold">Error</span>';
-      }
-
-      const hora = new Date(t.startedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-      return `
-        <tr class="hover:bg-slate-800/40 transition">
-          <td class="py-2.5 px-3 font-semibold uppercase text-indigo-300">${t.type}</td>
-          <td class="py-2.5 px-3">${statusBadge}</td>
-          <td class="py-2.5 px-3 text-slate-400 font-mono">${hora}</td>
-          <td class="py-2.5 px-3 text-slate-300">${escapeHtml(t.resultSummary || t.error || '-')}</td>
-        </tr>
-      `;
-    }).join('');
-
-  } catch (err) {}
-}
-
-async function testArcaConnection() {
-  showToast('Iniciando prueba de conexión con ARCA en backend con evasión WAF...', 'info');
-  try {
-    const res = await fetchWithAuth('/api/auth/test-login', { method: 'POST', body: JSON.stringify({}) });
-    const data = await res.json();
-
-    if (data.success) {
-      showToast(`¡Conexión Exitosa con ARCA! Titular: ${data.razonSocial}`, 'success');
-      loadAuthStatus();
-    } else {
-      showToast(`Fallo de conexión: ${data.message}`, 'error');
-    }
-  } catch (e) {
-    showToast(`Error de comunicación: ${e.message}`, 'error');
-  }
+  } catch (e) {}
 }
 
 async function handleSaveCreds(e) {
   e.preventDefault();
   const cuit = document.getElementById('cfgCuit').value;
   const claveFiscal = document.getElementById('cfgClaveFiscal').value;
-  const puntoVenta = document.getElementById('cfgPuntoVenta').value;
+  const puntoVentaDefault = parseInt(document.getElementById('cfgPuntoVenta').value || '1', 10);
 
   try {
     const res = await fetchWithAuth('/api/auth/credentials', {
       method: 'POST',
-      body: JSON.stringify({ cuit, claveFiscal, puntoVentaDefault: puntoVenta }),
+      body: JSON.stringify({ cuit, claveFiscal, puntoVentaDefault })
     });
     const data = await res.json();
     if (data.success) {
-      showToast('Credenciales de ARCA guardadas y encriptadas con éxito.', 'success');
-      loadAuthStatus();
+      showToast('Credenciales guardadas y cifradas con éxito.', 'success');
+      await loadAuthStatus();
     } else {
       showToast(data.message, 'error');
     }
-  } catch (err) {
+  } catch (e) {
     showToast('Error al guardar credenciales.', 'error');
+  }
+}
+
+async function testArcaConnection() {
+  showToast('Iniciando sesión en ARCA en modo Headless...', 'info');
+  try {
+    const res = await fetchWithAuth('/api/auth/test-login', { method: 'POST', body: JSON.stringify({}) });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`¡Conexión Exitosa con ARCA! Titular: ${data.razonSocial}`, 'success');
+      await loadAuthStatus();
+    } else {
+      showToast(`Fallo de conexión: ${data.message}`, 'error');
+    }
+  } catch (e) {
+    showToast(`Error: ${e.message}`, 'error');
   }
 }
 
 async function handleSaveKeepAlive(e) {
   e.preventDefault();
-  const enabled = document.getElementById('cfgKeepAliveEnabled').checked;
-  const interval = document.getElementById('cfgKeepAliveInterval').value;
-  const url = document.getElementById('cfgExternalUrl').value;
-  const uptimeRobotKey = document.getElementById('cfgUptimeRobotKey').value;
+  const externalUrl = document.getElementById('cfgExternalUrl').value.trim();
+  const uptimeRobotApiKey = document.getElementById('cfgUptimeRobotKey').value.trim();
 
   try {
     const res = await fetchWithAuth('/api/keepalive/config', {
       method: 'POST',
-      body: JSON.stringify({
-        keepAliveEnabled: enabled,
-        keepAliveIntervalMinutes: parseInt(interval, 10),
-        externalUrl: url,
-        uptimeRobotApiKey: uptimeRobotKey,
-      }),
+      body: JSON.stringify({ externalUrl, uptimeRobotApiKey, keepAliveEnabled: true, keepAliveIntervalMinutes: 5 })
     });
     const data = await res.json();
     if (data.success) {
-      showToast('Configuración de Keep-Alive y UptimeRobot actualizada.', 'success');
-      await checkUptimeRobotStatus();
+      showToast('Configuración de Keep-Alive guardada.', 'success');
     }
-  } catch (err) {
+  } catch (e) {
     showToast('Error al guardar Keep-Alive.', 'error');
   }
 }
@@ -986,95 +619,27 @@ async function loadKeepAliveSettings() {
     const res = await fetchWithAuth('/api/keepalive/health');
     const data = await res.json();
     if (data.settings) {
-      const chk = document.getElementById('cfgKeepAliveEnabled');
-      const intInput = document.getElementById('cfgKeepAliveInterval');
-      const urlInput = document.getElementById('cfgExternalUrl');
-      const uptimeKeyInput = document.getElementById('cfgUptimeRobotKey');
-      if (chk) chk.checked = data.settings.keepAliveEnabled;
-      if (intInput) intInput.value = data.settings.keepAliveIntervalMinutes;
-      if (urlInput) urlInput.value = data.settings.externalUrl || '';
-      if (uptimeKeyInput && data.settings.uptimeRobotApiKey) uptimeKeyInput.value = data.settings.uptimeRobotApiKey;
+      if (data.settings.externalUrl) document.getElementById('cfgExternalUrl').value = data.settings.externalUrl;
+      if (data.settings.uptimeRobotApiKey) document.getElementById('cfgUptimeRobotKey').value = data.settings.uptimeRobotApiKey;
     }
-    await checkUptimeRobotStatus();
+    if (data.uptimeFormatted) {
+      const el = document.getElementById('headerUptimeText');
+      if (el) el.innerText = `Uptime: ${data.uptimeFormatted}`;
+    }
   } catch (e) {}
-}
-
-async function checkUptimeRobotStatus() {
-  const detailsEl = document.getElementById('uptimeRobotDetails');
-  const badgeText = document.getElementById('uptimeRobotStatusText');
-  const liveBadge = document.getElementById('uptimeRobotLiveBadge');
-  if (!detailsEl) return;
-
-  try {
-    detailsEl.innerHTML = '<span class="text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Consultando API de UptimeRobot...</span>';
-    const res = await fetchWithAuth('/api/keepalive/uptimerobot/status');
-    const data = await res.json();
-
-    if (data.success && data.monitors && data.monitors.length > 0) {
-      if (liveBadge) liveBadge.classList.remove('hidden');
-      if (badgeText) badgeText.innerText = `UptimeRobot: ${data.monitors.length} Monitor(es)`;
-
-      detailsEl.innerHTML = `
-        <div class="space-y-2">
-          ${data.monitors.map(m => {
-            let statusColor = 'text-emerald-400 bg-emerald-950/80 border-emerald-800';
-            let statusLabel = 'OPERATIVO (UP)';
-            if (m.status === 0) {
-              statusColor = 'text-amber-400 bg-amber-950/80 border-amber-800';
-              statusLabel = 'PAUSADO';
-            } else if (m.status === 8 || m.status === 9) {
-              statusColor = 'text-rose-400 bg-rose-950/80 border-rose-800';
-              statusLabel = 'CAÍDO (DOWN)';
-            }
-
-            return `
-              <div class="flex items-center justify-between p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
-                <div class="space-y-0.5">
-                  <div class="flex items-center space-x-2">
-                    <strong class="text-slate-200 text-xs">${escapeHtml(m.friendly_name)}</strong>
-                    <span class="px-2 py-0.5 text-[10px] font-mono border rounded-full ${statusColor}">${statusLabel}</span>
-                  </div>
-                  <div class="text-[11px] text-slate-400 font-mono truncate max-w-md">${escapeHtml(m.url)}</div>
-                </div>
-                <div class="text-right">
-                  <div class="text-xs font-bold text-emerald-400">${m.all_time_uptime_ratio || '100'}% Uptime</div>
-                  <div class="text-[10px] text-slate-500 font-mono">ID: ${m.id}</div>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      `;
-    } else if (data.success && (!data.monitors || data.monitors.length === 0)) {
-      if (badgeText) badgeText.innerText = 'UptimeRobot: Sin monitores';
-      detailsEl.innerHTML = `
-        <div class="flex items-center justify-between">
-          <span class="text-slate-400">API Key conectada correctamente, pero aún no hay monitores registrados para esta URL.</span>
-          <button type="button" onclick="syncUptimeRobotMonitor()" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition">Crear Monitor Ahora</button>
-        </div>
-      `;
-    } else {
-      if (badgeText) badgeText.innerText = 'UptimeRobot: Pendiente';
-      detailsEl.innerHTML = `<span class="text-amber-400/90"><i class="fa-solid fa-triangle-exclamation mr-1"></i> ${escapeHtml(data.error || 'No se pudo conectar con UptimeRobot.')}</span>`;
-    }
-  } catch (err) {
-    if (detailsEl) detailsEl.innerHTML = '<span class="text-rose-400">Error al consultar UptimeRobot.</span>';
-  }
 }
 
 async function syncUptimeRobotMonitor() {
   const url = document.getElementById('cfgExternalUrl')?.value;
-  showToast('Registrando monitor en UptimeRobot...', 'info');
-
+  showToast('Sincronizando con UptimeRobot...', 'info');
   try {
     const res = await fetchWithAuth('/api/keepalive/uptimerobot/sync', {
       method: 'POST',
-      body: JSON.stringify({ targetUrl: url }),
+      body: JSON.stringify({ targetUrl: url })
     });
     const data = await res.json();
     if (data.success) {
       showToast(data.message, 'success');
-      await checkUptimeRobotStatus();
     } else {
       showToast(data.message, 'warn');
     }
@@ -1083,270 +648,87 @@ async function syncUptimeRobotMonitor() {
   }
 }
 
-async function triggerManualPing() {
+// --- LIVE LOGS SSE ---
+function connectLogsSSE() {
+  if (sseSource) sseSource.close();
   try {
-    const res = await fetchWithAuth('/api/keepalive/trigger', { method: 'POST' });
-    const data = await res.json();
-    showToast(`Keep-Alive: ${data.message}`, 'success');
-    loadDashboardStats();
-  } catch (e) {
-    showToast('Error al enviar ping.', 'error');
-  }
+    sseSource = new EventSource('/api/logs/stream');
+    sseSource.onmessage = (event) => {
+      try {
+        const log = JSON.parse(event.data);
+        appendTerminalLog(log);
+      } catch (e) {}
+    };
+    sseSource.onerror = () => {
+      if (sseSource) sseSource.close();
+    };
+  } catch (e) {}
 }
 
-// --- FACTURADOR ACTIONS ---
-function addInvoiceItem() {
-  const container = document.getElementById('invoiceItemsContainer');
+function appendTerminalLog(log) {
+  const screen = document.getElementById('terminalScreen');
+  if (!screen) return;
+
   const div = document.createElement('div');
-  div.className = 'invoice-item-row grid grid-cols-12 gap-2 items-center bg-slate-950/40 p-3 rounded-xl border border-slate-800/80';
-  div.innerHTML = `
-    <div class="col-span-12 md:col-span-6">
-      <input type="text" class="item-desc input-dark text-xs" placeholder="Descripción del servicio o producto..." required>
-    </div>
-    <div class="col-span-4 md:col-span-2">
-      <input type="number" class="item-qty input-dark text-xs" placeholder="Cant." value="1" min="1" step="1" oninput="calculateInvoiceTotals()" required>
-    </div>
-    <div class="col-span-6 md:col-span-3">
-      <input type="number" class="item-price input-dark text-xs" placeholder="Precio Unitario" value="0" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
-    </div>
-    <div class="col-span-2 md:col-span-1 text-center">
-      <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-500 hover:text-red-400 text-sm">
-        <i class="fa-solid fa-trash-can"></i>
-      </button>
-    </div>
-  `;
-  container.appendChild(div);
-  calculateInvoiceTotals();
+  const levelClass = `log-level-${log.level.toLowerCase()}`;
+  div.innerHTML = `<span class="text-slate-500">[${log.timestamp.split('T')[1].split('.')[0]}]</span> <strong class="${levelClass}">[${log.module}]</strong> <span>${escapeHtml(log.message)}</span>`;
+  screen.appendChild(div);
+  screen.scrollTop = screen.scrollHeight;
 }
 
-function removeInvoiceItem(button) {
-  const row = button.closest('.invoice-item-row');
-  const container = document.getElementById('invoiceItemsContainer');
-  if (container.children.length > 1) {
-    row.remove();
-    calculateInvoiceTotals();
-  } else {
-    showToast('La factura debe tener al menos un renglón.', 'warn');
-  }
+function clearLogsConsole() {
+  const screen = document.getElementById('terminalScreen');
+  if (screen) screen.innerHTML = '<div class="text-slate-600">[SISTEMA] Consola limpia.</div>';
 }
 
-function calculateInvoiceTotals() {
-  const rows = document.querySelectorAll('.invoice-item-row');
-  const moneda = document.getElementById('facMoneda')?.value || 'ARS';
-  let total = 0;
-
-  rows.forEach(row => {
-    const qty = parseFloat(row.querySelector('.item-qty')?.value || '0');
-    const price = parseFloat(row.querySelector('.item-price')?.value || '0');
-    total += qty * price;
-  });
-
-  const display = document.getElementById('invoiceTotalDisplay');
-  if (display) {
-    const prefix = moneda === 'USD' ? 'USD $' : '$';
-    display.innerText = `${prefix} ${total.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }
-  return total;
+function reconnectLogsSSE() {
+  connectLogsSSE();
+  showToast('Reconectando streaming de logs...', 'info');
 }
 
-async function handleEmitirFactura(e) {
-  e.preventDefault();
-  const btn = document.getElementById('btnEmitirFactura');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Procesando en ARCA (Headless)...';
+// --- UTILS & TOAST NOTIFICATIONS ---
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
 
-  const ptoVta = parseInt(document.getElementById('facPuntoVenta').value, 10);
-  const tipoComp = document.getElementById('facTipoComp').value;
-  const concepto = parseInt(document.getElementById('facConcepto').value, 10);
-  const docTipo = document.getElementById('facDocTipo').value;
-  const docNro = document.getElementById('facDocNro').value;
-  const razonSocial = document.getElementById('facRazonSocial').value;
-  const condIva = document.getElementById('facCondIva').value;
-  const condVenta = document.getElementById('facCondVenta').value;
-
-  const items = [];
-  document.querySelectorAll('.invoice-item-row').forEach(row => {
-    const desc = row.querySelector('.item-desc').value;
-    const qty = parseFloat(row.querySelector('.item-qty').value);
-    const price = parseFloat(row.querySelector('.item-price').value);
-    items.push({
-      descripcion: desc,
-      cantidad: qty,
-      precioUnitario: price,
-      subtotal: qty * price,
-    });
-  });
-
-  const payload = {
-    puntoVenta: ptoVta,
-    tipoComprobante: tipoComp,
-    concepto,
-    receptor: {
-      tipoDoc: docTipo,
-      nroDoc: docNro,
-      razonSocial,
-      condicionIva: condIva,
-    },
-    condicionVenta: condVenta,
-    items,
+  const toast = document.createElement('div');
+  const colors = {
+    success: 'bg-obsidian-850 border-emerald-500/60 text-emerald-300',
+    error: 'bg-obsidian-850 border-rose-500/60 text-rose-300',
+    warn: 'bg-obsidian-850 border-amber-500/60 text-amber-300',
+    info: 'bg-obsidian-850 border-obsidian-600 text-slate-200',
   };
 
-  try {
-    const res = await fetchWithAuth('/api/tasks/facturar', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+  const icons = {
+    success: 'fa-circle-check text-emerald-400',
+    error: 'fa-circle-exclamation text-rose-400',
+    warn: 'fa-triangle-exclamation text-amber-400',
+    info: 'fa-circle-info text-amber-400',
+  };
 
-    const result = await res.json();
-    if (result.success) {
-      showToast('¡Factura autorizada y emitida en ARCA!', 'success');
-      const box = document.getElementById('invoiceSuccessBox');
-      box.classList.remove('hidden');
-      document.getElementById('invResultNro').innerText = result.comprobanteNro;
-      document.getElementById('invResultCae').innerText = result.cae;
-      document.getElementById('invResultVto').innerText = result.caeVencimiento;
-      document.getElementById('invResultTotal').innerText = `$ ${result.totalImporte.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-      loadTaskHistory();
-    } else {
-      showToast(`Error al facturar: ${result.message}`, 'error');
-    }
-  } catch (err) {
-    showToast(`Error de conexión: ${err.message}`, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-stamp"></i><span>Autorizar y Emitir en ARCA</span>';
-  }
-}
+  toast.className = `pointer-events-auto p-3 rounded border shadow-xl flex items-center space-x-2.5 text-xs font-mono transition-all duration-300 translate-y-2 opacity-0 ${colors[type] || colors.info}`;
+  toast.innerHTML = `
+    <i class="fa-solid ${icons[type] || icons.info} text-sm"></i>
+    <span class="flex-1">${escapeHtml(message)}</span>
+  `;
 
-// --- MIS COMPROBANTES ---
-async function buscarComprobantes() {
-  const tipo = document.getElementById('compFilterTipo').value;
-  const desde = document.getElementById('compFilterDesde').value;
-  const hasta = document.getElementById('compFilterHasta').value;
-  const tbody = document.getElementById('comprobantesTableBody');
-
-  tbody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Consultando registros en ARCA...</td></tr>';
-
-  try {
-    const res = await fetchWithAuth('/api/tasks/comprobantes', {
-      method: 'POST',
-      body: JSON.stringify({ tipo, fechaDesde: desde, fechaHasta: hasta }),
-    });
-    const data = await res.json();
-
-    if (data.success && data.comprobantes) {
-      if (data.comprobantes.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-500">No se encontraron comprobantes para el período indicado.</td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = data.comprobantes.map(c => `
-        <tr class="hover:bg-slate-800/40 transition">
-          <td class="py-2.5 px-3 font-mono">${c.fecha}</td>
-          <td class="py-2.5 px-3 font-semibold text-slate-200">${c.tipo}</td>
-          <td class="py-2.5 px-3 font-mono text-indigo-300">${String(c.puntoVenta).padStart(4, '0')}-${String(c.numero).padStart(8, '0')}</td>
-          <td class="py-2.5 px-3 font-medium">${c.denominacionReceptor}</td>
-          <td class="py-2.5 px-3 text-slate-400 font-mono">${c.nroDocReceptor || '-'}</td>
-          <td class="py-2.5 px-3 text-right font-bold text-emerald-400 font-mono">$ ${c.importeTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
-          <td class="py-2.5 px-3 font-mono text-slate-400 text-[11px]">${c.cae || '-'}</td>
-        </tr>
-      `).join('');
-
-      document.getElementById('compSummaryFooter').classList.remove('hidden');
-      document.getElementById('compCountLabel').innerText = `${data.totalRegistros} comprobantes encontrados`;
-      document.getElementById('compTotalSum').innerText = `$ ${data.totalImporte.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-      showToast(`Consulta completada: ${data.totalRegistros} comprobantes.`, 'success');
-    } else {
-      tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-rose-400">Error: ${data.message}</td></tr>`;
-      showToast(data.message, 'error');
-    }
-  } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-rose-400">Error de conexión con el backend.</td></tr>`;
-  }
-}
-
-// --- MONOTRIBUTO & DFE ---
-async function loadMonotributoStatus() {
-  try {
-    const res = await fetchWithAuth('/api/tasks/monotributo');
-    const data = await res.json();
-    if (data.success) {
-      document.getElementById('dashCategoria').innerText = data.categoria || 'Cat C';
-      document.getElementById('monoCatVal').innerText = data.categoria || 'Cat C';
-      document.getElementById('monoRecatVal').innerText = data.proximaRecategorizacion || 'Julio 2026';
-      
-      const pct = data.porcentajeConsumido || 58.16;
-      document.getElementById('monoProgressBar').style.width = `${pct}%`;
-      document.getElementById('monoProgressText').innerText = `${pct}%`;
-      document.getElementById('monoAcumVal').innerText = `$ ${(data.facturacionAcumuladaAnual || 0).toLocaleString('es-AR')}`;
-      document.getElementById('monoTopeVal').innerText = `$ ${(data.topeCategoriaAnual || 0).toLocaleString('es-AR')}`;
-    }
-  } catch (e) {}
-}
-
-async function loadNotificacionesDFE() {
-  const container = document.getElementById('dfeNotifList');
-  try {
-    const res = await fetchWithAuth('/api/tasks/notificaciones');
-    const data = await res.json();
-    if (data.success && data.comunicaciones) {
-      document.getElementById('dashNotifCount').innerText = `${data.unreadCount} sin leer`;
-      
-      container.innerHTML = data.comunicaciones.map(n => `
-        <div class="p-3 bg-slate-950/60 rounded-xl border ${n.leido ? 'border-slate-800' : 'border-violet-700/60 bg-violet-950/20'} flex items-start justify-between">
-          <div class="space-y-1">
-            <div class="flex items-center space-x-2">
-              <span class="font-bold text-slate-100">${n.organismo}</span>
-              ${!n.leido ? '<span class="px-1.5 py-0.2 bg-violet-600 text-white rounded text-[9px] font-bold">NUEVA</span>' : ''}
-            </div>
-            <p class="text-slate-300 text-[11px]">${n.asunto}</p>
-            <span class="text-[10px] text-slate-500 font-mono">${n.fecha}</span>
-          </div>
-        </div>
-      `).join('');
-    }
-  } catch (e) {}
-}
-
-function quickSyncComprobantes() {
-  switchTab('comprobantes');
-  buscarComprobantes();
-}
-
-function quickCheckDFE() {
-  switchTab('monotributo');
-  loadNotificacionesDFE();
-}
-
-// --- UTILS ---
-function formatCuit(cuit) {
-  if (!cuit || cuit.length !== 11) return cuit || '-';
-  return `${cuit.slice(0, 2)}-${cuit.slice(2, 10)}-${cuit.slice(10)}`;
-}
-
-function escapeHtml(text) {
-  if (!text) return '';
-  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function showToast(message, type = 'info') {
-  const toast = document.createElement('div');
-  let bg = 'bg-slate-900 border-indigo-500 text-slate-100';
-  if (type === 'success') bg = 'bg-slate-900 border-emerald-500 text-emerald-300';
-  if (type === 'error') bg = 'bg-slate-900 border-rose-500 text-rose-300';
-  if (type === 'warn') bg = 'bg-slate-900 border-amber-500 text-amber-300';
-
-  toast.className = `fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl border shadow-2xl text-xs font-semibold flex items-center space-x-2 transition-all duration-300 transform translate-y-10 opacity-0 ${bg}`;
-  toast.innerHTML = `<i class="fa-solid fa-circle-info"></i><span>${escapeHtml(message)}</span>`;
-
-  document.body.appendChild(toast);
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.remove('translate-y-2', 'opacity-0');
+  }, 10);
 
   setTimeout(() => {
-    toast.classList.remove('translate-y-10', 'opacity-0');
-  }, 50);
-
-  setTimeout(() => {
-    toast.classList.add('opacity-0', 'translate-y-5');
+    toast.classList.add('opacity-0', 'translate-y-2');
     setTimeout(() => toast.remove(), 300);
   }, 4000);
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }

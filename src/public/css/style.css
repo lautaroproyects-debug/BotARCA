@@ -1,78 +1,204 @@
-/* Estilos personalizados para BotArca */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+/* Estilos de Vanguardia para BotArca (Obsidian & Titanium Gold Theme) */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
-body {
-  font-family: 'Inter', sans-serif;
+:root {
+  --bg-main: #08090c;
+  --bg-surface: #101217;
+  --bg-elevated: #161922;
+  --bg-card: #13151c;
+  --border-subtle: #1f232d;
+  --border-medium: #2a303d;
+  --border-highlight: #3a4254;
+  --accent-gold: #f59e0b;
+  --accent-gold-hover: #d97706;
+  --accent-gold-light: #fbbf24;
+  --accent-gold-dim: rgba(245, 158, 11, 0.12);
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
 }
 
-code, pre, #terminalScreen {
+body {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+}
+
+code, pre, .font-mono, #terminalScreen {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Tab buttons */
-.tab-btn {
-  padding: 0.5rem 1rem;
-  font-size: 0.8125rem;
+/* Scrollbars finos y minimalistas */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-gold);
+}
+
+/* Botones de navegación estilizados */
+.nav-tab-btn {
+  padding: 0.5rem 0.85rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  border-radius: 0.75rem;
-  color: #94a3b8;
+  border-radius: 0.375rem;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
   display: flex;
   align-items: center;
+  gap: 0.45rem;
   white-space: nowrap;
-  transition: all 0.2s ease-in-out;
+  transition: all 0.15s ease-in-out;
 }
 
-.tab-btn:hover {
-  color: #f1f5f9;
-  background-color: #1e293b;
-}
-
-.tab-btn.active {
+.nav-tab-btn:hover {
   color: #ffffff;
-  background-color: #4f46e5;
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+  background-color: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-subtle);
 }
 
-/* Inputs y Selects oscuros */
-.input-dark {
+.nav-tab-btn.active {
+  color: #ffffff;
+  background-color: var(--bg-elevated);
+  border-color: var(--border-medium);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.nav-tab-btn.active i {
+  color: var(--accent-gold-light);
+}
+
+/* Inputs y Selects oscuros profesionales con bordes afilados */
+.input-field {
   width: 100%;
-  background-color: #090d16;
-  border: 1px solid #334155;
-  border-radius: 0.75rem;
-  padding: 0.625rem 0.875rem;
-  color: #f8fafc;
+  background-color: #0c0e12;
+  border: 1px solid var(--border-medium);
+  border-radius: 0.375rem;
+  padding: 0.55rem 0.75rem;
+  color: #ffffff;
   font-size: 0.8125rem;
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.input-dark:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+.input-field:focus {
+  border-color: var(--accent-gold);
+  box-shadow: 0 0 0 1px var(--accent-gold), 0 0 12px rgba(245, 158, 11, 0.15);
 }
 
-.input-dark::placeholder {
-  color: #475569;
+.input-field::placeholder {
+  color: #4b5563;
 }
 
-/* Terminal Custom Scrollbar */
-#terminalScreen::-webkit-scrollbar {
-  width: 6px;
-}
-#terminalScreen::-webkit-scrollbar-track {
-  background: #090d16;
-}
-#terminalScreen::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 3px;
-}
-#terminalScreen::-webkit-scrollbar-thumb:hover {
-  background: #6366f1;
+/* Botón de acción principal con acento dorado/titanio */
+.btn-gold {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #0b0c10;
+  font-weight: 700;
+  border-radius: 0.375rem;
+  padding: 0.6rem 1.25rem;
+  font-size: 0.8125rem;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+  transition: all 0.15s ease-in-out;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
 }
 
-/* Log level color classes */
+.btn-gold:hover {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-gold:active {
+  transform: translateY(0);
+}
+
+/* Botón secundario oscuro */
+.btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  font-weight: 600;
+  border-radius: 0.375rem;
+  padding: 0.55rem 1rem;
+  font-size: 0.8125rem;
+  border: 1px solid var(--border-medium);
+  transition: all 0.15s ease-in-out;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.btn-secondary:hover {
+  background: #1c202b;
+  border-color: var(--border-highlight);
+  color: #ffffff;
+}
+
+/* Tarjetas con bordes sutiles y fondo obsidian */
+.card-panel {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+}
+
+.card-panel-header {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0.85rem 1.25rem;
+}
+
+/* Badges minimalistas */
+.badge-minimal {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  border-radius: 0.25rem;
+  border: 1px solid var(--border-medium);
+  background-color: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+}
+
+/* Ticker ribbon de cotizaciones en barra superior */
+.financial-strip {
+  background: #060709;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.6875rem;
+}
+
+.ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.5rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ticker-item:last-child {
+  border-right: none;
+}
+
+/* Log Colors */
 .log-level-info { color: #38bdf8; }
-.log-level-success { color: #4ade80; }
+.log-level-success { color: #34d399; }
 .log-level-warn { color: #fbbf24; }
 .log-level-error { color: #f87171; }
 .log-level-debug { color: #94a3b8; }

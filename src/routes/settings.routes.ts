@@ -22,25 +22,28 @@ router.get('/mail', authenticateToken, requireAdmin, (req: AuthenticatedRequest,
       senderEmail: cfg.senderEmail,
       senderName: cfg.senderName,
       adminNotifyEmail: cfg.adminNotifyEmail,
+      hasGroqKey: !!settings.groqApiKey,
+      groqKeyMasked: settings.groqApiKey ? `${settings.groqApiKey.slice(0, 6)}...${settings.groqApiKey.slice(-4)}` : '',
     }
   });
 });
 
-// Guardar configuración de correo (Solo Admin)
+// Guardar configuración de correo y Groq AI (Solo Admin)
 router.post('/mail', authenticateToken, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  const { provider, resendApiKey, brevoApiKey, senderEmail, senderName, adminNotifyEmail } = req.body;
+  const { provider, resendApiKey, brevoApiKey, senderEmail, senderName, adminNotifyEmail, groqApiKey } = req.body;
   const current = db.getSettings();
 
   const update: any = {};
   if (provider !== undefined) update.mailProvider = provider;
   if (resendApiKey !== undefined && resendApiKey !== '') update.resendApiKey = resendApiKey.trim();
   if (brevoApiKey !== undefined && brevoApiKey !== '') update.brevoApiKey = brevoApiKey.trim();
+  if (groqApiKey !== undefined && groqApiKey !== '') update.groqApiKey = groqApiKey.trim();
   if (senderEmail !== undefined) update.mailSenderEmail = senderEmail.trim();
   if (senderName !== undefined) update.mailSenderName = senderName.trim();
   if (adminNotifyEmail !== undefined) update.adminNotifyEmail = adminNotifyEmail.trim();
 
   db.updateSettings(update);
-  logger.info('CONFIG', `Configuración de correo (Brevo/Resend) actualizada por ${req.user!.username}.`);
+  logger.info('CONFIG', `Configuración de correo (Brevo/Resend) y Groq AI actualizada por ${req.user!.username}.`);
 
   res.json({
     success: true,

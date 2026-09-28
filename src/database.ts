@@ -121,6 +121,7 @@ export interface AppDatabase {
     mailSenderEmail?: string;
     mailSenderName?: string;
     adminNotifyEmail?: string;
+    groqApiKey?: string;
   };
   tasks: TaskRecord[];
   sessionCookies: any[];
@@ -169,6 +170,7 @@ class DatabaseManager {
         mailSenderEmail: process.env.MAIL_SENDER_EMAIL || 'onboarding@resend.dev',
         mailSenderName: process.env.MAIL_SENDER_NAME || 'BotArca Cloud',
         adminNotifyEmail: process.env.ADMIN_NOTIFY_EMAIL || '',
+        groqApiKey: process.env.GROQ_API_KEY || '',
       },
       tasks: [],
       sessionCookies: [],

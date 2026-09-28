@@ -3,111 +3,23 @@ import { facturacionModule } from '../engine/modules/facturacion.js';
 import { arcaSession } from '../engine/arcaSession.js';
 import { supabase } from './supabase.js';
 import { logger } from './logger.js';
+import { aiParserService } from './aiParserService.js';
 
 class QueueService {
   private isProcessing = false;
 
   /**
+   * Parsea de manera inteligente Excel, CSV o texto libre/WhatsApp (usando Groq o Heurística)
+   */
+  public async parseSmartText(rawText: string, options?: { forceAi?: boolean }) {
+    return await aiParserService.parseSmart(rawText, options);
+  }
+
+  /**
    * Parsea filas copiadas de Excel (separadas por tabulación \t) o CSV
    */
   public parseExcelOrCsv(rawText: string): Array<Omit<InvoicingQueueItem, 'id' | 'createdAt' | 'estado'>> {
-    const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-    const parsed: Array<Omit<InvoicingQueueItem, 'id' | 'createdAt' | 'estado'>> = [];
-
-    const creds = db.getCredentials();
-    const defaultPtoVta = creds.puntoVentaDefault || 1;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      // Detectar separador (\t para Excel, ; o , para CSV)
-      let cols: string[] = [];
-      if (line.includes('\t')) {
-        cols = line.split('\t').map(c => c.trim());
-      } else if (line.includes(';')) {
-        cols = line.split(';').map(c => c.trim());
-      } else if (line.includes(',')) {
-        cols = line.split(',').map(c => c.trim());
-      } else {
-        cols = [line];
-      }
-
-      // Si es encabezado (contiene palabras como cuit, receptor, monto, importe, etc.), saltar
-      const lowerHeader = cols.join(' ').toLowerCase();
-      if (i === 0 && (lowerHeader.includes('cuit') || lowerHeader.includes('importe') || lowerHeader.includes('razon') || lowerHeader.includes('monto'))) {
-        continue;
-      }
-
-      // Mapeo flexible según cantidad de columnas
-      // Formato típico 1: [CUIT, Razón Social, Descripción, Importe]
-      // Formato típico 2: [PtoVta, Tipo, CUIT, Razón Social, Descripción, Importe]
-      // Formato típico 3: [CUIT, Importe, Descripción]
-      let ptoVta = defaultPtoVta;
-      let tipoComp = 'Factura C';
-      let docNro = '';
-      let razonSocial = '';
-      let descripcion = 'Servicios profesionales';
-      let importe = 0;
-      let email = '';
-
-      if (cols.length >= 4 && cols[0].length <= 4 && !isNaN(Number(cols[0]))) {
-        // [PtoVta, Tipo, CUIT, Razón, Desc, Importe]
-        ptoVta = parseInt(cols[0], 10) || defaultPtoVta;
-        tipoComp = cols[1] || 'Factura C';
-        docNro = cols[2]?.replace(/\D/g, '') || '';
-        razonSocial = cols[3] || 'Consumidor Final';
-        descripcion = cols[4] || 'Servicios profesionales';
-        importe = this.parseNumeric(cols[5] || cols[cols.length - 1]);
-      } else if (cols.length >= 4) {
-        // [CUIT, Razón Social, Descripción, Importe, (Email)]
-        docNro = cols[0]?.replace(/\D/g, '') || '';
-        razonSocial = cols[1] || 'Consumidor Final';
-        descripcion = cols[2] || 'Servicios profesionales';
-        importe = this.parseNumeric(cols[3]);
-        if (cols[4]) email = cols[4];
-      } else if (cols.length === 3) {
-        // [CUIT, Descripción, Importe] o [CUIT, Razón, Importe]
-        docNro = cols[0]?.replace(/\D/g, '') || '';
-        if (isNaN(this.parseNumeric(cols[1])) && !isNaN(this.parseNumeric(cols[2]))) {
-          razonSocial = cols[1];
-          importe = this.parseNumeric(cols[2]);
-        } else {
-          descripcion = cols[1];
-          importe = this.parseNumeric(cols[2]);
-        }
-      } else if (cols.length === 2) {
-        // [CUIT, Importe]
-        docNro = cols[0]?.replace(/\D/g, '') || '';
-        importe = this.parseNumeric(cols[1]);
-        razonSocial = `Cliente ${docNro}`;
-      }
-
-      if (docNro && importe > 0) {
-        parsed.push({
-          cuitEmisor: creds.cuit,
-          puntoVenta: ptoVta,
-          tipoComprobante: tipoComp,
-          concepto: 2,
-          docTipo: docNro.length === 11 ? 'CUIT' : (docNro.length === 8 ? 'DNI' : 'Consumidor Final'),
-          docNro,
-          razonSocial: razonSocial || `Receptor ${docNro}`,
-          condicionIva: docNro.length === 11 ? 'Responsable Inscripto' : 'Consumidor Final',
-          condicionVenta: 'Contado',
-          descripcion: descripcion || 'Servicios profesionales',
-          cantidad: 1,
-          precioUnitario: importe,
-          importeTotal: importe,
-          email,
-        });
-      }
-    }
-
-    return parsed;
-  }
-
-  private parseNumeric(val: string): number {
-    if (!val) return 0;
-    const clean = val.replace(/\$/g, '').trim().replace(/\./g, '').replace(',', '.');
-    return parseFloat(clean) || 0;
+    return aiParserService.parseTabular(rawText);
   }
 
   /**

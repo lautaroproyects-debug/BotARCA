@@ -345,25 +345,90 @@ async function handleSaveAccount(e) {
   }
 }
 
-// --- EXCEL & CSV PASTING (CARGA MASIVA) ---
+// --- EXCEL & WHATSAPP SMART PASTING (CARGA MASIVA & IA) ---
+let parseDebounceTimer = null;
+
 async function handleExcelPasteChange(text) {
+  clearTimeout(parseDebounceTimer);
   if (!text || text.trim().length === 0) {
     parsedExcelItems = [];
     renderExcelPreview([]);
+    updateParserBadge('auto', 0);
     return;
   }
 
+  parseDebounceTimer = setTimeout(async () => {
+    try {
+      const res = await fetchWithAuth('/api/queue/parse-excel', {
+        method: 'POST',
+        body: JSON.stringify({ text })
+      });
+      const data = await res.json();
+      if (data.success) {
+        parsedExcelItems = data.items || [];
+        renderExcelPreview(parsedExcelItems);
+        updateParserBadge(data.parserUsed, parsedExcelItems.length);
+      }
+    } catch (e) {}
+  }, 350);
+}
+
+async function handleParseWithGroq() {
+  const text = document.getElementById('excelPasteArea')?.value?.trim();
+  if (!text) {
+    showToast('Pega texto, tabla o un mensaje de WhatsApp antes de interpretar.', 'warn');
+    return;
+  }
+
+  const btn = document.getElementById('btnParseWithAi');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Analizando con IA...';
+  }
+
   try {
-    const res = await fetchWithAuth('/api/queue/parse-excel', {
+    const res = await fetchWithAuth('/api/queue/parse-smart', {
       method: 'POST',
-      body: JSON.stringify({ text })
+      body: JSON.stringify({ text, forceAi: true })
     });
     const data = await res.json();
-    if (data.success) {
-      parsedExcelItems = data.items || [];
+    if (data.success && data.items) {
+      parsedExcelItems = data.items;
       renderExcelPreview(parsedExcelItems);
+      updateParserBadge(data.parserUsed, parsedExcelItems.length);
+      if (data.items.length > 0) {
+        const provName = data.parserUsed === 'groq_ai' ? 'Groq IA (Llama-3.3-70B)' : 'Motor Heurístico';
+        showToast(`¡${data.items.length} facturas extraídas con ${provName}!`, 'success');
+      } else {
+        showToast('No se encontraron datos fiscales válidos en el texto.', 'warn');
+      }
+    } else {
+      showToast(data.message || 'Error al interpretar con IA.', 'error');
     }
-  } catch (e) {}
+  } catch (err) {
+    showToast('Error de comunicación con el motor de IA.', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-brain text-[10px] mr-1"></i> Interpretar con IA';
+    }
+  }
+}
+
+function updateParserBadge(parserUsed, count) {
+  const badge = document.getElementById('parserBadge');
+  if (!badge) return;
+
+  if (parserUsed === 'groq_ai') {
+    badge.innerHTML = '<i class="fa-solid fa-brain text-emerald-400 mr-1"></i> Groq IA (Llama-3.3-70B)';
+    badge.className = 'px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700 text-[10px] text-emerald-300 font-bold';
+  } else if (parserUsed === 'heuristic_nlp') {
+    badge.innerHTML = '<i class="fa-brands fa-whatsapp text-emerald-400 mr-1"></i> Parser Inteligente WhatsApp';
+    badge.className = 'px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700 text-[10px] text-emerald-300 font-bold';
+  } else {
+    badge.innerHTML = '<i class="fa-solid fa-table-cells text-amber-400 mr-1"></i> Formato Tabular Excel / CSV';
+    badge.className = 'px-2 py-0.5 rounded bg-obsidian-800 border border-obsidian-700 text-[10px] text-slate-300';
+  }
 }
 
 function renderExcelPreview(items) {
@@ -371,38 +436,104 @@ function renderExcelPreview(items) {
   const countText = document.getElementById('excelParsedCountText');
   const totalDisplay = document.getElementById('excelPreviewTotal');
   const btnAdd = document.getElementById('btnAddToQueue');
+  const btnAddText = document.getElementById('btnAddToQueueText');
 
-  if (countText) countText.innerText = `${items.length} filas válidas detectadas`;
+  if (countText) countText.innerText = `${items.length} comprobante${items.length === 1 ? '' : 's'} listo${items.length === 1 ? '' : 's'}`;
 
   let sum = 0;
-  items.forEach(i => sum += (i.importeTotal || 0));
+  items.forEach(i => sum += (Number(i.importeTotal) || 0));
   if (totalDisplay) totalDisplay.innerText = `$${sum.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
 
   if (btnAdd) btnAdd.disabled = items.length === 0;
+  if (btnAddText) btnAddText.innerText = items.length > 0 ? `AGREGAR ${items.length} FACTURAS A LA COLA` : 'AGREGAR A LA COLA DE FACTURACIÓN';
 
   if (!tbody) return;
   if (items.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-500">Pega filas arriba para previsualizar.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="py-8 text-center text-slate-500">Pega filas de Excel o mensajes de WhatsApp arriba para previsualizar.</td></tr>';
     return;
   }
 
   tbody.innerHTML = items.map((it, idx) => `
-    <tr class="hover:bg-obsidian-850/60">
-      <td class="py-2 px-3 text-slate-500">${idx + 1}</td>
-      <td class="py-2 px-3 font-semibold text-slate-200 select-all">${it.docNro}</td>
-      <td class="py-2 px-3 text-slate-300 truncate max-w-[180px]">${escapeHtml(it.razonSocial)}</td>
-      <td class="py-2 px-3 text-slate-400 truncate max-w-[200px]">${escapeHtml(it.descripcion)}</td>
-      <td class="py-2 px-3 text-amber-400 font-semibold">${it.tipoComprobante}</td>
-      <td class="py-2 px-3 text-right font-bold text-slate-100">$${it.importeTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+    <tr class="hover:bg-obsidian-850/60 transition group">
+      <td class="py-2 px-2.5 text-slate-500 text-center">${idx + 1}</td>
+      <td class="py-1.5 px-2">
+        <input type="text" value="${escapeHtml(it.docNro || '')}" oninput="updateDraftRow(${idx}, 'docNro', this.value)" class="input-field !py-1 text-xs font-mono font-bold text-slate-200" placeholder="CUIT / DNI">
+      </td>
+      <td class="py-1.5 px-2">
+        <input type="text" value="${escapeHtml(it.razonSocial || '')}" oninput="updateDraftRow(${idx}, 'razonSocial', this.value)" class="input-field !py-1 text-xs text-slate-200" placeholder="Nombre / Razón Social">
+      </td>
+      <td class="py-1.5 px-2">
+        <select onchange="updateDraftRow(${idx}, 'concepto', this.value)" class="input-field !py-1 text-xs">
+          <option value="1" ${it.concepto === 1 ? 'selected' : ''}>1: Productos</option>
+          <option value="2" ${it.concepto === 2 ? 'selected' : ''}>2: Servicios</option>
+          <option value="3" ${it.concepto === 3 ? 'selected' : ''}>3: Ambos</option>
+        </select>
+      </td>
+      <td class="py-1.5 px-2">
+        <select onchange="updateDraftRow(${idx}, 'tipoComprobante', this.value)" class="input-field !py-1 text-xs font-semibold text-amber-400">
+          <option value="Factura C" ${it.tipoComprobante === 'Factura C' ? 'selected' : ''}>Factura C</option>
+          <option value="Factura A" ${it.tipoComprobante === 'Factura A' ? 'selected' : ''}>Factura A</option>
+          <option value="Factura B" ${it.tipoComprobante === 'Factura B' ? 'selected' : ''}>Factura B</option>
+          <option value="Recibo C" ${it.tipoComprobante === 'Recibo C' ? 'selected' : ''}>Recibo C</option>
+        </select>
+      </td>
+      <td class="py-1.5 px-2">
+        <input type="text" value="${escapeHtml(it.descripcion || '')}" oninput="updateDraftRow(${idx}, 'descripcion', this.value)" class="input-field !py-1 text-xs text-slate-300" placeholder="Descripción del item">
+      </td>
+      <td class="py-1.5 px-2 text-right">
+        <input type="number" step="any" value="${it.importeTotal || 0}" oninput="updateDraftRow(${idx}, 'importeTotal', this.value)" class="input-field !py-1 text-xs font-bold text-amber-400 text-right w-24">
+      </td>
+      <td class="py-1.5 px-2 text-center">
+        <button type="button" onclick="deleteDraftRow(${idx})" class="text-slate-500 hover:text-red-400 p-1 transition" title="Eliminar fila">
+          <i class="fa-solid fa-trash-can text-xs"></i>
+        </button>
+      </td>
     </tr>
   `).join('');
 }
 
+function updateDraftRow(idx, field, value) {
+  if (!parsedExcelItems[idx]) return;
+
+  if (field === 'importeTotal') {
+    const valNum = parseFloat(value) || 0;
+    parsedExcelItems[idx].importeTotal = valNum;
+    parsedExcelItems[idx].precioUnitario = valNum;
+    let sum = 0;
+    parsedExcelItems.forEach(i => sum += (Number(i.importeTotal) || 0));
+    const totalDisplay = document.getElementById('excelPreviewTotal');
+    if (totalDisplay) totalDisplay.innerText = `$${sum.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+  } else if (field === 'concepto') {
+    parsedExcelItems[idx].concepto = parseInt(value, 10) || 2;
+  } else {
+    parsedExcelItems[idx][field] = value;
+  }
+}
+
+function deleteDraftRow(idx) {
+  if (parsedExcelItems[idx]) {
+    parsedExcelItems.splice(idx, 1);
+    renderExcelPreview(parsedExcelItems);
+    showToast('Fila eliminada de la vista previa.', 'info');
+  }
+}
+
 function loadSampleExcelData() {
-  const sample = `30712345678\tEmpresa Alpha SRL\tServicios de Desarrollo de Software\t250000
-20309998887\tMartín Rodríguez\tHonorarios Profesionales de Consultoría\t120000
-30654321098\tGlobal Trade SA\tMantenimiento y soporte mensual IT\t180000
-27321112223\tLucía Benítez\tAsesoramiento contable e impositivo\t95000`;
+  const sample = `30712345678\tEmpresa Alpha SRL\tServicios de Desarrollo de Software y APIs\t250000
+20309998887\tMartín Rodríguez\tHonorarios Profesionales de Consultoría IT\t120000
+30654321098\tGlobal Trade SA\tMantenimiento y soporte mensual Cloud\t180000
+27321112223\tLucía Benítez\tAsesoramiento impositivo y contable\t95000`;
+  const area = document.getElementById('excelPasteArea');
+  if (area) {
+    area.value = sample;
+    handleExcelPasteChange(sample);
+  }
+}
+
+function loadSampleWhatsAppMsg() {
+  const sample = `[28/9, 11:20] Juan Perez: Hola! Me podés emitir una factura C a Tech Solutions SRL? El CUIT es 30-71234567-8 por $185.000 de honorarios por desarrollo web y APIs.
+[28/9, 14:45] Maria Gómez: Hola Lautaro, facturale a Gómez Distribuidora CUIT 27-33889900-4 la suma de 75.000 pesos por consultoría mensual de marketing. Gracias!
+[28/9, 16:10] Carlos Lopez: Haceme una factura para Lopez Construcciones CUIT 20-28776655-1 por $320000 concepto de materiales e instalación.`;
   const area = document.getElementById('excelPasteArea');
   if (area) {
     area.value = sample;
@@ -420,13 +551,13 @@ function clearExcelPasteArea() {
 
 async function submitExcelBatchToQueue() {
   if (parsedExcelItems.length === 0) {
-    showToast('No hay filas para agregar a la cola.', 'warn');
+    showToast('No hay facturas para agregar a la cola.', 'warn');
     return;
   }
 
   const btn = document.getElementById('btnAddToQueue');
   btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Agregando...';
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Encolando comprobantes...';
 
   try {
     const res = await fetchWithAuth('/api/queue/add', {
@@ -435,7 +566,7 @@ async function submitExcelBatchToQueue() {
     });
     const data = await res.json();
     if (data.success) {
-      showToast(`¡${data.count} facturas agregadas a la cola de emisión!`, 'success');
+      showToast(`¡${data.count} facturas agregadas a la cola de emisión con éxito!`, 'success');
       clearExcelPasteArea();
       switchTab('cola');
       await loadQueueItems();
@@ -1076,6 +1207,11 @@ async function loadMailSettings() {
         if (bk) bk.placeholder = `Guardada (${m.brevoKeyMasked})`;
       }
 
+      if (m.groqKeyMasked) {
+        const gk = document.getElementById('cfgGroqKey');
+        if (gk) gk.placeholder = `Guardada (${m.groqKeyMasked})`;
+      }
+
       const badge = document.getElementById('mailStatusText');
       if (badge) {
         const provName = m.provider === 'resend' ? 'Resend API' : m.provider === 'brevo' ? 'Brevo API' : m.provider === 'simulation' ? 'Simulado' : 'Auto';
@@ -1090,6 +1226,7 @@ async function handleSaveMailSettings(e) {
   const provider = document.getElementById('cfgMailProvider').value;
   const resendApiKey = document.getElementById('cfgResendKey').value.trim();
   const brevoApiKey = document.getElementById('cfgBrevoKey').value.trim();
+  const groqApiKey = document.getElementById('cfgGroqKey')?.value.trim();
   const senderEmail = document.getElementById('cfgMailSenderEmail').value.trim();
   const senderName = document.getElementById('cfgMailSenderName').value.trim();
   const adminNotifyEmail = document.getElementById('cfgAdminNotifyEmail').value.trim();
@@ -1101,6 +1238,7 @@ async function handleSaveMailSettings(e) {
         provider,
         resendApiKey,
         brevoApiKey,
+        groqApiKey,
         senderEmail,
         senderName,
         adminNotifyEmail,
@@ -1109,7 +1247,7 @@ async function handleSaveMailSettings(e) {
 
     const data = await res.json();
     if (data.success) {
-      showToast(data.message || 'Configuración de correo guardada.', 'success');
+      showToast(data.message || 'Configuración guardada con éxito.', 'success');
       await loadMailSettings();
     } else {
       showToast(data.message || 'Error guardando configuración.', 'error');

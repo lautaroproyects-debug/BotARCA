@@ -10,15 +10,38 @@ router.get('/', (req: Request, res: Response) => {
   res.json({ success: true, ...status });
 });
 
-// Parsear texto copiado de Excel / CSV
-router.post('/parse-excel', (req: Request, res: Response) => {
-  const { text } = req.body;
+// Parsear texto copiado de Excel / CSV o WhatsApp con IA (Groq / Heurístico)
+router.post('/parse-excel', async (req: Request, res: Response) => {
+  const { text, forceAi } = req.body;
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ success: false, message: 'No se envió texto para parsear.' });
   }
 
-  const items = queueService.parseExcelOrCsv(text);
-  res.json({ success: true, count: items.length, items });
+  const result = await queueService.parseSmartText(text, { forceAi: Boolean(forceAi) });
+  res.json({
+    success: true,
+    count: result.items.length,
+    items: result.items,
+    parserUsed: result.parserUsed,
+    message: result.message,
+  });
+});
+
+// Endpoint explícito para parseo con IA
+router.post('/parse-smart', async (req: Request, res: Response) => {
+  const { text, forceAi } = req.body;
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({ success: false, message: 'No se envió texto para parsear.' });
+  }
+
+  const result = await queueService.parseSmartText(text, { forceAi: forceAi !== false });
+  res.json({
+    success: true,
+    count: result.items.length,
+    items: result.items,
+    parserUsed: result.parserUsed,
+    message: result.message,
+  });
 });
 
 // Agregar lote de comprobantes a la cola

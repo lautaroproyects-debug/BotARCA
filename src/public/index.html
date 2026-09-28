@@ -268,72 +268,91 @@
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex-1 w-full">
 
     <!-- ========================================== -->
-    <!-- TAB 1: CARGA MASIVA (EXCEL & CSV PASTING)  -->
+    <!-- TAB 1: CARGA MASIVA & WHATSAPP (IA PARSER) -->
     <!-- ========================================== -->
     <section id="tab-carga-masiva" class="tab-content block space-y-4">
       
       <div class="card-panel p-5 space-y-4">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-obsidian-700 pb-3">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-obsidian-700 pb-3">
           <div>
             <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
-              <i class="fa-solid fa-file-excel text-emerald-400 mr-2"></i> Pegar Planilla desde Excel / Google Sheets
+              <i class="fa-solid fa-wand-magic-sparkles text-amber-400 mr-2"></i> Pegar Planilla de Excel o Mensajes de WhatsApp (IA Smart Parser)
             </h3>
-            <p class="text-xs text-slate-400 mt-0.5">Copia las celdas directamente desde Excel con <kbd class="px-1.5 py-0.5 bg-obsidian-800 border border-obsidian-600 rounded text-slate-300 font-mono text-[10px]">Ctrl+C</kbd> y pégalas abajo con <kbd class="px-1.5 py-0.5 bg-obsidian-800 border border-obsidian-600 rounded text-slate-300 font-mono text-[10px]">Ctrl+V</kbd>.</p>
+            <p class="text-xs text-slate-400 mt-0.5">Pega filas de Excel (<kbd class="px-1 py-0.5 bg-obsidian-800 border border-obsidian-600 rounded text-slate-300 font-mono text-[10px]">Ctrl+V</kbd>) o texto libre / chats de WhatsApp. Groq IA y el motor heurístico extraerán automáticamente CUIT, monto, concepto y cliente.</p>
           </div>
 
-          <div class="flex items-center space-x-2">
-            <button onclick="loadSampleExcelData()" class="btn-secondary !py-1 !px-2.5 text-xs">
-              <i class="fa-solid fa-wand-magic-sparkles text-amber-400 text-[10px]"></i> Cargar Ejemplo
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button type="button" onclick="loadSampleExcelData()" class="btn-secondary !py-1 !px-2.5 text-xs" title="Cargar tabla de prueba de Excel">
+              <i class="fa-solid fa-table-cells text-emerald-400 text-[10px] mr-1"></i> Ejemplo Excel
             </button>
-            <button onclick="clearExcelPasteArea()" class="btn-secondary !py-1 !px-2.5 text-xs">
-              <i class="fa-solid fa-trash-can text-[10px]"></i> Limpiar
+            <button type="button" onclick="loadSampleWhatsAppMsg()" class="btn-secondary !py-1 !px-2.5 text-xs" title="Cargar mensaje informal de WhatsApp">
+              <i class="fa-brands fa-whatsapp text-emerald-400 text-[11px] mr-1"></i> Ejemplo WhatsApp
+            </button>
+            <button type="button" id="btnParseWithAi" onclick="handleParseWithGroq()" class="btn-gold !py-1 !px-3 text-xs shadow">
+              <i class="fa-solid fa-brain text-[10px] mr-1"></i> Interpretar con IA
+            </button>
+            <button type="button" onclick="clearExcelPasteArea()" class="btn-secondary !py-1 !px-2 text-xs" title="Limpiar área de texto">
+              <i class="fa-solid fa-trash-can text-[10px]"></i>
             </button>
           </div>
         </div>
 
-        <!-- Excel Pasting Textarea / Dropzone -->
+        <!-- Pasting Textarea / Dropzone -->
         <div class="space-y-2">
-          <textarea id="excelPasteArea" oninput="handleExcelPasteChange(this.value)" rows="6" class="w-full bg-[#050608] border border-obsidian-700 rounded p-3 font-mono text-xs text-slate-200 outline-none focus:border-amber-500 transition" placeholder="Pega aquí tus filas de Excel (Columnas recomendadas: CUIT | Razón Social | Concepto | Importe)"></textarea>
+          <textarea id="excelPasteArea" oninput="handleExcelPasteChange(this.value)" rows="6" class="w-full bg-[#050608] border border-obsidian-700 rounded p-3 font-mono text-xs text-slate-200 outline-none focus:border-amber-500 transition placeholder:text-slate-600" placeholder="Pega aquí tus filas de Excel (CUIT | Razón Social | Concepto | Importe) o mensajes directos de WhatsApp (ej: 'Facturale a Juan CUIT 20-33445566-9 la suma de $150.000 por honorarios de desarrollo')..."></textarea>
           
-          <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-500 font-mono gap-2">
-            <span>Formatos aceptados: Tabulación de Excel (\t), CSV (; o ,).</span>
-            <span id="excelParsedCountText" class="text-amber-400 font-semibold">0 filas detectadas</span>
+          <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-400 font-mono gap-2">
+            <div class="flex items-center space-x-2">
+              <span id="parserBadge" class="px-2 py-0.5 rounded bg-obsidian-800 border border-obsidian-700 text-[10px] text-slate-400">
+                <i class="fa-solid fa-microchip mr-1 text-amber-400"></i> Modo: Auto-Detección
+              </span>
+              <span class="text-slate-500 hidden sm:inline">Formatos: Excel (\t), CSV (; / ,), WhatsApp, Texto libre.</span>
+            </div>
+            <span id="excelParsedCountText" class="text-amber-400 font-bold">0 comprobantes listos</span>
           </div>
         </div>
 
-        <!-- Preview Table -->
+        <!-- Preview Table with Live Inline Editing -->
         <div id="excelPreviewContainer" class="space-y-3 pt-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-slate-300 uppercase font-mono tracking-wider">Vista Previa de Facturas a Encolar</span>
-            <div class="font-mono text-xs">
-              <span class="text-slate-400">Total Lote:</span>
-              <strong id="excelPreviewTotal" class="text-emerald-400 text-sm font-bold ml-1">$0,00</strong>
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div class="flex items-center space-x-2">
+              <span class="text-xs font-bold text-slate-200 uppercase font-mono tracking-wider">Vista Previa de Facturas a Encolar</span>
+              <span class="text-[10px] text-slate-500 font-mono">(Podés editar cualquier celda antes de encolar)</span>
+            </div>
+            <div class="font-mono text-xs bg-obsidian-850 px-3 py-1 rounded border border-obsidian-700 flex items-center space-x-2">
+              <span class="text-slate-400">Total del Lote:</span>
+              <strong id="excelPreviewTotal" class="text-amber-400 text-sm font-bold">$0,00</strong>
             </div>
           </div>
 
-          <div class="overflow-x-auto max-h-64 overflow-y-auto border border-obsidian-700 rounded">
+          <div class="overflow-x-auto max-h-80 overflow-y-auto border border-obsidian-700 rounded bg-[#050608]">
             <table class="w-full text-left text-xs">
-              <thead class="bg-obsidian-850 sticky top-0 border-b border-obsidian-700">
+              <thead class="bg-obsidian-850 sticky top-0 border-b border-obsidian-700 z-10">
                 <tr class="text-slate-500 font-mono uppercase text-[10px]">
-                  <th class="py-2 px-3">#</th>
-                  <th class="py-2 px-3">Receptor (CUIT / Doc)</th>
-                  <th class="py-2 px-3">Razón Social</th>
-                  <th class="py-2 px-3">Concepto / Descripción</th>
-                  <th class="py-2 px-3">Tipo</th>
-                  <th class="py-2 px-3 text-right">Importe</th>
+                  <th class="py-2.5 px-2.5 w-8">#</th>
+                  <th class="py-2.5 px-2.5 w-36">Receptor (CUIT / Doc)</th>
+                  <th class="py-2.5 px-2.5 w-48">Razón Social</th>
+                  <th class="py-2.5 px-2.5 w-28">Concepto</th>
+                  <th class="py-2.5 px-2.5 w-28">Tipo</th>
+                  <th class="py-2.5 px-2.5">Descripción</th>
+                  <th class="py-2.5 px-2.5 w-28 text-right">Importe Total</th>
+                  <th class="py-2.5 px-2 w-10 text-center"></th>
                 </tr>
               </thead>
               <tbody id="excelPreviewTbody" class="divide-y divide-obsidian-800 font-mono">
-                <tr><td colspan="6" class="py-6 text-center text-slate-500">Pega filas arriba para previsualizar.</td></tr>
+                <tr><td colspan="8" class="py-8 text-center text-slate-500">Pega filas o mensajes arriba para previsualizar.</td></tr>
               </tbody>
             </table>
           </div>
 
           <!-- Add to Queue Action -->
-          <div class="flex justify-end pt-2">
-            <button type="button" id="btnAddToQueue" onclick="submitExcelBatchToQueue()" disabled class="btn-gold !py-2.5 !px-6 text-xs">
+          <div class="flex flex-col sm:flex-row items-center justify-between pt-2 gap-3">
+            <div class="text-[11px] text-slate-500 font-mono">
+              <i class="fa-solid fa-circle-info text-amber-400 mr-1"></i> Los comprobantes se encolan en estado <strong>Pendiente</strong> y se emiten secuencialmente en ARCA con evasión de WAF.
+            </div>
+            <button type="button" id="btnAddToQueue" onclick="submitExcelBatchToQueue()" disabled class="btn-gold !py-2.5 !px-6 text-xs w-full sm:w-auto shadow-lg">
               <i class="fa-solid fa-plus text-[11px]"></i>
-              <span>AGREGAR A LA COLA DE FACTURACIÓN</span>
+              <span id="btnAddToQueueText">AGREGAR A LA COLA DE FACTURACIÓN</span>
             </button>
           </div>
         </div>
@@ -885,7 +904,7 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div>
                 <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Email Remitente (From)</label>
                 <input type="text" id="cfgMailSenderEmail" placeholder="onboarding@resend.dev o noreply@tuempresa.com" class="input-field text-xs">
@@ -895,8 +914,14 @@
                 <input type="text" id="cfgMailSenderName" placeholder="BotArca Cloud" class="input-field text-xs">
               </div>
               <div>
-                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Email Notificaciones Admin</label>
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Email Alertas Admin</label>
                 <input type="email" id="cfgAdminNotifyEmail" placeholder="admin@tuempresa.com" class="input-field text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-semibold text-amber-400 uppercase mb-1 flex items-center">
+                  <i class="fa-solid fa-brain text-[10px] mr-1"></i> API Key Groq (IA Llama 70B)
+                </label>
+                <input type="password" id="cfgGroqKey" placeholder="gsk_..." class="input-field text-xs">
               </div>
             </div>
 
@@ -908,7 +933,7 @@
                 </button>
               </div>
               <button type="submit" class="btn-gold !py-1.5 !px-5 text-xs w-full sm:w-auto">
-                Guardar Configuración de Correo
+                Guardar Configuración (Email & Groq IA)
               </button>
             </div>
           </form>

@@ -3,6 +3,35 @@ import { argentinaDatos } from '../services/argentinaDatos.js';
 
 const router = Router();
 
+// Resumen unificado para el ticker en vivo superior (ArgentinaDatos)
+router.get('/resumen', async (req: Request, res: Response) => {
+  try {
+    const cache = await argentinaDatos.refreshCache();
+    const dolaresObj: Record<string, any> = {};
+    for (const d of cache.dolares) {
+      if (d.casa === 'bolsa') dolaresObj.mep = d;
+      else if (d.casa === 'contadoconliqui') dolaresObj.ccl = d;
+      else dolaresObj[d.casa] = d;
+    }
+
+    const ultimoIpc = cache.inflacionMensual[cache.inflacionMensual.length - 1] || { fecha: '', valor: 2.4 };
+    const ultimoUva = cache.uva[cache.uva.length - 1] || { fecha: '', valor: 1150 };
+
+    res.json({
+      success: true,
+      dolares: dolaresObj,
+      inflacion: {
+        ultimoIpc
+      },
+      uva: {
+        ultimoValor: ultimoUva
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Cotizaciones de dólares en vivo
 router.get('/dolares', async (req: Request, res: Response) => {
   try {

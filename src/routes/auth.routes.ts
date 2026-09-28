@@ -26,6 +26,31 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
+// Registro público de usuario (con notificación por Brevo / Resend)
+router.post('/register', async (req: Request, res: Response) => {
+  const { name, username, email, password } = req.body;
+
+  if (!name || !username || !email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Todos los campos son obligatorios (Nombre, Usuario, Email y Contraseña).',
+    });
+  }
+
+  const result = await userService.registerUser({
+    name,
+    username,
+    email,
+    passwordPlain: password,
+  });
+
+  if (result.success) {
+    res.status(201).json(result);
+  } else {
+    res.status(400).json(result);
+  }
+});
+
 // Perfil de usuario autenticado
 router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
   const user = userService.getUserById(req.user!.id);

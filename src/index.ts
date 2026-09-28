@@ -17,6 +17,7 @@ import erpRoutes from './routes/erp.routes.js';
 import usersRoutes from './routes/users.routes.js';
 import queueRoutes from './routes/queue.routes.js';
 import accountsRoutes from './routes/accounts.routes.js';
+import settingsRoutes from './routes/settings.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,6 +43,7 @@ app.use('/api/finanzas', finanzasRoutes);
 app.use('/api/erp', erpRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/accounts', accountsRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Endpoint rápido /healthz y /ping para Render y UptimeRobot
 app.get('/healthz', (req, res) => res.status(200).send('OK'));

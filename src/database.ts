@@ -115,6 +115,12 @@ export interface AppDatabase {
     autoSyncCron: string;
     uptimeRobotApiKey?: string;
     uptimeRobotMonitorId?: string;
+    mailProvider?: 'resend' | 'brevo' | 'auto' | 'simulation';
+    resendApiKey?: string;
+    brevoApiKey?: string;
+    mailSenderEmail?: string;
+    mailSenderName?: string;
+    adminNotifyEmail?: string;
   };
   tasks: TaskRecord[];
   sessionCookies: any[];
@@ -157,6 +163,12 @@ class DatabaseManager {
         autoSyncEnabled: false,
         autoSyncCron: config.scheduler.cronExpression,
         uptimeRobotApiKey: config.uptimeRobotApiKey,
+        mailProvider: (process.env.MAIL_PROVIDER as any) || 'auto',
+        resendApiKey: process.env.RESEND_API_KEY || '',
+        brevoApiKey: process.env.BREVO_API_KEY || '',
+        mailSenderEmail: process.env.MAIL_SENDER_EMAIL || 'onboarding@resend.dev',
+        mailSenderName: process.env.MAIL_SENDER_NAME || 'BotArca Cloud',
+        adminNotifyEmail: process.env.ADMIN_NOTIFY_EMAIL || '',
       },
       tasks: [],
       sessionCookies: [],

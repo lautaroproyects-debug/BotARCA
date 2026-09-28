@@ -4,6 +4,7 @@ import { db } from '../../database.js';
 import { config } from '../../config.js';
 import { supabase } from '../supabase.js';
 import { logger } from '../logger.js';
+import { mailService } from '../mailService.js';
 
 export interface UserRecord {
   id: string;
@@ -251,7 +252,108 @@ class UserService {
     });
 
     logger.info('AUTH-ADMIN', `Nuevo usuario creado: @${newUser.username} (${newUser.name}) por admin.`);
+    
+    // Enviar notificación de bienvenida por Brevo/Resend de forma asíncrona
+    mailService.sendWelcomeEmail({
+      name: newUser.name,
+      username: newUser.username,
+      email: newUser.email,
+      role: newUser.role,
+    }).catch(err => logger.warn('MAIL', `No se pudo enviar bienvenida: ${err.message}`));
+
     return { success: true, message: 'Usuario creado exitosamente.', user: this.toPublicProfile(newUser) };
+  }
+
+  /**
+   * Registro público de un nuevo usuario desde la pantalla de login
+   */
+  public async registerUser(data: { name: string; username: string; email: string; passwordPlain: string }): Promise<{ success: boolean; message: string; token?: string; user?: UserPublicProfile }> {
+    const cleanUser = (data.username || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    const cleanEmail = (data.email || '').trim().toLowerCase();
+    const cleanName = (data.name || '').trim();
+
+    if (!cleanName || cleanName.length < 2) {
+      return { success: false, message: 'Ingresa tu nombre y apellido completo.' };
+    }
+
+    if (!cleanUser || cleanUser.length < 3) {
+      return { success: false, message: 'El nombre de usuario debe tener al menos 3 caracteres alfanuméricos.' };
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return { success: false, message: 'Por favor ingresa una dirección de correo electrónico válida.' };
+    }
+
+    if (!data.passwordPlain || data.passwordPlain.length < 4) {
+      return { success: false, message: 'La contraseña debe tener al menos 4 caracteres.' };
+    }
+
+    if (this.users.some(u => u.username.toLowerCase() === cleanUser)) {
+      return { success: false, message: 'El nombre de usuario ya se encuentra registrado. Prueba con otro.' };
+    }
+
+    if (this.users.some(u => u.email.toLowerCase() === cleanEmail)) {
+      return { success: false, message: 'El correo electrónico ya está registrado. Inicia sesión o usa otro email.' };
+    }
+
+    const salt = bcrypt.genSaltSync(10);
+    const hash = bcrypt.hashSync(data.passwordPlain, salt);
+
+    const newUser: UserRecord = {
+      id: 'user_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      username: cleanUser,
+      email: cleanEmail,
+      name: cleanName,
+      passwordHash: hash,
+      role: 'operator',
+      active: true,
+      lastLoginAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    this.users.push(newUser);
+    this.saveLocalUsers();
+
+    // Sincronizar en Supabase Cloud
+    this.asyncInsertSupabase({
+      id: newUser.id,
+      username: newUser.username,
+      email: newUser.email,
+      name: newUser.name,
+      password_hash: newUser.passwordHash,
+      role: newUser.role,
+      active: newUser.active,
+      created_at: newUser.createdAt,
+      last_login_at: newUser.lastLoginAt,
+    });
+
+    logger.success('AUTH-REGISTER', `Nuevo usuario auto-registrado: @${newUser.username} (${newUser.email})`);
+
+    // Enviar notificación por Brevo o Resend
+    mailService.sendWelcomeEmail({
+      name: newUser.name,
+      username: newUser.username,
+      email: newUser.email,
+      role: 'Operador',
+    }).catch(err => logger.warn('MAIL', `Fallo al enviar notificación de registro: ${err.message}`));
+
+    // Generar JWT para login instantáneo
+    const payload = {
+      id: newUser.id,
+      username: newUser.username,
+      email: newUser.email,
+      name: newUser.name,
+      role: newUser.role,
+    };
+    const token = jwt.sign(payload, config.appSecret, { expiresIn: '7d' });
+
+    return {
+      success: true,
+      message: '¡Cuenta creada con éxito! Se ha enviado una confirmación a tu correo electrónico.',
+      token,
+      user: this.toPublicProfile(newUser),
+    };
   }
 
   public async updateUser(id: string, update: { name?: string; email?: string; role?: UserRecord['role']; active?: boolean }): Promise<{ success: boolean; message: string }> {

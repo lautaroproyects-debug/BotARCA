@@ -32,6 +32,7 @@ async function initApp() {
   await loadKeepAliveSettings();
   if (currentUser && currentUser.role === 'admin') {
     await loadUsersList();
+    await loadMailSettings();
   }
   connectLogsSSE();
 
@@ -40,13 +41,44 @@ async function initApp() {
   setInterval(loadQueueItems, 5000);
 }
 
-// --- AUTHENTICATION & LOGIN ---
+// --- AUTHENTICATION & LOGIN / REGISTER ---
 function showLoginOverlay() {
   document.getElementById('loginOverlay')?.classList.remove('hidden');
 }
 
 function hideLoginOverlay() {
   document.getElementById('loginOverlay')?.classList.add('hidden');
+}
+
+function switchAuthMode(mode) {
+  const loginForm = document.getElementById('loginForm');
+  const registerForm = document.getElementById('registerForm');
+  const tabLogin = document.getElementById('tabBtnLogin');
+  const tabRegister = document.getElementById('tabBtnRegister');
+
+  if (mode === 'register') {
+    loginForm?.classList.add('hidden');
+    registerForm?.classList.remove('hidden');
+
+    tabLogin?.classList.remove('text-amber-400', 'border-b-2', 'border-amber-400');
+    tabLogin?.classList.add('text-slate-400', 'border-transparent');
+
+    tabRegister?.classList.remove('text-slate-400', 'border-transparent');
+    tabRegister?.classList.add('text-amber-400', 'border-b-2', 'border-amber-400');
+
+    document.getElementById('regName')?.focus();
+  } else {
+    registerForm?.classList.add('hidden');
+    loginForm?.classList.remove('hidden');
+
+    tabRegister?.classList.remove('text-amber-400', 'border-b-2', 'border-amber-400');
+    tabRegister?.classList.add('text-slate-400', 'border-transparent');
+
+    tabLogin?.classList.remove('text-slate-400', 'border-transparent');
+    tabLogin?.classList.add('text-amber-400', 'border-b-2', 'border-amber-400');
+
+    document.getElementById('loginUsername')?.focus();
+  }
 }
 
 async function handleUserLogin(e) {
@@ -81,6 +113,55 @@ async function handleUserLogin(e) {
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<span>Ingresar al Sistema</span> <i class="fa-solid fa-arrow-right text-xs"></i>';
+  }
+}
+
+async function handleUserRegister(e) {
+  e.preventDefault();
+  const name = document.getElementById('regName').value.trim();
+  const username = document.getElementById('regUsername').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const confirm = document.getElementById('regPasswordConfirm').value;
+  const btn = document.getElementById('btnRegisterSubmit');
+
+  if (password !== confirm) {
+    showToast('Las contraseñas no coinciden.', 'warn');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Creando y enviando email...';
+
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, username, email, password })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast(data.message, 'success');
+      if (data.token) {
+        authToken = data.token;
+        localStorage.setItem('botarca_token', authToken);
+        currentUser = data.user;
+        hideLoginOverlay();
+        await initApp();
+      } else {
+        switchAuthMode('login');
+        document.getElementById('loginUsername').value = username;
+        document.getElementById('loginPassword').value = '';
+      }
+    } else {
+      showToast(data.message || 'Error al crear la cuenta.', 'error');
+    }
+  } catch (err) {
+    showToast('Error en la comunicación con el servidor.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span>Crear Usuario & Activar</span> <i class="fa-solid fa-paper-plane text-xs"></i>';
   }
 }
 
@@ -962,6 +1043,105 @@ async function syncUptimeRobotMonitor() {
     }
   } catch (e) {
     showToast('Error al sincronizar con UptimeRobot.', 'error');
+  }
+}
+
+// --- BREVO & RESEND MAIL NOTIFICATIONS ---
+async function loadMailSettings() {
+  try {
+    const res = await fetchWithAuth('/api/settings/mail');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.success && data.mail) {
+      const m = data.mail;
+      const provEl = document.getElementById('cfgMailProvider');
+      if (provEl && m.provider) provEl.value = m.provider;
+
+      const senderEmailEl = document.getElementById('cfgMailSenderEmail');
+      if (senderEmailEl && m.senderEmail) senderEmailEl.value = m.senderEmail;
+
+      const senderNameEl = document.getElementById('cfgMailSenderName');
+      if (senderNameEl && m.senderName) senderNameEl.value = m.senderName;
+
+      const adminEmailEl = document.getElementById('cfgAdminNotifyEmail');
+      if (adminEmailEl && m.adminNotifyEmail) adminEmailEl.value = m.adminNotifyEmail;
+
+      if (m.resendKeyMasked) {
+        const rk = document.getElementById('cfgResendKey');
+        if (rk) rk.placeholder = `Guardada (${m.resendKeyMasked})`;
+      }
+
+      if (m.brevoKeyMasked) {
+        const bk = document.getElementById('cfgBrevoKey');
+        if (bk) bk.placeholder = `Guardada (${m.brevoKeyMasked})`;
+      }
+
+      const badge = document.getElementById('mailStatusText');
+      if (badge) {
+        const provName = m.provider === 'resend' ? 'Resend API' : m.provider === 'brevo' ? 'Brevo API' : m.provider === 'simulation' ? 'Simulado' : 'Auto';
+        badge.innerText = `Modo: ${provName}`;
+      }
+    }
+  } catch (e) {}
+}
+
+async function handleSaveMailSettings(e) {
+  e.preventDefault();
+  const provider = document.getElementById('cfgMailProvider').value;
+  const resendApiKey = document.getElementById('cfgResendKey').value.trim();
+  const brevoApiKey = document.getElementById('cfgBrevoKey').value.trim();
+  const senderEmail = document.getElementById('cfgMailSenderEmail').value.trim();
+  const senderName = document.getElementById('cfgMailSenderName').value.trim();
+  const adminNotifyEmail = document.getElementById('cfgAdminNotifyEmail').value.trim();
+
+  try {
+    const res = await fetchWithAuth('/api/settings/mail', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider,
+        resendApiKey,
+        brevoApiKey,
+        senderEmail,
+        senderName,
+        adminNotifyEmail,
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast(data.message || 'Configuración de correo guardada.', 'success');
+      await loadMailSettings();
+    } else {
+      showToast(data.message || 'Error guardando configuración.', 'error');
+    }
+  } catch (e) {
+    showToast('Error en la conexión con el servidor.', 'error');
+  }
+}
+
+async function handleSendTestEmail() {
+  const testEmail = document.getElementById('cfgTestEmailInput').value.trim();
+  if (!testEmail) {
+    showToast('Ingresa una dirección de correo para enviar la prueba.', 'warn');
+    return;
+  }
+
+  showToast(`Enviando correo de prueba a ${testEmail}...`, 'info');
+
+  try {
+    const res = await fetchWithAuth('/api/settings/mail/test', {
+      method: 'POST',
+      body: JSON.stringify({ testEmail })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast('¡Email de prueba enviado con éxito!', 'success');
+    } else {
+      showToast(data.message || 'Error al enviar el email de prueba.', 'error');
+    }
+  } catch (e) {
+    showToast(`Error al enviar prueba: ${e.message}`, 'error');
   }
 }
 

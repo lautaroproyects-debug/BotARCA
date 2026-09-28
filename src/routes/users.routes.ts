@@ -23,6 +23,31 @@ router.post('/login', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
+// Registro público
+router.post('/register', async (req: AuthenticatedRequest, res: Response) => {
+  const { name, username, email, password } = req.body;
+
+  if (!name || !username || !email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Todos los campos son obligatorios (Nombre, Usuario, Email y Contraseña).',
+    });
+  }
+
+  const result = await userService.registerUser({
+    name,
+    username,
+    email,
+    passwordPlain: password,
+  });
+
+  if (result.success) {
+    res.status(201).json(result);
+  } else {
+    res.status(400).json(result);
+  }
+});
+
 // Perfil del usuario actual autenticado
 router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
   const user = userService.getUserById(req.user!.id);

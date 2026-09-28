@@ -37,21 +37,34 @@
 </head>
 <body class="bg-[#08090c] text-slate-100 min-h-screen font-sans antialiased flex flex-col selection:bg-amber-500 selection:text-black">
 
-  <!-- LOGIN OVERLAY -->
+  <!-- LOGIN & REGISTRATION OVERLAY -->
   <div id="loginOverlay" class="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-    <div class="card-panel max-w-sm w-full p-6 shadow-2xl space-y-5 border-obsidian-700">
+    <div class="card-panel max-w-md w-full p-6 shadow-2xl space-y-5 border-obsidian-700">
+      
+      <!-- Brand Header -->
       <div class="text-center space-y-1.5">
         <div class="w-10 h-10 mx-auto rounded-lg bg-obsidian-800 border border-obsidian-600 flex items-center justify-center text-amber-400 text-lg shadow-inner">
           <i class="fa-solid fa-bolt"></i>
         </div>
         <h2 class="text-lg font-bold tracking-tight text-white font-mono">BOTARCA ACCESS</h2>
-        <p class="text-xs text-slate-400">Ingresa con tus credenciales de operador o administrador.</p>
+        <p class="text-xs text-slate-400">Sistema Headless de Facturación ARCA & Gestión Cloud</p>
       </div>
 
+      <!-- Auth Mode Tabs -->
+      <div class="flex border-b border-obsidian-700 font-mono text-xs">
+        <button type="button" id="tabBtnLogin" onclick="switchAuthMode('login')" class="flex-1 pb-2 font-bold text-amber-400 border-b-2 border-amber-400 transition">
+          <i class="fa-solid fa-right-to-bracket mr-1.5"></i> Iniciar Sesión
+        </button>
+        <button type="button" id="tabBtnRegister" onclick="switchAuthMode('register')" class="flex-1 pb-2 font-bold text-slate-400 hover:text-slate-200 border-b-2 border-transparent transition">
+          <i class="fa-solid fa-user-plus mr-1.5"></i> Crear Usuario
+        </button>
+      </div>
+
+      <!-- VIEW 1: LOGIN FORM -->
       <form id="loginForm" onsubmit="handleUserLogin(event)" class="space-y-3.5">
         <div>
           <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Usuario / Email</label>
-          <input type="text" id="loginUsername" class="input-field" placeholder="admin" value="admin" required autofocus>
+          <input type="text" id="loginUsername" class="input-field" placeholder="admin o tu usuario" value="admin" required autofocus>
         </div>
 
         <div>
@@ -64,10 +77,57 @@
           <i class="fa-solid fa-arrow-right text-xs"></i>
         </button>
 
-        <div class="text-center pt-1 text-[11px] text-slate-500 font-mono">
-          Super Admin inicial: <span class="text-amber-400/90 font-bold">admin</span> / <span class="text-amber-400/90 font-bold">admin123</span>
+        <div class="text-center pt-2 text-[11px] text-slate-500 font-mono">
+          ¿No tienes una cuenta aún? <a href="javascript:void(0)" onclick="switchAuthMode('register')" class="text-amber-400 hover:underline font-bold">Crear Usuario</a>
         </div>
       </form>
+
+      <!-- VIEW 2: REGISTER FORM -->
+      <form id="registerForm" onsubmit="handleUserRegister(event)" class="space-y-3 hidden">
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Nombre y Apellido</label>
+          <input type="text" id="regName" class="input-field text-xs" placeholder="ej: Lucas González" required>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Usuario</label>
+            <input type="text" id="regUsername" class="input-field text-xs font-mono" placeholder="lucasg" required>
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Email</label>
+            <input type="email" id="regEmail" class="input-field text-xs font-mono" placeholder="lucas@empresa.com" required>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Contraseña</label>
+            <input type="password" id="regPassword" class="input-field text-xs" placeholder="••••••••" minlength="4" required>
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Confirmar</label>
+            <input type="password" id="regPasswordConfirm" class="input-field text-xs" placeholder="••••••••" minlength="4" required>
+          </div>
+        </div>
+
+        <div class="p-2.5 rounded bg-obsidian-850 border border-obsidian-700 text-[10px] text-slate-400 space-y-1">
+          <div class="flex items-center text-amber-400 font-bold">
+            <i class="fa-solid fa-envelope-circle-check mr-1.5"></i> Notificación automática
+          </div>
+          <div>Recibirás un email de bienvenida y confirmación de acceso vía <strong>Brevo / Resend</strong>.</div>
+        </div>
+
+        <button type="submit" id="btnRegisterSubmit" class="btn-gold w-full py-2.5 mt-2">
+          <span>Crear Usuario & Activar</span>
+          <i class="fa-solid fa-paper-plane text-xs"></i>
+        </button>
+
+        <div class="text-center pt-2 text-[11px] text-slate-500 font-mono">
+          ¿Ya tienes cuenta? <a href="javascript:void(0)" onclick="switchAuthMode('login')" class="text-amber-400 hover:underline font-bold">Iniciar Sesión</a>
+        </div>
+      </form>
+
     </div>
   </div>
 
@@ -785,6 +845,71 @@
                 <i class="fa-solid fa-satellite-dish text-amber-400 text-[10px]"></i> Sincronizar Monitor
               </button>
               <button type="submit" class="btn-gold !py-1.5 !px-4 text-xs">Guardar</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Brevo / Resend Email Notification Config (12 Cols) -->
+        <div class="lg:col-span-12 card-panel p-5 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-obsidian-700 pb-3 gap-2">
+            <div>
+              <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
+                <i class="fa-solid fa-envelope text-amber-400 mr-2"></i> Notificaciones de Usuario por Email (Brevo / Resend)
+              </h3>
+              <p class="text-[11px] text-slate-400 mt-0.5">Envía correos automáticos de bienvenida y credenciales al crear usuarios o registrarse.</p>
+            </div>
+            <div id="mailStatusBadge" class="text-[10px] font-mono px-2 py-1 rounded bg-obsidian-850 border border-obsidian-700 text-slate-400 flex items-center space-x-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+              <span id="mailStatusText">Modo: Auto</span>
+            </div>
+          </div>
+
+          <form onsubmit="handleSaveMailSettings(event)" class="space-y-3 font-mono">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Proveedor de Correo</label>
+                <select id="cfgMailProvider" class="input-field text-xs">
+                  <option value="auto">Auto-detectar (Por API Key)</option>
+                  <option value="resend">Resend API (Recomendado)</option>
+                  <option value="brevo">Brevo API (Sendinblue)</option>
+                  <option value="simulation">Simulación Local (Consola)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">API Key Resend (re_...)</label>
+                <input type="password" id="cfgResendKey" placeholder="re_123456789..." class="input-field text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">API Key Brevo (xkeysib-...)</label>
+                <input type="password" id="cfgBrevoKey" placeholder="xkeysib-..." class="input-field text-xs">
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Email Remitente (From)</label>
+                <input type="text" id="cfgMailSenderEmail" placeholder="onboarding@resend.dev o noreply@tuempresa.com" class="input-field text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Nombre Remitente</label>
+                <input type="text" id="cfgMailSenderName" placeholder="BotArca Cloud" class="input-field text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Email Notificaciones Admin</label>
+                <input type="email" id="cfgAdminNotifyEmail" placeholder="admin@tuempresa.com" class="input-field text-xs">
+              </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row items-center justify-between pt-3 border-t border-obsidian-700 gap-2">
+              <div class="flex items-center space-x-2 w-full sm:w-auto">
+                <input type="email" id="cfgTestEmailInput" placeholder="tu-email@gmail.com" class="input-field text-xs !py-1.5 max-w-[220px]">
+                <button type="button" onclick="handleSendTestEmail()" class="btn-secondary !py-1.5 !px-3 text-xs whitespace-nowrap">
+                  <i class="fa-solid fa-paper-plane text-[10px] mr-1 text-amber-400"></i> Probar Envío
+                </button>
+              </div>
+              <button type="submit" class="btn-gold !py-1.5 !px-5 text-xs w-full sm:w-auto">
+                Guardar Configuración de Correo
+              </button>
             </div>
           </form>
         </div>

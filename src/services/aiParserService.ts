@@ -111,32 +111,43 @@ Devuelve EXCLUSIVAMENTE un arreglo JSON válido (sin explicaciones, sin formato 
   }
 ]`;
 
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: rawText }
-        ],
-        temperature: 0.1,
-        max_tokens: 2048,
-        response_format: { type: 'json_object' }
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 15000
-      }
-    );
+    const modelsToTry = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+    let content = '';
 
-    const content = response.data?.choices?.[0]?.message?.content;
+    for (const modelName of modelsToTry) {
+      try {
+        const response = await axios.post(
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            model: modelName,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: rawText }
+            ],
+            temperature: 0.1,
+            max_tokens: 2048,
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${apiKey.trim()}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 15000
+          }
+        );
+
+        content = response.data?.choices?.[0]?.message?.content || '';
+        if (content) break;
+      } catch (err: any) {
+        logger.warn('AI-GROQ', `Modelo ${modelName} no disponible: ${err.message}. Probando siguiente...`);
+      }
+    }
+
     if (!content) return [];
 
     try {
-      const parsed = JSON.parse(content);
+      const cleanJson = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(cleanJson);
       const itemsArray: any[] = Array.isArray(parsed) 
         ? parsed 
         : (parsed.items || parsed.facturas || parsed.comprobantes || Object.values(parsed)[0] || []);

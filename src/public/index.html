@@ -113,9 +113,9 @@
 
         <div class="p-2.5 rounded bg-obsidian-850 border border-obsidian-700 text-[10px] text-slate-400 space-y-1">
           <div class="flex items-center text-amber-400 font-bold">
-            <i class="fa-solid fa-envelope-circle-check mr-1.5"></i> Notificación automática
+            <i class="fa-solid fa-circle-check mr-1.5"></i> Activación Inmediata
           </div>
-          <div>Recibirás un email de bienvenida y confirmación de acceso vía <strong>Brevo / Resend</strong>.</div>
+          <div>Tu cuenta se creará y quedará habilitada inmediatamente para facturar en ARCA.</div>
         </div>
 
         <button type="submit" id="btnRegisterSubmit" class="btn-gold w-full py-2.5 mt-2">
@@ -805,138 +805,129 @@
     </section>
 
     <!-- ========================================== -->
-    <!-- TAB 9: CONFIGURACIÓN & CLOUD CREDENTIALS   -->
+    <!-- TAB 9: PREFERENCIAS & ESTADO CLOUD         -->
     <!-- ========================================== -->
     <section id="tab-settings" class="tab-content hidden space-y-4">
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
         
-        <!-- Supabase Cloud Config (6 Cols) -->
+        <!-- Preferences (6 Cols) -->
         <div class="lg:col-span-6 card-panel p-5 space-y-4">
           <div class="border-b border-obsidian-700 pb-3">
             <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
-              <i class="fa-solid fa-database text-emerald-400 mr-2"></i> Base de Datos Cloud (Supabase)
+              <i class="fa-solid fa-sliders text-amber-400 mr-2"></i> Preferencias de Facturación
             </h3>
-            <p class="text-[11px] text-slate-400 mt-0.5">Sincroniza usuarios, clientes, comprobantes y cola en la nube.</p>
+            <p class="text-[11px] text-slate-400 mt-0.5">Configura los valores predeterminados para agilizar la emisión diaria.</p>
           </div>
 
-          <form onsubmit="handleSaveSupabase(event)" class="space-y-3">
+          <form onsubmit="handleSaveGeneralPreferences(event)" class="space-y-3.5 font-mono">
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Supabase Project URL</label>
-              <input type="url" id="cfgSupaUrl" placeholder="https://xyzcompany.supabase.co" class="input-field font-mono text-xs" required>
+              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Punto de Venta por Defecto</label>
+              <input type="number" id="prefPuntoVenta" value="1" min="1" max="9999" class="input-field text-xs font-bold" required>
             </div>
 
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Service Role / Anon Key</label>
-              <input type="password" id="cfgSupaKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5..." class="input-field font-mono text-xs" required>
+              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Concepto Predeterminado</label>
+              <select id="prefConcepto" class="input-field text-xs">
+                <option value="2" selected>2: Servicios (Honorarios, Consultoría, Desarrollo)</option>
+                <option value="1">1: Productos / Mercadería</option>
+                <option value="3">3: Productos y Servicios</option>
+              </select>
             </div>
 
-            <div class="flex items-center justify-between pt-2">
-              <span id="supaStatusBadgeForm" class="text-xs font-mono text-slate-400">Estado: Sin conectar</span>
-              <button type="submit" class="btn-gold !py-1.5 !px-4 text-xs">
-                Conectar Supabase
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Condición de Venta Predeterminada</label>
+              <select id="prefCondicionVenta" class="input-field text-xs">
+                <option value="Contado" selected>Contado</option>
+                <option value="Transferencia">Transferencia Bancaria</option>
+                <option value="Cuenta Corriente">Cuenta Corriente</option>
+                <option value="Tarjeta de Débito">Tarjeta de Débito</option>
+                <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Tipo de Comprobante Habitual</label>
+              <select id="prefTipoComprobante" class="input-field text-xs font-bold text-amber-400">
+                <option value="Factura C" selected>Factura C (Monotributo / Consumidor Final)</option>
+                <option value="Factura A">Factura A (Responsable Inscripto)</option>
+                <option value="Factura B">Factura B (RI a Consumidor Final)</option>
+                <option value="Recibo C">Recibo C</option>
+              </select>
+            </div>
+
+            <div class="pt-2 border-t border-obsidian-700 flex justify-end">
+              <button type="submit" class="btn-gold !py-2 !px-6 text-xs shadow">
+                Guardar Preferencias
               </button>
             </div>
           </form>
         </div>
 
-        <!-- Keep-Alive 24/7 (6 Cols) -->
+        <!-- Automated Cloud Status (6 Cols) -->
         <div class="lg:col-span-6 card-panel p-5 space-y-4">
-          <div class="border-b border-obsidian-700 pb-3">
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
-              <i class="fa-solid fa-heart-pulse text-emerald-400 mr-2"></i> Keep-Alive 24/7 (UptimeRobot / Render)
-            </h3>
-            <p class="text-[11px] text-slate-400 mt-0.5">Pings automáticos cada 5 minutos para disponibilidad continua.</p>
-          </div>
-
-          <form onsubmit="handleSaveKeepAlive(event)" class="space-y-3">
-            <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">URL Pública en Render</label>
-              <input type="url" id="cfgExternalUrl" placeholder="https://botarca.onrender.com" class="input-field font-mono text-xs">
-            </div>
-
-            <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">API Key UptimeRobot</label>
-              <input type="password" id="cfgUptimeRobotKey" placeholder="u3807259-da5acf1c8d7f897703ff3f2b" class="input-field font-mono text-xs">
-            </div>
-
-            <div class="flex items-center justify-between pt-2">
-              <button type="button" onclick="syncUptimeRobotMonitor()" class="btn-secondary !py-1.5 !px-3 text-xs">
-                <i class="fa-solid fa-satellite-dish text-amber-400 text-[10px]"></i> Sincronizar Monitor
-              </button>
-              <button type="submit" class="btn-gold !py-1.5 !px-4 text-xs">Guardar</button>
-            </div>
-          </form>
-        </div>
-
-        <!-- Brevo / Resend Email Notification Config (12 Cols) -->
-        <div class="lg:col-span-12 card-panel p-5 space-y-4">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-obsidian-700 pb-3 gap-2">
+          <div class="border-b border-obsidian-700 pb-3 flex items-center justify-between">
             <div>
               <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
-                <i class="fa-solid fa-envelope text-amber-400 mr-2"></i> Notificaciones de Usuario por Email (Brevo / Resend)
+                <i class="fa-solid fa-cloud-bolt text-emerald-400 mr-2"></i> Servicios Cloud Autogestionados
               </h3>
-              <p class="text-[11px] text-slate-400 mt-0.5">Envía correos automáticos de bienvenida y credenciales al crear usuarios o registrarse.</p>
+              <p class="text-[11px] text-slate-400 mt-0.5">Toda la infraestructura en la nube opera 100% en automático.</p>
             </div>
-            <div id="mailStatusBadge" class="text-[10px] font-mono px-2 py-1 rounded bg-obsidian-850 border border-obsidian-700 text-slate-400 flex items-center space-x-1.5">
-              <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-              <span id="mailStatusText">Modo: Auto</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold font-mono">
+              En Línea 24/7
+            </span>
+          </div>
+
+          <div class="space-y-2.5 font-mono text-xs">
+            <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 flex items-center justify-between">
+              <div class="flex items-center space-x-2.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <div>
+                  <div class="text-slate-200 font-bold">Servidor Cloud & Keep-Alive</div>
+                  <div class="text-[10px] text-slate-500">Ejecución continua en Render sin descargas locales</div>
+                </div>
+              </div>
+              <span class="text-emerald-400 text-[11px] font-bold">Activo</span>
+            </div>
+
+            <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 flex items-center justify-between">
+              <div class="flex items-center space-x-2.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <div>
+                  <div class="text-slate-200 font-bold">Base de Datos Cloud</div>
+                  <div class="text-[10px] text-slate-500">Sincronización en tiempo real con Supabase</div>
+                </div>
+              </div>
+              <span class="text-emerald-400 text-[11px] font-bold">Conectada</span>
+            </div>
+
+            <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 flex items-center justify-between">
+              <div class="flex items-center space-x-2.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <div>
+                  <div class="text-slate-200 font-bold">Inteligencia Artificial (Groq IA)</div>
+                  <div class="text-[10px] text-slate-500">Lectura instantánea de chats de WhatsApp y Excel</div>
+                </div>
+              </div>
+              <span class="text-emerald-400 text-[11px] font-bold">Lista</span>
+            </div>
+
+            <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 flex items-center justify-between">
+              <div class="flex items-center space-x-2.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <div>
+                  <div class="text-slate-200 font-bold">Motor de Facturación ARCA</div>
+                  <div class="text-[10px] text-slate-500">Playwright Headless con evasión Anti-WAF</div>
+                </div>
+              </div>
+              <span class="text-emerald-400 text-[11px] font-bold">Operativo</span>
             </div>
           </div>
 
-          <form onsubmit="handleSaveMailSettings(event)" class="space-y-3 font-mono">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Proveedor de Correo</label>
-                <select id="cfgMailProvider" class="input-field text-xs">
-                  <option value="auto">Auto-detectar (Por API Key)</option>
-                  <option value="resend">Resend API (Recomendado)</option>
-                  <option value="brevo">Brevo API (Sendinblue)</option>
-                  <option value="simulation">Simulación Local (Consola)</option>
-                </select>
-              </div>
-              <div>
-                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">API Key Resend (re_...)</label>
-                <input type="password" id="cfgResendKey" placeholder="re_123456789..." class="input-field text-xs">
-              </div>
-              <div>
-                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">API Key Brevo (xkeysib-...)</label>
-                <input type="password" id="cfgBrevoKey" placeholder="xkeysib-..." class="input-field text-xs">
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div>
-                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Email Remitente (From)</label>
-                <input type="text" id="cfgMailSenderEmail" placeholder="onboarding@resend.dev o noreply@tuempresa.com" class="input-field text-xs">
-              </div>
-              <div>
-                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Nombre Remitente</label>
-                <input type="text" id="cfgMailSenderName" placeholder="BotArca Cloud" class="input-field text-xs">
-              </div>
-              <div>
-                <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Email Alertas Admin</label>
-                <input type="email" id="cfgAdminNotifyEmail" placeholder="admin@tuempresa.com" class="input-field text-xs">
-              </div>
-              <div>
-                <label class="block text-[10px] font-semibold text-amber-400 uppercase mb-1 flex items-center">
-                  <i class="fa-solid fa-brain text-[10px] mr-1"></i> API Key Groq (IA Llama 70B)
-                </label>
-                <input type="password" id="cfgGroqKey" placeholder="gsk_..." class="input-field text-xs">
-              </div>
-            </div>
-
-            <div class="flex flex-col sm:flex-row items-center justify-between pt-3 border-t border-obsidian-700 gap-2">
-              <div class="flex items-center space-x-2 w-full sm:w-auto">
-                <input type="email" id="cfgTestEmailInput" placeholder="tu-email@gmail.com" class="input-field text-xs !py-1.5 max-w-[220px]">
-                <button type="button" onclick="handleSendTestEmail()" class="btn-secondary !py-1.5 !px-3 text-xs whitespace-nowrap">
-                  <i class="fa-solid fa-paper-plane text-[10px] mr-1 text-amber-400"></i> Probar Envío
-                </button>
-              </div>
-              <button type="submit" class="btn-gold !py-1.5 !px-5 text-xs w-full sm:w-auto">
-                Guardar Configuración (Email & Groq IA)
-              </button>
-            </div>
-          </form>
+          <div class="pt-1 flex justify-end">
+            <button type="button" onclick="checkCloudHealthStatus()" class="btn-secondary !py-1.5 !px-3 text-xs font-mono">
+              <i class="fa-solid fa-rotate text-amber-400 mr-1 text-[10px]"></i> Verificar Estado de Conexión
+            </button>
+          </div>
         </div>
 
       </div>

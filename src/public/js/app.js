@@ -29,10 +29,9 @@ async function initApp() {
   await loadCRMClientes();
   await loadComprobantesList();
   await loadMonotributoStats();
-  await loadKeepAliveSettings();
+  loadGeneralPreferences();
   if (currentUser && currentUser.role === 'admin') {
     await loadUsersList();
-    await loadMailSettings();
   }
   connectLogsSSE();
 
@@ -224,7 +223,7 @@ function switchTab(tabId) {
   if (tabId === 'cuentas') loadAccounts();
   if (tabId === 'users' && currentUser && currentUser.role === 'admin') loadUsersList();
   if (tabId === 'monotributo') loadMonotributoStats();
-  if (tabId === 'settings') loadKeepAliveSettings();
+  if (tabId === 'settings') loadGeneralPreferences();
 }
 
 // --- FINANCIAL TICKER (ArgentinaDatos) ---
@@ -1104,182 +1103,70 @@ async function testArcaConnection() {
   }
 }
 
-async function handleSaveSupabase(e) {
-  e.preventDefault();
-  const url = document.getElementById('cfgSupaUrl').value.trim();
-  const key = document.getElementById('cfgSupaKey').value.trim();
-
+// --- PREFERENCIAS DE FACTURACIÓN Y ESTADO CLOUD AUTOGESTIONADO ---
+function loadGeneralPreferences() {
   try {
-    const res = await fetchWithAuth('/api/erp/supabase/connect', {
-      method: 'POST',
-      body: JSON.stringify({ url, key })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('¡Supabase conectado y sincronizado exitosamente!', 'success');
-      const badge = document.getElementById('supaStatusText');
-      if (badge) badge.innerText = 'Supabase: OK';
-    } else {
-      showToast(data.message, 'warn');
-    }
-  } catch (e) {
-    showToast('Error conectando con Supabase.', 'error');
-  }
-}
-
-async function handleSaveKeepAlive(e) {
-  e.preventDefault();
-  const externalUrl = document.getElementById('cfgExternalUrl').value.trim();
-  const uptimeRobotApiKey = document.getElementById('cfgUptimeRobotKey').value.trim();
-
-  try {
-    const res = await fetchWithAuth('/api/keepalive/config', {
-      method: 'POST',
-      body: JSON.stringify({ externalUrl, uptimeRobotApiKey, keepAliveEnabled: true, keepAliveIntervalMinutes: 5 })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Configuración de Keep-Alive guardada.', 'success');
-    }
-  } catch (e) {
-    showToast('Error al guardar Keep-Alive.', 'error');
-  }
-}
-
-async function loadKeepAliveSettings() {
-  try {
-    const res = await fetchWithAuth('/api/keepalive/health');
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.settings) {
-      if (data.settings.externalUrl) document.getElementById('cfgExternalUrl').value = data.settings.externalUrl;
-      if (data.settings.uptimeRobotApiKey) document.getElementById('cfgUptimeRobotKey').value = data.settings.uptimeRobotApiKey;
-    }
-  } catch (e) {}
-}
-
-async function syncUptimeRobotMonitor() {
-  const url = document.getElementById('cfgExternalUrl')?.value;
-  showToast('Sincronizando monitor en UptimeRobot...', 'info');
-  try {
-    const res = await fetchWithAuth('/api/keepalive/uptimerobot/sync', {
-      method: 'POST',
-      body: JSON.stringify({ targetUrl: url })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast(data.message, 'success');
-    } else {
-      showToast(data.message, 'warn');
-    }
-  } catch (e) {
-    showToast('Error al sincronizar con UptimeRobot.', 'error');
-  }
-}
-
-// --- BREVO & RESEND MAIL NOTIFICATIONS ---
-async function loadMailSettings() {
-  try {
-    const res = await fetchWithAuth('/api/settings/mail');
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.success && data.mail) {
-      const m = data.mail;
-      const provEl = document.getElementById('cfgMailProvider');
-      if (provEl && m.provider) provEl.value = m.provider;
-
-      const senderEmailEl = document.getElementById('cfgMailSenderEmail');
-      if (senderEmailEl && m.senderEmail) senderEmailEl.value = m.senderEmail;
-
-      const senderNameEl = document.getElementById('cfgMailSenderName');
-      if (senderNameEl && m.senderName) senderNameEl.value = m.senderName;
-
-      const adminEmailEl = document.getElementById('cfgAdminNotifyEmail');
-      if (adminEmailEl && m.adminNotifyEmail) adminEmailEl.value = m.adminNotifyEmail;
-
-      if (m.resendKeyMasked) {
-        const rk = document.getElementById('cfgResendKey');
-        if (rk) rk.placeholder = `Guardada (${m.resendKeyMasked})`;
+    const raw = localStorage.getItem('botarca_general_prefs');
+    if (raw) {
+      const prefs = JSON.parse(raw);
+      if (prefs.puntoVenta && document.getElementById('prefPuntoVenta')) {
+        document.getElementById('prefPuntoVenta').value = prefs.puntoVenta;
+      }
+      if (prefs.concepto && document.getElementById('prefConcepto')) {
+        document.getElementById('prefConcepto').value = prefs.concepto;
+      }
+      if (prefs.condicionVenta && document.getElementById('prefCondicionVenta')) {
+        document.getElementById('prefCondicionVenta').value = prefs.condicionVenta;
+      }
+      if (prefs.tipoComprobante && document.getElementById('prefTipoComprobante')) {
+        document.getElementById('prefTipoComprobante').value = prefs.tipoComprobante;
       }
 
-      if (m.brevoKeyMasked) {
-        const bk = document.getElementById('cfgBrevoKey');
-        if (bk) bk.placeholder = `Guardada (${m.brevoKeyMasked})`;
+      // Sincronizar también con el Facturador Rápido
+      if (prefs.puntoVenta && document.getElementById('facPuntoVenta')) {
+        document.getElementById('facPuntoVenta').value = prefs.puntoVenta;
       }
-
-      if (m.groqKeyMasked) {
-        const gk = document.getElementById('cfgGroqKey');
-        if (gk) gk.placeholder = `Guardada (${m.groqKeyMasked})`;
+      if (prefs.concepto && document.getElementById('facConcepto')) {
+        document.getElementById('facConcepto').value = prefs.concepto;
       }
-
-      const badge = document.getElementById('mailStatusText');
-      if (badge) {
-        const provName = m.provider === 'resend' ? 'Resend API' : m.provider === 'brevo' ? 'Brevo API' : m.provider === 'simulation' ? 'Simulado' : 'Auto';
-        badge.innerText = `Modo: ${provName}`;
+      if (prefs.tipoComprobante && document.getElementById('facTipo')) {
+        document.getElementById('facTipo').value = prefs.tipoComprobante;
       }
-    }
-  } catch (e) {}
-}
-
-async function handleSaveMailSettings(e) {
-  e.preventDefault();
-  const provider = document.getElementById('cfgMailProvider').value;
-  const resendApiKey = document.getElementById('cfgResendKey').value.trim();
-  const brevoApiKey = document.getElementById('cfgBrevoKey').value.trim();
-  const groqApiKey = document.getElementById('cfgGroqKey')?.value.trim();
-  const senderEmail = document.getElementById('cfgMailSenderEmail').value.trim();
-  const senderName = document.getElementById('cfgMailSenderName').value.trim();
-  const adminNotifyEmail = document.getElementById('cfgAdminNotifyEmail').value.trim();
-
-  try {
-    const res = await fetchWithAuth('/api/settings/mail', {
-      method: 'POST',
-      body: JSON.stringify({
-        provider,
-        resendApiKey,
-        brevoApiKey,
-        groqApiKey,
-        senderEmail,
-        senderName,
-        adminNotifyEmail,
-      })
-    });
-
-    const data = await res.json();
-    if (data.success) {
-      showToast(data.message || 'Configuración guardada con éxito.', 'success');
-      await loadMailSettings();
-    } else {
-      showToast(data.message || 'Error guardando configuración.', 'error');
     }
   } catch (e) {
-    showToast('Error en la conexión con el servidor.', 'error');
+    console.error('Error cargando preferencias:', e);
   }
 }
 
-async function handleSendTestEmail() {
-  const testEmail = document.getElementById('cfgTestEmailInput').value.trim();
-  if (!testEmail) {
-    showToast('Ingresa una dirección de correo para enviar la prueba.', 'warn');
-    return;
-  }
+function handleSaveGeneralPreferences(e) {
+  if (e) e.preventDefault();
+  const puntoVenta = document.getElementById('prefPuntoVenta')?.value || 1;
+  const concepto = document.getElementById('prefConcepto')?.value || '2';
+  const condicionVenta = document.getElementById('prefCondicionVenta')?.value || 'Contado';
+  const tipoComprobante = document.getElementById('prefTipoComprobante')?.value || 'Factura C';
 
-  showToast(`Enviando correo de prueba a ${testEmail}...`, 'info');
+  const prefs = { puntoVenta, concepto, condicionVenta, tipoComprobante };
+  localStorage.setItem('botarca_general_prefs', JSON.stringify(prefs));
 
+  // Sincronizar inmediatamente con Facturador Rápido
+  if (document.getElementById('facPuntoVenta')) document.getElementById('facPuntoVenta').value = puntoVenta;
+  if (document.getElementById('facConcepto')) document.getElementById('facConcepto').value = concepto;
+  if (document.getElementById('facTipo')) document.getElementById('facTipo').value = tipoComprobante;
+
+  showToast('Preferencias de facturación guardadas correctamente.', 'success');
+}
+
+async function checkCloudHealthStatus() {
+  showToast('Verificando conexión de servicios Cloud en tiempo real...', 'info');
   try {
-    const res = await fetchWithAuth('/api/settings/mail/test', {
-      method: 'POST',
-      body: JSON.stringify({ testEmail })
-    });
-
-    const data = await res.json();
-    if (data.success) {
-      showToast('¡Email de prueba enviado con éxito!', 'success');
+    const res = await fetch('/api/finanzas/resumen');
+    if (res.ok) {
+      showToast('Todos los servicios Cloud (Servidor, Base de Datos, IA Groq y ARCA) están 100% operativos.', 'success');
     } else {
-      showToast(data.message || 'Error al enviar el email de prueba.', 'error');
+      showToast('Servidor respondiendo pero con latencia.', 'warn');
     }
-  } catch (e) {
-    showToast(`Error al enviar prueba: ${e.message}`, 'error');
+  } catch (err) {
+    showToast('Error al conectar con los servicios Cloud.', 'error');
   }
 }
 

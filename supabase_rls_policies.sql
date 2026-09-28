@@ -9,8 +9,24 @@
 -- 1. HABILITAR EXTENSIÓN UUID (SI NO ESTÁ ACTIVA)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. TABLA: usuarios
+-- 2. TABLA: usuarios (CON RESTRICCIÓN DE UNICIDAD EN EMAIL Y USERNAME)
 -- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.usuarios (
+  id TEXT PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'operator',
+  active BOOLEAN NOT NULL DEFAULT true,
+  last_login_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Índices únicos para prevenir colisiones o duplicados
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email_lower ON public.usuarios (LOWER(email));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_username_lower ON public.usuarios (LOWER(username));
+
 ALTER TABLE IF EXISTS public.usuarios ENABLE ROW LEVEL SECURITY;
 
 -- Política: El backend (service_role) tiene acceso total para administración

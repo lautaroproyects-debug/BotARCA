@@ -361,7 +361,14 @@ class UserService {
     if (!user) return { success: false, message: 'Usuario no encontrado.' };
 
     if (update.name !== undefined) user.name = update.name.trim();
-    if (update.email !== undefined) user.email = update.email.trim().toLowerCase();
+    if (update.email !== undefined) {
+      const cleanEmail = update.email.trim().toLowerCase();
+      const duplicate = this.users.find(u => u.email.toLowerCase() === cleanEmail && u.id !== id);
+      if (duplicate) {
+        return { success: false, message: 'El correo electrónico ya está registrado por otro usuario.' };
+      }
+      user.email = cleanEmail;
+    }
     if (update.role !== undefined) user.role = update.role;
     if (update.active !== undefined) user.active = Boolean(update.active);
 

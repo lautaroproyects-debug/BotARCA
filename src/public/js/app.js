@@ -1,12 +1,14 @@
 /**
- * BotArca Frontend Core Engine
- * Minimalist, high-reliability controller for ARCA headless automation and invoicing
+ * BotArca Core Frontend Controller
+ * Complete high-performance dashboard for ARCA batch invoicing, multi-cuit accounts, and user management
  */
 
 let authToken = localStorage.getItem('botarca_token') || '';
 let currentUser = null;
+let allAccounts = [];
 let allClients = [];
 let allComprobantes = [];
+let parsedExcelItems = [];
 let sseSource = null;
 
 // --- INITIALIZATION ---
@@ -21,16 +23,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function initApp() {
   await loadCurrentUser();
+  await loadAccounts();
   await loadFinancialTicker();
-  await loadAuthStatus();
+  await loadQueueItems();
   await loadCRMClientes();
   await loadComprobantesList();
   await loadMonotributoStats();
   await loadKeepAliveSettings();
+  if (currentUser && currentUser.role === 'admin') {
+    await loadUsersList();
+  }
   connectLogsSSE();
 
-  // Polling discreto de cotizaciones financieras cada 60 segundos
+  // Polling automático
   setInterval(loadFinancialTicker, 60000);
+  setInterval(loadQueueItems, 5000);
 }
 
 // --- AUTHENTICATION & LOGIN ---
@@ -67,13 +74,13 @@ async function handleUserLogin(e) {
       showToast(`¡Bienvenido, ${data.user.name || data.user.username}!`, 'success');
       await initApp();
     } else {
-      showToast(data.message || 'Credenciales incorrectas.', 'error');
+      showToast(data.message || 'Usuario o contraseña incorrectos.', 'error');
     }
   } catch (err) {
-    showToast('Error de conexión con el servidor.', 'error');
+    showToast('Error conectando con el servidor.', 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span>Iniciar Sesión</span> <i class="fa-solid fa-arrow-right text-xs"></i>';
+    btn.innerHTML = '<span>Ingresar al Sistema</span> <i class="fa-solid fa-arrow-right text-xs"></i>';
   }
 }
 
@@ -88,12 +95,18 @@ function handleUserLogout() {
 
 async function loadCurrentUser() {
   try {
-    const res = await fetchWithAuth('/api/users/me');
+    const res = await fetchWithAuth('/api/auth/me');
     if (res.ok) {
       const data = await res.json();
       currentUser = data.user;
       const el = document.getElementById('headerUserName');
       if (el) el.innerText = currentUser.username;
+
+      const navUsers = document.getElementById('navTabUsers');
+      if (navUsers) {
+        if (currentUser.role === 'admin') navUsers.classList.remove('hidden');
+        else navUsers.classList.add('hidden');
+      }
     }
   } catch (e) {}
 }
@@ -106,9 +119,9 @@ async function fetchWithAuth(url, options = {}) {
   };
 
   const response = await fetch(url, { ...options, headers });
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     handleUserLogout();
-    throw new Error('Sesión expirada');
+    throw new Error('Sesión no autorizada');
   }
   return response;
 }
@@ -124,13 +137,16 @@ function switchTab(tabId) {
   const targetBtn = document.querySelector(`.nav-tab-btn[data-tab="${tabId}"]`);
   if (targetBtn) targetBtn.classList.add('active');
 
+  if (tabId === 'cola') loadQueueItems();
   if (tabId === 'comprobantes') loadComprobantesList();
   if (tabId === 'crm') loadCRMClientes();
+  if (tabId === 'cuentas') loadAccounts();
+  if (tabId === 'users' && currentUser && currentUser.role === 'admin') loadUsersList();
   if (tabId === 'monotributo') loadMonotributoStats();
   if (tabId === 'settings') loadKeepAliveSettings();
 }
 
-// --- DISCRETE FINANCIAL TICKER (ArgentinaDatos) ---
+// --- FINANCIAL TICKER (ArgentinaDatos) ---
 async function loadFinancialTicker() {
   try {
     const res = await fetch('/api/finanzas/resumen');
@@ -138,49 +154,424 @@ async function loadFinancialTicker() {
     const data = await res.json();
 
     const d = data.dolares || {};
-    if (d.oficial) {
-      document.getElementById('tickOficial').innerText = `$${d.oficial.compra} / $${d.oficial.venta}`;
-    }
-    if (d.blue) {
-      document.getElementById('tickBlue').innerText = `$${d.blue.venta}`;
-    }
-    if (d.mep) {
-      document.getElementById('tickMep').innerText = `$${d.mep.venta || d.mep.compra}`;
-    }
-    if (d.ccl) {
-      document.getElementById('tickCcl').innerText = `$${d.ccl.venta || d.ccl.compra}`;
-    }
-    if (data.inflacion && data.inflacion.ultimoIpc) {
-      document.getElementById('tickIpc').innerText = `${data.inflacion.ultimoIpc.valor}%`;
-    }
-    if (data.uva && data.uva.ultimoValor) {
-      document.getElementById('tickUva').innerText = `$${data.uva.ultimoValor.valor}`;
-    }
+    if (d.oficial) document.getElementById('tickOficial').innerText = `$${d.oficial.compra} / $${d.oficial.venta}`;
+    if (d.blue) document.getElementById('tickBlue').innerText = `$${d.blue.venta}`;
+    if (d.mep) document.getElementById('tickMep').innerText = `$${d.mep.venta || d.mep.compra}`;
+    if (d.ccl) document.getElementById('tickCcl').innerText = `$${d.ccl.venta || d.ccl.compra}`;
+    if (data.inflacion?.ultimoIpc) document.getElementById('tickIpc').innerText = `${data.inflacion.ultimoIpc.valor}%`;
+    if (data.uva?.ultimoValor) document.getElementById('tickUva').innerText = `$${data.uva.ultimoValor.valor}`;
 
     const updatedEl = document.getElementById('tickerUpdated');
-    if (updatedEl) {
-      updatedEl.innerText = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    if (updatedEl) updatedEl.innerText = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {}
+}
+
+// --- MULTI-ACCOUNT CUIT MANAGEMENT ---
+async function loadAccounts() {
+  try {
+    const res = await fetchWithAuth('/api/accounts');
+    if (!res.ok) return;
+    const data = await res.json();
+    allAccounts = data.accounts || [];
+
+    // Header selector
+    const headerSel = document.getElementById('headerAccountSelect');
+    if (headerSel) {
+      if (allAccounts.length === 0) {
+        headerSel.innerHTML = '<option value="">Sin CUIT configurado</option>';
+      } else {
+        headerSel.innerHTML = allAccounts.map(a => `
+          <option value="${a.cuit}" ${a.cuit === data.activeCuit ? 'selected' : ''}>
+            CUIT: ${formatCuit(a.cuit)} (${escapeHtml(a.razonSocial || 'Cuenta')})
+          </option>
+        `).join('');
+      }
+    }
+
+    // Grid in accounts tab
+    const grid = document.getElementById('accountsGrid');
+    if (grid) {
+      if (allAccounts.length === 0) {
+        grid.innerHTML = '<div class="col-span-full py-8 text-center text-slate-500">No hay cuentas fiscales registradas aún.</div>';
+      } else {
+        grid.innerHTML = allAccounts.map(a => `
+          <div class="p-4 bg-obsidian-850 border ${a.cuit === data.activeCuit ? 'border-amber-500/60 bg-amber-950/10' : 'border-obsidian-700'} rounded space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-200 truncate">${escapeHtml(a.razonSocial || 'Empresa')}</span>
+              ${a.cuit === data.activeCuit ? '<span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[10px] font-bold">ACTIVA</span>' : ''}
+            </div>
+            <div class="text-[11px] text-slate-400">CUIT: <strong class="text-white select-all">${formatCuit(a.cuit)}</strong></div>
+            <div class="text-[10px] text-slate-500">Punto de Venta: ${a.puntoVentaDefault || 1}</div>
+            <div class="pt-2 border-t border-obsidian-800 flex justify-between items-center">
+              ${a.cuit !== data.activeCuit ? `<button onclick="switchActiveCuitAccount('${a.cuit}')" class="text-[11px] text-amber-400 hover:text-amber-300 font-bold">Seleccionar como Emisor</button>` : '<span class="text-[10px] text-emerald-400">Emisor por defecto</span>'}
+            </div>
+          </div>
+        `).join('');
+      }
     }
   } catch (e) {}
 }
 
-// --- FAST INVOICING (Facturador Rápido) ---
+async function switchActiveCuitAccount(cuit) {
+  if (!cuit) return;
+  try {
+    const res = await fetchWithAuth('/api/accounts/switch', {
+      method: 'POST',
+      body: JSON.stringify({ cuit })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Emisor cambiado a CUIT ${cuit}.`, 'success');
+      await loadAccounts();
+      await loadAuthStatus();
+    }
+  } catch (e) {
+    showToast('Error al cambiar cuenta.', 'error');
+  }
+}
+
+function openNewAccountModal() {
+  document.getElementById('accountModal')?.classList.remove('hidden');
+}
+
+function closeAccountModal() {
+  document.getElementById('accountModal')?.classList.add('hidden');
+}
+
+async function handleSaveAccount(e) {
+  e.preventDefault();
+  const cuit = document.getElementById('accCuit').value.trim();
+  const razonSocial = document.getElementById('accRazonSocial').value.trim();
+  const claveFiscal = document.getElementById('accClaveFiscal').value;
+  const puntoVentaDefault = parseInt(document.getElementById('accPuntoVenta').value || '1', 10);
+
+  try {
+    const res = await fetchWithAuth('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify({ cuit, razonSocial, claveFiscal, puntoVentaDefault })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Cuenta fiscal guardada y activada con éxito.', 'success');
+      closeAccountModal();
+      await loadAccounts();
+      await loadAuthStatus();
+    } else {
+      showToast(data.message, 'error');
+    }
+  } catch (e) {
+    showToast('Error al guardar cuenta.', 'error');
+  }
+}
+
+// --- EXCEL & CSV PASTING (CARGA MASIVA) ---
+async function handleExcelPasteChange(text) {
+  if (!text || text.trim().length === 0) {
+    parsedExcelItems = [];
+    renderExcelPreview([]);
+    return;
+  }
+
+  try {
+    const res = await fetchWithAuth('/api/queue/parse-excel', {
+      method: 'POST',
+      body: JSON.stringify({ text })
+    });
+    const data = await res.json();
+    if (data.success) {
+      parsedExcelItems = data.items || [];
+      renderExcelPreview(parsedExcelItems);
+    }
+  } catch (e) {}
+}
+
+function renderExcelPreview(items) {
+  const tbody = document.getElementById('excelPreviewTbody');
+  const countText = document.getElementById('excelParsedCountText');
+  const totalDisplay = document.getElementById('excelPreviewTotal');
+  const btnAdd = document.getElementById('btnAddToQueue');
+
+  if (countText) countText.innerText = `${items.length} filas válidas detectadas`;
+
+  let sum = 0;
+  items.forEach(i => sum += (i.importeTotal || 0));
+  if (totalDisplay) totalDisplay.innerText = `$${sum.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+
+  if (btnAdd) btnAdd.disabled = items.length === 0;
+
+  if (!tbody) return;
+  if (items.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-500">Pega filas arriba para previsualizar.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = items.map((it, idx) => `
+    <tr class="hover:bg-obsidian-850/60">
+      <td class="py-2 px-3 text-slate-500">${idx + 1}</td>
+      <td class="py-2 px-3 font-semibold text-slate-200 select-all">${it.docNro}</td>
+      <td class="py-2 px-3 text-slate-300 truncate max-w-[180px]">${escapeHtml(it.razonSocial)}</td>
+      <td class="py-2 px-3 text-slate-400 truncate max-w-[200px]">${escapeHtml(it.descripcion)}</td>
+      <td class="py-2 px-3 text-amber-400 font-semibold">${it.tipoComprobante}</td>
+      <td class="py-2 px-3 text-right font-bold text-slate-100">$${it.importeTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+    </tr>
+  `).join('');
+}
+
+function loadSampleExcelData() {
+  const sample = `30712345678\tEmpresa Alpha SRL\tServicios de Desarrollo de Software\t250000
+20309998887\tMartín Rodríguez\tHonorarios Profesionales de Consultoría\t120000
+30654321098\tGlobal Trade SA\tMantenimiento y soporte mensual IT\t180000
+27321112223\tLucía Benítez\tAsesoramiento contable e impositivo\t95000`;
+  const area = document.getElementById('excelPasteArea');
+  if (area) {
+    area.value = sample;
+    handleExcelPasteChange(sample);
+  }
+}
+
+function clearExcelPasteArea() {
+  const area = document.getElementById('excelPasteArea');
+  if (area) {
+    area.value = '';
+    handleExcelPasteChange('');
+  }
+}
+
+async function submitExcelBatchToQueue() {
+  if (parsedExcelItems.length === 0) {
+    showToast('No hay filas para agregar a la cola.', 'warn');
+    return;
+  }
+
+  const btn = document.getElementById('btnAddToQueue');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Agregando...';
+
+  try {
+    const res = await fetchWithAuth('/api/queue/add', {
+      method: 'POST',
+      body: JSON.stringify({ items: parsedExcelItems })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`¡${data.count} facturas agregadas a la cola de emisión!`, 'success');
+      clearExcelPasteArea();
+      switchTab('cola');
+      await loadQueueItems();
+    } else {
+      showToast(data.message, 'error');
+    }
+  } catch (e) {
+    showToast('Error al agregar a la cola.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-plus text-[11px]"></i> <span>AGREGAR A LA COLA DE FACTURACIÓN</span>';
+  }
+}
+
+// --- LIVE QUEUE ENGINE (COLA DE FACTURACIÓN) ---
+async function loadQueueItems() {
+  try {
+    const res = await fetchWithAuth('/api/queue');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const badgePendientes = document.getElementById('badgeColaPendientes');
+    const qPend = document.getElementById('queueCountPendientes');
+    const qEmit = document.getElementById('queueCountEmitidas');
+    const btnProcess = document.getElementById('btnProcessQueue');
+    const cockpit = document.getElementById('cockpitBanner');
+
+    if (badgePendientes) badgePendientes.innerText = data.pendientes || 0;
+    if (qPend) qPend.innerText = `${data.pendientes || 0} pendientes`;
+    if (qEmit) qEmit.innerText = `${data.emitidas || 0} emitidas`;
+
+    if (btnProcess) btnProcess.disabled = data.isProcessing || data.pendientes === 0;
+
+    // Cockpit status
+    if (cockpit) {
+      if (data.isProcessing) {
+        cockpit.classList.remove('hidden');
+        const pct = data.total > 0 ? Math.round(((data.emitidas + data.errores) / data.total) * 100) : 0;
+        document.getElementById('cockpitPercent').innerText = `${pct}%`;
+        document.getElementById('cockpitProgressBar').style.width = `${pct}%`;
+        document.getElementById('cockpitStatusMsg').innerText = `Procesando lote en ARCA: ${data.emitidas + data.errores} de ${data.total} comprobantes procesados...`;
+      } else {
+        cockpit.classList.add('hidden');
+      }
+    }
+
+    renderQueueTable(data.items || []);
+  } catch (e) {}
+}
+
+function renderQueueTable(items) {
+  const tbody = document.getElementById('queueTableBody');
+  if (!tbody) return;
+
+  if (items.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-500 font-mono text-xs">La cola de facturación está vacía. Pega una planilla en "Carga Masiva".</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = items.map(it => {
+    let statusBadge = '<span class="px-2 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 text-[10px] font-bold uppercase">Pendiente</span>';
+    if (it.estado === 'procesando') {
+      statusBadge = '<span class="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800 text-[10px] font-bold uppercase animate-pulse"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Emitiendo</span>';
+    } else if (it.estado === 'emitida') {
+      statusBadge = '<span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold uppercase">Emitida</span>';
+    } else if (it.estado === 'error') {
+      statusBadge = '<span class="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800 text-[10px] font-bold uppercase">Error</span>';
+    }
+
+    let resultado = it.cae ? `<span class="text-amber-400 font-bold select-all text-xs">CAE: ${it.cae}</span> <span class="text-slate-500 text-[10px]">(${it.comprobanteNro || ''})</span>` : (it.errorMensaje ? `<span class="text-rose-400 text-[11px] truncate max-w-[200px] block" title="${escapeHtml(it.errorMensaje)}">${escapeHtml(it.errorMensaje)}</span>` : '<span class="text-slate-500">-</span>');
+
+    return `
+      <tr class="hover:bg-obsidian-850/60 transition">
+        <td class="py-2.5 px-3">${statusBadge}</td>
+        <td class="py-2.5 px-3">
+          <div class="text-slate-200 font-semibold truncate max-w-[180px]">${escapeHtml(it.razonSocial)}</div>
+          <div class="text-[10px] text-slate-500 font-mono">Doc: ${it.docNro}</div>
+        </td>
+        <td class="py-2.5 px-3 text-slate-300 truncate max-w-[180px]">${escapeHtml(it.descripcion)}</td>
+        <td class="py-2.5 px-3 text-slate-400">${it.tipoComprobante} (Pto ${it.puntoVenta})</td>
+        <td class="py-2.5 px-3 text-right font-bold text-slate-100">$${(it.importeTotal || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+        <td class="py-2.5 px-3">${resultado}</td>
+        <td class="py-2.5 px-3 text-center">
+          ${it.estado === 'pendiente' ? `<button onclick="deleteQueueItem('${it.id}')" class="text-slate-600 hover:text-rose-400 transition" title="Eliminar de la cola"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function startProcessingQueue() {
+  showToast('Iniciando procesamiento de la cola de facturación en ARCA...', 'info');
+  try {
+    const res = await fetchWithAuth('/api/queue/process', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Motor iniciado. Puedes ver el avance en la terminal y en la barra superior.', 'success');
+      await loadQueueItems();
+    }
+  } catch (e) {
+    showToast('Error al iniciar procesamiento de la cola.', 'error');
+  }
+}
+
+async function deleteQueueItem(id) {
+  try {
+    await fetchWithAuth(`/api/queue/${id}`, { method: 'DELETE' });
+    await loadQueueItems();
+  } catch (e) {}
+}
+
+async function clearQueueCompleted() {
+  try {
+    await fetchWithAuth('/api/queue/clear', { method: 'POST', body: JSON.stringify({ status: 'emitida' }) });
+    showToast('Comprobantes emitidos removidos de la cola.', 'info');
+    await loadQueueItems();
+  } catch (e) {}
+}
+
+// --- USER MANAGEMENT (ADMIN PANEL) ---
+async function loadUsersList() {
+  if (!currentUser || currentUser.role !== 'admin') return;
+  try {
+    const res = await fetchWithAuth('/api/users');
+    if (!res.ok) return;
+    const data = await res.json();
+    const tbody = document.getElementById('usersTableBody');
+    if (!tbody) return;
+
+    tbody.innerHTML = (data.users || []).map(u => `
+      <tr class="hover:bg-obsidian-850/60 transition">
+        <td class="py-2.5 px-3">
+          <strong class="text-slate-200 block">${escapeHtml(u.name)}</strong>
+          <span class="text-slate-500 text-[11px]">@${escapeHtml(u.username)}</span>
+        </td>
+        <td class="py-2.5 px-3 text-slate-300">${escapeHtml(u.email)}</td>
+        <td class="py-2.5 px-3">
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-amber-950 text-amber-400 border border-amber-800' : 'bg-obsidian-800 text-slate-300 border border-obsidian-600'}">
+            ${u.role}
+          </span>
+        </td>
+        <td class="py-2.5 px-3">
+          <span class="text-xs ${u.active ? 'text-emerald-400' : 'text-rose-400'} font-semibold">
+            ${u.active ? '● Activo' : '○ Inactivo'}
+          </span>
+        </td>
+        <td class="py-2.5 px-3 text-slate-400 text-[11px]">${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('es-AR') : 'Nunca'}</td>
+        <td class="py-2.5 px-3 text-right">
+          ${u.id !== currentUser.id ? `<button onclick="deleteUser('${u.id}')" class="text-slate-600 hover:text-rose-400 p-1" title="Eliminar"><i class="fa-solid fa-trash-can text-xs"></i></button>` : '<span class="text-[10px] text-slate-500">Tú</span>'}
+        </td>
+      </tr>
+    `).join('');
+  } catch (e) {}
+}
+
+function openNewUserModal() {
+  document.getElementById('userModal')?.classList.remove('hidden');
+}
+
+function closeUserModal() {
+  document.getElementById('userModal')?.classList.add('hidden');
+}
+
+async function handleSaveUser(e) {
+  e.preventDefault();
+  const name = document.getElementById('usrName').value.trim();
+  const username = document.getElementById('usrUsername').value.trim();
+  const email = document.getElementById('usrEmail').value.trim();
+  const password = document.getElementById('usrPassword').value;
+  const role = document.getElementById('usrRole').value;
+
+  try {
+    const res = await fetchWithAuth('/api/users', {
+      method: 'POST',
+      body: JSON.stringify({ name, username, email, password, role })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Usuario @${username} creado con éxito.`, 'success');
+      closeUserModal();
+      await loadUsersList();
+    } else {
+      showToast(data.message, 'error');
+    }
+  } catch (e) {
+    showToast('Error al crear usuario.', 'error');
+  }
+}
+
+async function deleteUser(id) {
+  if (!confirm('¿Seguro de eliminar este usuario?')) return;
+  try {
+    const res = await fetchWithAuth(`/api/users/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Usuario eliminado.', 'info');
+      await loadUsersList();
+    } else {
+      showToast(data.message, 'error');
+    }
+  } catch (e) {}
+}
+
+// --- FAST INVOICING (INDIVIDUAL) ---
 function addInvoiceItem() {
   const container = document.getElementById('invoiceItemsContainer');
   const div = document.createElement('div');
   div.className = 'invoice-item-row grid grid-cols-12 gap-2 items-center bg-obsidian-850 p-2.5 rounded border border-obsidian-700';
   div.innerHTML = `
     <div class="col-span-12 sm:col-span-6">
-      <input type="text" class="item-desc input-field text-xs" placeholder="Descripción del servicio o producto..." required>
+      <input type="text" class="item-desc input-field text-xs" placeholder="Descripción..." required>
     </div>
     <div class="col-span-3 sm:col-span-2">
-      <input type="number" class="item-qty input-field font-mono text-xs text-center" placeholder="Cant." value="1" min="1" step="1" oninput="calculateInvoiceTotals()" required>
+      <input type="number" class="item-qty input-field font-mono text-xs text-center" value="1" min="1" oninput="calculateInvoiceTotals()" required>
     </div>
     <div class="col-span-7 sm:col-span-3">
-      <div class="relative">
-        <span class="absolute inset-y-0 left-0 pl-2 flex items-center text-slate-500 font-mono text-xs">$</span>
-        <input type="number" class="item-price input-field font-mono text-xs !pl-6" placeholder="Precio" value="0" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
-      </div>
+      <input type="number" class="item-price input-field font-mono text-xs" value="0" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
     </div>
     <div class="col-span-2 sm:col-span-1 text-center">
       <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-500 hover:text-rose-400 transition text-sm">
@@ -198,16 +589,12 @@ function removeInvoiceItem(btn) {
   if (container.children.length > 1) {
     row.remove();
     calculateInvoiceTotals();
-  } else {
-    showToast('El comprobante debe tener al menos un concepto.', 'warn');
   }
 }
 
 function setQuickItemDesc(desc) {
   const firstDesc = document.querySelector('.invoice-item-row .item-desc');
-  if (firstDesc) {
-    firstDesc.value = desc;
-  }
+  if (firstDesc) firstDesc.value = desc;
 }
 
 function calculateInvoiceTotals() {
@@ -218,11 +605,8 @@ function calculateInvoiceTotals() {
     const price = parseFloat(r.querySelector('.item-price')?.value || '0');
     total += (qty * price);
   });
-
   const displayEl = document.getElementById('facTotalDisplay');
-  if (displayEl) {
-    displayEl.innerText = `$${total.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }
+  if (displayEl) displayEl.innerText = `$${total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
   return total;
 }
 
@@ -250,83 +634,44 @@ async function handleEmitirFactura(e) {
     const descripcion = r.querySelector('.item-desc').value.trim();
     const cantidad = parseFloat(r.querySelector('.item-qty').value || '1');
     const precioUnitario = parseFloat(r.querySelector('.item-price').value || '0');
-    items.push({
-      descripcion,
-      cantidad,
-      precioUnitario,
-      subtotal: cantidad * precioUnitario
-    });
+    items.push({ descripcion, cantidad, precioUnitario, subtotal: cantidad * precioUnitario });
   });
 
-  if (items.length === 0 || items[0].subtotal <= 0) {
-    showToast('Ingresa un importe válido para el comprobante.', 'warn');
-    return;
-  }
-
-  const payload = {
-    tipoComprobante,
-    puntoVenta,
-    concepto,
-    condicionVenta,
-    receptor: {
-      tipoDoc,
-      nroDoc,
-      razonSocial,
-      condicionIva
-    },
-    items
-  };
+  const payload = { tipoComprobante, puntoVenta, concepto, condicionVenta, receptor: { tipoDoc, nroDoc, razonSocial, condicionIva }, items };
 
   const btn = document.getElementById('btnEmitirComprobante');
   btn.disabled = true;
   btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Conectando con ARCA...';
-  showToast('Iniciando navegador headless y autorizando con ARCA...', 'info');
 
   try {
     const res = await fetchWithAuth('/api/erp/facturacion/emitir', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-
     const data = await res.json();
     if (data.success) {
-      showToast('¡Factura autorizada con éxito en ARCA!', 'success');
-      
-      // Update glance & modal
+      showToast('¡Comprobante autorizado con éxito en ARCA!', 'success');
       document.getElementById('lastCaeNumber').innerText = data.cae || '-';
       document.getElementById('lastCaeVto').innerText = data.caeVencimiento || '-';
       document.getElementById('lastComprobanteNro').innerText = data.comprobanteNro || '-';
       document.getElementById('caeStatusDot').className = 'w-2 h-2 rounded-full bg-emerald-400';
-
-      openCaeSuccessModal(data);
       loadComprobantesList();
     } else {
       showToast(`Error de emisión: ${data.message}`, 'error');
     }
   } catch (err) {
-    showToast(`Fallo en la comunicación: ${err.message}`, 'error');
+    showToast(`Error de comunicación: ${err.message}`, 'error');
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs"></i> <span>EMITIR EN ARCA</span>';
   }
 }
 
-function openCaeSuccessModal(data) {
-  document.getElementById('modalCaeNumber').innerText = data.cae || '-';
-  document.getElementById('modalCaeVto').innerText = data.caeVencimiento || '-';
-  document.getElementById('modalComprobanteNro').innerText = data.comprobanteNro || '-';
-  document.getElementById('modalTotalImporte').innerText = `$${(data.totalImporte || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-  document.getElementById('caeSuccessModal').classList.remove('hidden');
-}
-
-function closeCaeSuccessModal() {
-  document.getElementById('caeSuccessModal').classList.add('hidden');
-}
-
 // --- COMPROBANTES HISTORIAL ---
 async function loadComprobantesList() {
   try {
     const res = await fetchWithAuth('/api/erp/comprobantes');
+    if (!res.ok) return;
     const data = await res.json();
     allComprobantes = data.comprobantes || [];
     renderComprobantesTable(allComprobantes);
@@ -338,37 +683,27 @@ function renderComprobantesTable(list) {
   if (!tbody) return;
 
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="py-6 text-center text-slate-500">No hay comprobantes emitidos aún.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-slate-500 font-mono text-xs">No hay comprobantes emitidos registrados aún.</td></tr>';
     return;
   }
 
-  tbody.innerHTML = list.map(c => {
-    const total = (c.importeTotal || c.importe_total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 });
-    const cuit = c.cuitReceptor || c.cuit_receptor || '-';
-    const razon = c.razonSocialReceptor || c.razon_social_receptor || 'Consumidor Final';
-    const tipo = c.tipoComprobante || c.tipo_comprobante || 'Factura C';
-    const pto = String(c.puntoVenta || c.punto_venta || 1).padStart(4, '0');
-    const nro = String(c.numero || 1).padStart(8, '0');
-    const cae = c.cae || '-';
-
-    return `
-      <tr class="hover:bg-obsidian-850/60 transition">
-        <td class="py-2.5 px-3 text-slate-400">${c.fechaEmision || c.fecha_emision || '-'}</td>
-        <td class="py-2.5 px-3">
-          <strong class="text-amber-400 font-semibold">${escapeHtml(tipo)}</strong>
-          <span class="text-slate-500 ml-1 font-mono">${pto}-${nro}</span>
-        </td>
-        <td class="py-2.5 px-3">
-          <div class="text-slate-200 font-semibold truncate max-w-[200px]">${escapeHtml(razon)}</div>
-          <div class="text-[10px] text-slate-500 font-mono">CUIT: ${cuit}</div>
-        </td>
-        <td class="py-2.5 px-3 text-right font-bold text-slate-100">$${total}</td>
-        <td class="py-2.5 px-3">
-          <span class="px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800 text-[10px] font-bold">CAE: ${cae}</span>
-        </td>
-      </tr>
-    `;
-  }).join('');
+  tbody.innerHTML = list.map(c => `
+    <tr class="hover:bg-obsidian-850/60 transition">
+      <td class="py-2.5 px-3 text-slate-400">${c.fechaEmision || c.fecha_emision || '-'}</td>
+      <td class="py-2.5 px-3">
+        <strong class="text-amber-400 font-semibold">${escapeHtml(c.tipoComprobante || c.tipo_comprobante || 'Factura C')}</strong>
+        <span class="text-slate-500 ml-1 font-mono">${c.comprobanteFormato || c.comprobante_formato || '-'}</span>
+      </td>
+      <td class="py-2.5 px-3">
+        <div class="text-slate-200 font-semibold truncate max-w-[200px]">${escapeHtml(c.razonSocialReceptor || c.razon_social_receptor || 'Consumidor Final')}</div>
+        <div class="text-[10px] text-slate-500 font-mono">CUIT: ${c.cuitReceptor || c.cuit_receptor || '-'}</div>
+      </td>
+      <td class="py-2.5 px-3 text-right font-bold text-slate-100">$${(c.importeTotal || c.importe_total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+      <td class="py-2.5 px-3">
+        <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">CAE: ${c.cae || '-'}</span>
+      </td>
+    </tr>
+  `).join('');
 }
 
 function filterComprobantesTable(query) {
@@ -385,6 +720,7 @@ function filterComprobantesTable(query) {
 async function loadCRMClientes() {
   try {
     const res = await fetchWithAuth('/api/erp/clientes');
+    if (!res.ok) return;
     const data = await res.json();
     allClients = data.clientes || [];
     renderClientsGrid(allClients);
@@ -408,13 +744,9 @@ function renderClientsGrid(clients) {
           <strong class="text-slate-200 text-[13px] font-bold block truncate">${escapeHtml(c.razonSocial)}</strong>
           <span class="text-slate-500 text-[11px]">CUIT: ${c.cuit}</span>
         </div>
-        <button onclick="deleteClient('${c.id}')" title="Eliminar" class="text-slate-600 hover:text-rose-400 transition p-1">
-          <i class="fa-solid fa-trash-can text-xs"></i>
-        </button>
+        <button onclick="deleteClient('${c.id}')" class="text-slate-600 hover:text-rose-400 transition p-1"><i class="fa-solid fa-trash-can text-xs"></i></button>
       </div>
-
       <div class="text-[11px] text-slate-400">Condición: <span class="text-amber-400/90">${c.condicionIva}</span></div>
-
       <div class="pt-1 border-t border-obsidian-700 flex justify-end">
         <button onclick="selectClientAndInvoice('${c.id}')" class="text-[11px] text-amber-400 hover:text-amber-300 font-bold flex items-center space-x-1">
           <span>Facturar a este cliente</span>
@@ -428,7 +760,6 @@ function renderClientsGrid(clients) {
 function populateQuickClientSelector(clients) {
   const select = document.getElementById('facQuickClientSelect');
   if (!select) return;
-
   select.innerHTML = '<option value="">-- Cargar de Clientes --</option>' +
     clients.map(c => `<option value="${c.id}">${escapeHtml(c.razonSocial)} (${c.cuit})</option>`).join('');
 }
@@ -437,7 +768,6 @@ function applySelectedClientToInvoice(clientId) {
   if (!clientId) return;
   const client = allClients.find(c => c.id === clientId);
   if (!client) return;
-
   document.getElementById('facRazonSocial').value = client.razonSocial;
   document.getElementById('facNroDoc').value = client.cuit;
   document.getElementById('facCondIva').value = client.condicionIva || 'Consumidor Final';
@@ -493,14 +823,15 @@ async function deleteClient(id) {
   } catch (e) {}
 }
 
-// --- MONOTRIBUTO & DFE VIEW ---
+// --- MONOTRIBUTO & DFE ---
 async function loadMonotributoStats() {
   try {
     const res = await fetchWithAuth('/api/erp/monotributo/status');
+    if (!res.ok) return;
     const data = await res.json();
     if (data.categoria) {
-      document.getElementById('glanceCategoria').innerText = `Cat ${data.categoria} (${data.tipoActividad || 'Servicios'})`;
-      document.getElementById('monoCategoriaBadge').innerText = `Categoría ${data.categoria} (${data.tipoActividad || 'Servicios'})`;
+      const badge = document.getElementById('monoCategoriaBadge');
+      if (badge) badge.innerText = `Categoría ${data.categoria} (${data.tipoActividad || 'Servicios'})`;
     }
   } catch (e) {}
 }
@@ -508,18 +839,19 @@ async function loadMonotributoStats() {
 async function loadDfeNotifications() {
   try {
     const res = await fetchWithAuth('/api/erp/dfe/notificaciones');
+    if (!res.ok) return;
     const data = await res.json();
     const list = data.notificaciones || [];
     const container = document.getElementById('dfeInboxList');
     if (!container) return;
 
     if (list.length === 0) {
-      container.innerHTML = '<div class="p-3 text-center text-slate-500 text-xs">Sin notificaciones pendientes en ARCA.</div>';
+      container.innerHTML = '<div class="p-3 text-center text-slate-500 text-xs font-mono">Sin notificaciones pendientes en ARCA.</div>';
       return;
     }
 
     container.innerHTML = list.map(n => `
-      <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 space-y-1">
+      <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 space-y-1 font-mono">
         <div class="flex justify-between text-[10px] text-slate-500">
           <span>${escapeHtml(n.organismo || 'ARCA')}</span>
           <span>${n.fecha || '-'}</span>
@@ -531,52 +863,17 @@ async function loadDfeNotifications() {
   } catch (e) {}
 }
 
-// --- CONFIG & CREDENTIALS ---
+// --- CONFIG & SUPABASE ---
 async function loadAuthStatus() {
   try {
     const res = await fetchWithAuth('/api/auth/status');
+    if (!res.ok) return;
     const data = await res.json();
-
-    const titularHeader = document.getElementById('arcaTitularHeader');
-    const statusDot = document.getElementById('arcaStatusDot');
-    const unconfiguredAlert = document.getElementById('unconfiguredAlert');
-
     if (data.cuit) {
-      document.getElementById('cfgCuit').value = data.cuit;
-      document.getElementById('cfgPuntoVenta').value = data.puntoVentaDefault || 1;
-      document.getElementById('facPuntoVenta').value = data.puntoVentaDefault || 1;
-      if (titularHeader) titularHeader.innerText = data.razonSocial || `CUIT: ${data.cuit}`;
-      if (statusDot) statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
-      if (unconfiguredAlert) unconfiguredAlert.classList.add('hidden');
-    } else {
-      if (titularHeader) titularHeader.innerText = 'ARCA: Sin CUIT';
-      if (statusDot) statusDot.className = 'w-2 h-2 rounded-full bg-amber-400';
-      if (unconfiguredAlert) unconfiguredAlert.classList.remove('hidden');
+      const facPto = document.getElementById('facPuntoVenta');
+      if (facPto) facPto.value = data.puntoVentaDefault || 1;
     }
   } catch (e) {}
-}
-
-async function handleSaveCreds(e) {
-  e.preventDefault();
-  const cuit = document.getElementById('cfgCuit').value;
-  const claveFiscal = document.getElementById('cfgClaveFiscal').value;
-  const puntoVentaDefault = parseInt(document.getElementById('cfgPuntoVenta').value || '1', 10);
-
-  try {
-    const res = await fetchWithAuth('/api/auth/credentials', {
-      method: 'POST',
-      body: JSON.stringify({ cuit, claveFiscal, puntoVentaDefault })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Credenciales guardadas y cifradas con éxito.', 'success');
-      await loadAuthStatus();
-    } else {
-      showToast(data.message, 'error');
-    }
-  } catch (e) {
-    showToast('Error al guardar credenciales.', 'error');
-  }
 }
 
 async function testArcaConnection() {
@@ -586,12 +883,35 @@ async function testArcaConnection() {
     const data = await res.json();
     if (data.success) {
       showToast(`¡Conexión Exitosa con ARCA! Titular: ${data.razonSocial}`, 'success');
-      await loadAuthStatus();
+      await loadAccounts();
     } else {
       showToast(`Fallo de conexión: ${data.message}`, 'error');
     }
   } catch (e) {
     showToast(`Error: ${e.message}`, 'error');
+  }
+}
+
+async function handleSaveSupabase(e) {
+  e.preventDefault();
+  const url = document.getElementById('cfgSupaUrl').value.trim();
+  const key = document.getElementById('cfgSupaKey').value.trim();
+
+  try {
+    const res = await fetchWithAuth('/api/erp/supabase/connect', {
+      method: 'POST',
+      body: JSON.stringify({ url, key })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('¡Supabase conectado y sincronizado exitosamente!', 'success');
+      const badge = document.getElementById('supaStatusText');
+      if (badge) badge.innerText = 'Supabase: OK';
+    } else {
+      showToast(data.message, 'warn');
+    }
+  } catch (e) {
+    showToast('Error conectando con Supabase.', 'error');
   }
 }
 
@@ -617,21 +937,18 @@ async function handleSaveKeepAlive(e) {
 async function loadKeepAliveSettings() {
   try {
     const res = await fetchWithAuth('/api/keepalive/health');
+    if (!res.ok) return;
     const data = await res.json();
     if (data.settings) {
       if (data.settings.externalUrl) document.getElementById('cfgExternalUrl').value = data.settings.externalUrl;
       if (data.settings.uptimeRobotApiKey) document.getElementById('cfgUptimeRobotKey').value = data.settings.uptimeRobotApiKey;
-    }
-    if (data.uptimeFormatted) {
-      const el = document.getElementById('headerUptimeText');
-      if (el) el.innerText = `Uptime: ${data.uptimeFormatted}`;
     }
   } catch (e) {}
 }
 
 async function syncUptimeRobotMonitor() {
   const url = document.getElementById('cfgExternalUrl')?.value;
-  showToast('Sincronizando con UptimeRobot...', 'info');
+  showToast('Sincronizando monitor en UptimeRobot...', 'info');
   try {
     const res = await fetchWithAuth('/api/keepalive/uptimerobot/sync', {
       method: 'POST',
@@ -686,7 +1003,16 @@ function reconnectLogsSSE() {
   showToast('Reconectando streaming de logs...', 'info');
 }
 
-// --- UTILS & TOAST NOTIFICATIONS ---
+// --- UTILS & TOASTS ---
+function formatCuit(cuit) {
+  if (!cuit) return '-';
+  const c = String(cuit).replace(/\D/g, '');
+  if (c.length === 11) {
+    return `${c.substring(0, 2)}-${c.substring(2, 10)}-${c.substring(10, 11)}`;
+  }
+  return c;
+}
+
 function showToast(message, type = 'info') {
   const container = document.getElementById('toastContainer');
   if (!container) return;
@@ -713,10 +1039,7 @@ function showToast(message, type = 'info') {
   `;
 
   container.appendChild(toast);
-  setTimeout(() => {
-    toast.classList.remove('translate-y-2', 'opacity-0');
-  }, 10);
-
+  setTimeout(() => toast.classList.remove('translate-y-2', 'opacity-0'), 10);
   setTimeout(() => {
     toast.classList.add('opacity-0', 'translate-y-2');
     setTimeout(() => toast.remove(), 300);

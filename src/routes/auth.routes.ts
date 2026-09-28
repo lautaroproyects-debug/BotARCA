@@ -1,11 +1,41 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../database.js';
 import { arcaSession } from '../engine/arcaSession.js';
+import { userService } from '../services/auth/userService.js';
+import { authenticateToken, AuthenticatedRequest } from '../middleware/auth.middleware.js';
 import { logger } from '../services/logger.js';
 
 const router = Router();
 
-// Estado actual de credenciales y sesión
+// Login de usuario al panel web
+router.post('/login', async (req: Request, res: Response) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Por favor ingresa usuario y contraseña.',
+    });
+  }
+
+  const result = await userService.authenticate(username, password);
+  if (result.success) {
+    res.json(result);
+  } else {
+    res.status(401).json(result);
+  }
+});
+
+// Perfil de usuario autenticado
+router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
+  const user = userService.getUserById(req.user!.id);
+  if (!user) {
+    return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });
+  }
+  res.json({ success: true, user: userService.toPublicProfile(user) });
+});
+
+// Estado actual de credenciales y sesión en ARCA
 router.get('/status', (req: Request, res: Response) => {
   const creds = db.getCredentials();
   res.json({
@@ -20,7 +50,7 @@ router.get('/status', (req: Request, res: Response) => {
 
 // Guardar o actualizar credenciales
 router.post('/credentials', (req: Request, res: Response) => {
-  const { cuit, claveFiscal, puntoVentaDefault } = req.body;
+  const { cuit, claveFiscal, puntoVentaDefault, razonSocial } = req.body;
 
   if (!cuit) {
     return res.status(400).json({ success: false, message: 'El CUIT es obligatorio.' });
@@ -38,7 +68,7 @@ router.post('/credentials', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'Debes ingresar una Clave Fiscal.' });
   }
 
-  db.setCredentials(cleanCuit, passwordToSave, Number(puntoVentaDefault) || 1);
+  db.setCredentials(cleanCuit, passwordToSave, Number(puntoVentaDefault) || 1, razonSocial);
   logger.info('AUTH', `Credenciales actualizadas para CUIT ${cleanCuit}.`);
 
   res.json({

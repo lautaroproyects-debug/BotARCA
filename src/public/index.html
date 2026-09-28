@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BotArca - Automatización & Facturador Headless ARCA</title>
+  <title>BotArca - ERP & Facturador Headless ARCA (ex-AFIP)</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- FontAwesome 6 -->
@@ -44,13 +44,13 @@
         <div class="w-10 h-10 mx-auto rounded-lg bg-obsidian-800 border border-obsidian-600 flex items-center justify-center text-amber-400 text-lg shadow-inner">
           <i class="fa-solid fa-bolt"></i>
         </div>
-        <h2 class="text-lg font-bold tracking-tight text-white">BotArca Access</h2>
-        <p class="text-xs text-slate-400">Ingresa para gestionar facturación y automatizaciones de ARCA.</p>
+        <h2 class="text-lg font-bold tracking-tight text-white font-mono">BOTARCA ACCESS</h2>
+        <p class="text-xs text-slate-400">Ingresa con tus credenciales de operador o administrador.</p>
       </div>
 
       <form id="loginForm" onsubmit="handleUserLogin(event)" class="space-y-3.5">
         <div>
-          <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Usuario</label>
+          <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Usuario / Email</label>
           <input type="text" id="loginUsername" class="input-field" placeholder="admin" value="admin" required autofocus>
         </div>
 
@@ -60,12 +60,12 @@
         </div>
 
         <button type="submit" id="btnLoginSubmit" class="btn-gold w-full py-2.5 mt-2">
-          <span>Iniciar Sesión</span>
+          <span>Ingresar al Sistema</span>
           <i class="fa-solid fa-arrow-right text-xs"></i>
         </button>
 
         <div class="text-center pt-1 text-[11px] text-slate-500 font-mono">
-          Credenciales iniciales: <span class="text-amber-400/90">admin</span> / <span class="text-amber-400/90">admin123</span>
+          Super Admin inicial: <span class="text-amber-400/90 font-bold">admin</span> / <span class="text-amber-400/90 font-bold">admin123</span>
         </div>
       </form>
     </div>
@@ -124,7 +124,7 @@
         <div>
           <div class="flex items-center space-x-2">
             <span class="text-base font-extrabold tracking-tight text-white font-mono">BOTARCA</span>
-            <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono uppercase font-bold">RCEL Headless</span>
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono uppercase font-bold">Cloud ERP</span>
           </div>
         </div>
       </div>
@@ -132,16 +132,24 @@
       <!-- Live Engine Badges & Controls -->
       <div class="flex items-center space-x-2 sm:space-x-3">
         
-        <!-- ARCA Status Quick Badge -->
-        <div id="arcaStatusBadge" onclick="switchTab('settings')" class="cursor-pointer flex items-center space-x-1.5 px-2.5 py-1 rounded bg-obsidian-800 border border-obsidian-600 text-[11px] text-slate-300 hover:border-obsidian-500 transition">
-          <span id="arcaStatusDot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
-          <span id="arcaTitularHeader" class="font-medium font-mono truncate max-w-[130px]">ARCA: Activo</span>
+        <!-- Multi-Account / Active CUIT Selector -->
+        <div class="flex items-center space-x-1.5 bg-obsidian-800 border border-obsidian-600 px-2.5 py-1 rounded text-xs font-mono">
+          <i class="fa-solid fa-building text-amber-400 text-[10px]"></i>
+          <select id="headerAccountSelect" onchange="switchActiveCuitAccount(this.value)" class="bg-transparent text-slate-200 outline-none text-[11px] font-semibold cursor-pointer">
+            <option value="">Cargando CUIT...</option>
+          </select>
+        </div>
+
+        <!-- Supabase Cloud Badge -->
+        <div id="supaStatusBadge" onclick="switchTab('settings')" class="cursor-pointer hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded bg-obsidian-800 border border-obsidian-600 text-[11px] text-emerald-400 hover:border-emerald-700 transition font-mono">
+          <i class="fa-solid fa-database text-[10px]"></i>
+          <span id="supaStatusText">Supabase: OK</span>
         </div>
 
         <!-- Render Keep-Alive Badge -->
         <div class="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded bg-obsidian-800 border border-obsidian-600 text-[11px] text-slate-400 font-mono">
-          <i class="fa-solid fa-server text-emerald-400 text-[10px]"></i>
-          <span id="headerUptimeText">Render 24/7</span>
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="headerUptimeText">24/7 Live</span>
         </div>
 
         <!-- Test Connection Button -->
@@ -163,8 +171,14 @@
 
     <!-- STREAMLINED NAVIGATION TABS -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-1 overflow-x-auto border-t border-obsidian-800 py-1">
-      <button onclick="switchTab('facturacion')" class="nav-tab-btn active" data-tab="facturacion">
-        <i class="fa-solid fa-file-invoice-dollar"></i> Facturar
+      <button onclick="switchTab('carga-masiva')" class="nav-tab-btn active" data-tab="carga-masiva">
+        <i class="fa-solid fa-file-excel text-emerald-400"></i> Carga Masiva (Excel)
+      </button>
+      <button onclick="switchTab('cola')" class="nav-tab-btn" data-tab="cola">
+        <i class="fa-solid fa-layer-group text-amber-400"></i> Cola en Vivo <span id="badgeColaPendientes" class="px-1.5 py-0.2 text-[10px] bg-amber-500/20 text-amber-300 rounded-full font-mono font-bold">0</span>
+      </button>
+      <button onclick="switchTab('facturacion')" class="nav-tab-btn" data-tab="facturacion">
+        <i class="fa-solid fa-receipt"></i> Facturador Rápido
       </button>
       <button onclick="switchTab('comprobantes')" class="nav-tab-btn" data-tab="comprobantes">
         <i class="fa-solid fa-list-check"></i> Comprobantes
@@ -172,8 +186,14 @@
       <button onclick="switchTab('crm')" class="nav-tab-btn" data-tab="crm">
         <i class="fa-solid fa-address-book"></i> Clientes
       </button>
+      <button onclick="switchTab('cuentas')" class="nav-tab-btn" data-tab="cuentas">
+        <i class="fa-solid fa-building-user"></i> Cuentas ARCA
+      </button>
+      <button id="navTabUsers" onclick="switchTab('users')" class="nav-tab-btn" data-tab="users">
+        <i class="fa-solid fa-user-shield"></i> Usuarios
+      </button>
       <button onclick="switchTab('monotributo')" class="nav-tab-btn" data-tab="monotributo">
-        <i class="fa-solid fa-building-columns"></i> Estado Fiscal & DFE
+        <i class="fa-solid fa-building-columns"></i> Estado Fiscal
       </button>
       <button onclick="switchTab('settings')" class="nav-tab-btn" data-tab="settings">
         <i class="fa-solid fa-sliders"></i> Configuración
@@ -188,24 +208,152 @@
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex-1 w-full">
 
     <!-- ========================================== -->
-    <!-- TAB 1: FACTURACIÓN RÁPIDA (HERO TAB)       -->
+    <!-- TAB 1: CARGA MASIVA (EXCEL & CSV PASTING)  -->
     <!-- ========================================== -->
-    <section id="tab-facturacion" class="tab-content block space-y-4">
+    <section id="tab-carga-masiva" class="tab-content block space-y-4">
       
-      <!-- Notice if credentials missing -->
-      <div id="unconfiguredAlert" class="hidden card-panel p-3.5 bg-amber-950/20 border-amber-900/60 flex items-center justify-between">
-        <div class="flex items-center space-x-3">
-          <i class="fa-solid fa-triangle-exclamation text-amber-400 text-base"></i>
+      <div class="card-panel p-5 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-obsidian-700 pb-3">
           <div>
-            <h4 class="text-xs font-bold text-amber-200">Credenciales de ARCA pendientes</h4>
-            <p class="text-[11px] text-amber-400/80">Configura tu CUIT y Clave Fiscal en Configuración para emitir comprobantes en producción.</p>
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
+              <i class="fa-solid fa-file-excel text-emerald-400 mr-2"></i> Pegar Planilla desde Excel / Google Sheets
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">Copia las celdas directamente desde Excel con <kbd class="px-1.5 py-0.5 bg-obsidian-800 border border-obsidian-600 rounded text-slate-300 font-mono text-[10px]">Ctrl+C</kbd> y pégalas abajo con <kbd class="px-1.5 py-0.5 bg-obsidian-800 border border-obsidian-600 rounded text-slate-300 font-mono text-[10px]">Ctrl+V</kbd>.</p>
+          </div>
+
+          <div class="flex items-center space-x-2">
+            <button onclick="loadSampleExcelData()" class="btn-secondary !py-1 !px-2.5 text-xs">
+              <i class="fa-solid fa-wand-magic-sparkles text-amber-400 text-[10px]"></i> Cargar Ejemplo
+            </button>
+            <button onclick="clearExcelPasteArea()" class="btn-secondary !py-1 !px-2.5 text-xs">
+              <i class="fa-solid fa-trash-can text-[10px]"></i> Limpiar
+            </button>
           </div>
         </div>
-        <button onclick="switchTab('settings')" class="btn-gold !py-1 !px-3 text-xs">
-          Configurar
-        </button>
+
+        <!-- Excel Pasting Textarea / Dropzone -->
+        <div class="space-y-2">
+          <textarea id="excelPasteArea" oninput="handleExcelPasteChange(this.value)" rows="6" class="w-full bg-[#050608] border border-obsidian-700 rounded p-3 font-mono text-xs text-slate-200 outline-none focus:border-amber-500 transition" placeholder="Pega aquí tus filas de Excel (Columnas recomendadas: CUIT | Razón Social | Concepto | Importe)"></textarea>
+          
+          <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-500 font-mono gap-2">
+            <span>Formatos aceptados: Tabulación de Excel (\t), CSV (; o ,).</span>
+            <span id="excelParsedCountText" class="text-amber-400 font-semibold">0 filas detectadas</span>
+          </div>
+        </div>
+
+        <!-- Preview Table -->
+        <div id="excelPreviewContainer" class="space-y-3 pt-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-300 uppercase font-mono tracking-wider">Vista Previa de Facturas a Encolar</span>
+            <div class="font-mono text-xs">
+              <span class="text-slate-400">Total Lote:</span>
+              <strong id="excelPreviewTotal" class="text-emerald-400 text-sm font-bold ml-1">$0,00</strong>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto max-h-64 overflow-y-auto border border-obsidian-700 rounded">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-obsidian-850 sticky top-0 border-b border-obsidian-700">
+                <tr class="text-slate-500 font-mono uppercase text-[10px]">
+                  <th class="py-2 px-3">#</th>
+                  <th class="py-2 px-3">Receptor (CUIT / Doc)</th>
+                  <th class="py-2 px-3">Razón Social</th>
+                  <th class="py-2 px-3">Concepto / Descripción</th>
+                  <th class="py-2 px-3">Tipo</th>
+                  <th class="py-2 px-3 text-right">Importe</th>
+                </tr>
+              </thead>
+              <tbody id="excelPreviewTbody" class="divide-y divide-obsidian-800 font-mono">
+                <tr><td colspan="6" class="py-6 text-center text-slate-500">Pega filas arriba para previsualizar.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Add to Queue Action -->
+          <div class="flex justify-end pt-2">
+            <button type="button" id="btnAddToQueue" onclick="submitExcelBatchToQueue()" disabled class="btn-gold !py-2.5 !px-6 text-xs">
+              <i class="fa-solid fa-plus text-[11px]"></i>
+              <span>AGREGAR A LA COLA DE FACTURACIÓN</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- TAB 2: COLA EN VIVO (LIVE QUEUE ENGINE)    -->
+    <!-- ========================================== -->
+    <section id="tab-cola" class="tab-content hidden space-y-4">
+      
+      <!-- Cockpit Banner when batch running -->
+      <div id="cockpitBanner" class="hidden card-panel p-4 bg-amber-950/20 border-amber-500/40 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="w-3 h-3 rounded-full bg-amber-400 animate-ping"></span>
+            <strong class="text-xs font-bold text-amber-200 font-mono uppercase">Motor ARCA en Ejecución</strong>
+          </div>
+          <span id="cockpitPercent" class="text-xs font-bold text-amber-400 font-mono">0%</span>
+        </div>
+        <div class="w-full bg-obsidian-950 rounded-full h-2 overflow-hidden border border-obsidian-700">
+          <div id="cockpitProgressBar" class="bg-amber-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+        <p id="cockpitStatusMsg" class="text-[11px] text-slate-300 font-mono">Iniciando sesión en ARCA...</p>
       </div>
 
+      <div class="card-panel p-5 space-y-4">
+        
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-obsidian-700 pb-3">
+          <div class="flex items-center space-x-3 font-mono">
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider">Cola de Facturación</h3>
+            <div class="flex items-center space-x-2 text-xs">
+              <span id="queueCountPendientes" class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 font-bold">0 pendientes</span>
+              <span id="queueCountEmitidas" class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">0 emitidas</span>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-2">
+            <button onclick="loadQueueItems()" class="btn-secondary !py-1 !px-2.5 text-xs" title="Actualizar">
+              <i class="fa-solid fa-rotate text-[11px]"></i>
+            </button>
+            <button onclick="clearQueueCompleted()" class="btn-secondary !py-1 !px-2.5 text-xs text-slate-400" title="Limpiar emitidas">
+              <i class="fa-solid fa-broom text-[11px]"></i> Limpiar Emitidas
+            </button>
+            <button type="button" id="btnProcessQueue" onclick="startProcessingQueue()" class="btn-gold !py-1.5 !px-4 text-xs font-bold shadow-lg">
+              <i class="fa-solid fa-bolt text-[11px]"></i>
+              <span>FACTURAR COLA EN ARCA</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Queue Items Table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="border-b border-obsidian-700 text-slate-500 font-mono uppercase text-[10px]">
+                <th class="py-2.5 px-3">Estado</th>
+                <th class="py-2.5 px-3">Receptor</th>
+                <th class="py-2.5 px-3">Concepto</th>
+                <th class="py-2.5 px-3">Tipo & Pto</th>
+                <th class="py-2.5 px-3 text-right">Importe</th>
+                <th class="py-2.5 px-3">CAE / Resultado</th>
+                <th class="py-2.5 px-3 text-center">Acción</th>
+              </tr>
+            </thead>
+            <tbody id="queueTableBody" class="divide-y divide-obsidian-800 font-mono">
+              <tr><td colspan="7" class="py-8 text-center text-slate-500">Cargando cola de facturación...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- TAB 3: FACTURADOR RÁPIDO (INDIVIDUAL)      -->
+    <!-- ========================================== -->
+    <section id="tab-facturacion" class="tab-content hidden space-y-4">
+      
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
         
         <!-- Left Column: Invoice Form (8 Cols) -->
@@ -215,7 +363,7 @@
             <div class="flex items-center justify-between border-b border-obsidian-700 pb-3">
               <div class="flex items-center space-x-2">
                 <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-                <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono">Nuevo Comprobante</h3>
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono">Emisión Individual Rápida</h3>
               </div>
               <span class="text-xs text-slate-400 font-mono">RCEL Direct</span>
             </div>
@@ -249,7 +397,7 @@
             </div>
 
             <!-- Recipient Section (Receptor) -->
-            <div class="p-3.5 bg-obsidian-850 border border-obsidian-700 rounded-md space-y-3">
+            <div class="p-3.5 bg-obsidian-850 border border-obsidian-700 rounded space-y-3">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono flex items-center">
                   <i class="fa-solid fa-user-tag text-amber-400 mr-1.5"></i> Datos del Receptor
@@ -299,7 +447,6 @@
                     <option value="Cuenta Corriente">Cuenta Corriente</option>
                     <option value="Tarjeta de Débito">Tarjeta de Débito</option>
                     <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
-                    <option value="Otra">Otra</option>
                   </select>
                 </div>
               </div>
@@ -351,7 +498,7 @@
             <!-- Summary & Emit Action Bar -->
             <div class="border-t border-obsidian-700 pt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
               <div class="flex items-baseline space-x-3 font-mono">
-                <span class="text-xs text-slate-400 uppercase font-semibold">Total a Facturar:</span>
+                <span class="text-xs text-slate-400 uppercase font-semibold">Total:</span>
                 <span id="facTotalDisplay" class="text-xl font-extrabold text-white tracking-tight">$150.000,00</span>
               </div>
 
@@ -364,10 +511,8 @@
           </form>
         </div>
 
-        <!-- Right Column: Status & Live Result (4 Cols) -->
+        <!-- Right Column: Last CAE Box -->
         <div class="lg:col-span-4 space-y-4">
-          
-          <!-- Last CAE Generated Box -->
           <div class="card-panel p-4 space-y-3">
             <div class="flex items-center justify-between border-b border-obsidian-700 pb-2">
               <span class="text-xs font-bold text-slate-300 uppercase font-mono">Último CAE Autorizado</span>
@@ -383,46 +528,15 @@
                   <span id="lastComprobanteNro" class="text-slate-300 font-semibold">-</span>
                 </div>
               </div>
-              <p class="text-[11px] text-slate-500 leading-relaxed">
-                Los comprobantes se autorizan en tiempo real contra el backend de ARCA mediante Playwright con evasión anti-WAF.
-              </p>
             </div>
           </div>
-
-          <!-- Quick Stats / Monotributo glance -->
-          <div class="card-panel p-4 space-y-3 font-mono">
-            <div class="flex items-center justify-between border-b border-obsidian-700 pb-2">
-              <span class="text-xs font-bold text-slate-300 uppercase">Estado Contable</span>
-              <span class="text-[10px] text-amber-400 font-bold">2026</span>
-            </div>
-
-            <div class="space-y-2 text-xs">
-              <div class="flex justify-between py-1 border-b border-obsidian-800">
-                <span class="text-slate-500">Categoría:</span>
-                <span id="glanceCategoria" class="font-bold text-slate-200">Cat C (Servicios)</span>
-              </div>
-              <div class="flex justify-between py-1 border-b border-obsidian-800">
-                <span class="text-slate-500">Límite Anual:</span>
-                <span class="text-slate-300">$20.500.000</span>
-              </div>
-              <div class="flex justify-between py-1 border-b border-obsidian-800">
-                <span class="text-slate-500">Facturado:</span>
-                <span id="glanceFacturado" class="text-emerald-400 font-semibold">$3.450.000 (16.8%)</span>
-              </div>
-              <div class="flex justify-between py-1">
-                <span class="text-slate-500">Deuda CCMA:</span>
-                <span id="glanceDeuda" class="text-emerald-400 font-semibold">$0,00 (Al día)</span>
-              </div>
-            </div>
-          </div>
-
         </div>
 
       </div>
     </section>
 
     <!-- ========================================== -->
-    <!-- TAB 2: COMPROBANTES EMITIDOS               -->
+    <!-- TAB 4: COMPROBANTES EMITIDOS               -->
     <!-- ========================================== -->
     <section id="tab-comprobantes" class="tab-content hidden space-y-4">
       <div class="card-panel p-5 space-y-4">
@@ -454,9 +568,7 @@
               </tr>
             </thead>
             <tbody id="comprobantesTableBody" class="divide-y divide-obsidian-800 font-mono">
-              <tr>
-                <td colspan="5" class="py-8 text-center text-slate-500">Cargando comprobantes...</td>
-              </tr>
+              <tr><td colspan="5" class="py-8 text-center text-slate-500">Cargando comprobantes...</td></tr>
             </tbody>
           </table>
         </div>
@@ -465,7 +577,7 @@
     </section>
 
     <!-- ========================================== -->
-    <!-- TAB 3: CLIENTES (CRM LIGERO)               -->
+    <!-- TAB 5: CLIENTES (CRM LIGERO)               -->
     <!-- ========================================== -->
     <section id="tab-crm" class="tab-content hidden space-y-4">
       <div class="card-panel p-5 space-y-4">
@@ -481,7 +593,7 @@
           </button>
         </div>
 
-        <!-- Clients Grid / List -->
+        <!-- Clients Grid -->
         <div id="clientsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <!-- Rendered dynamically -->
         </div>
@@ -490,17 +602,83 @@
     </section>
 
     <!-- ========================================== -->
-    <!-- TAB 4: ESTADO FISCAL & NOTIFICACIONES DFE  -->
+    <!-- TAB 6: CUENTAS ARCA & MULTI-CUIT           -->
+    <!-- ========================================== -->
+    <section id="tab-cuentas" class="tab-content hidden space-y-4">
+      <div class="card-panel p-5 space-y-4">
+        
+        <div class="flex items-center justify-between border-b border-obsidian-700 pb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
+              <i class="fa-solid fa-building-user text-amber-400 mr-2"></i> Gestión de Cuentas Fiscales ARCA (Multi-Empresa)
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">Administra varios CUITs y Claves Fiscales. Cambia de emisor con 1 solo clic.</p>
+          </div>
+          <button onclick="openNewAccountModal()" class="btn-gold !py-1 !px-3 text-xs">
+            <i class="fa-solid fa-plus text-[10px]"></i>
+            <span>Agregar CUIT</span>
+          </button>
+        </div>
+
+        <div id="accountsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 font-mono">
+          <!-- Rendered dynamically -->
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- TAB 7: GESTIÓN DE USUARIOS Y ROLES (ADMIN) -->
+    <!-- ========================================== -->
+    <section id="tab-users" class="tab-content hidden space-y-4">
+      <div class="card-panel p-5 space-y-4">
+        
+        <div class="flex items-center justify-between border-b border-obsidian-700 pb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
+              <i class="fa-solid fa-user-shield text-amber-400 mr-2"></i> Usuarios del Sistema & Roles
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">Crea operadores con permisos de facturación o administradores completos.</p>
+          </div>
+          <button onclick="openNewUserModal()" class="btn-gold !py-1 !px-3 text-xs">
+            <i class="fa-solid fa-user-plus text-[10px]"></i>
+            <span>Crear Usuario</span>
+          </button>
+        </div>
+
+        <!-- Users Table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="border-b border-obsidian-700 text-slate-500 font-mono uppercase text-[10px]">
+                <th class="py-2.5 px-3">Usuario / Nombre</th>
+                <th class="py-2.5 px-3">Email</th>
+                <th class="py-2.5 px-3">Rol</th>
+                <th class="py-2.5 px-3">Estado</th>
+                <th class="py-2.5 px-3">Último Login</th>
+                <th class="py-2.5 px-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody" class="divide-y divide-obsidian-800 font-mono">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- TAB 8: ESTADO FISCAL & DFE                 -->
     <!-- ========================================== -->
     <section id="tab-monotributo" class="tab-content hidden space-y-4">
-      
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
         
-        <!-- Left: Fiscal Status & Monotributo Card (6 Cols) -->
+        <!-- Left: Fiscal Status -->
         <div class="lg:col-span-6 card-panel p-5 space-y-4">
           <div class="flex items-center justify-between border-b border-obsidian-700 pb-3 font-mono">
             <h3 class="text-sm font-bold text-white uppercase tracking-wider">Situación Monotributo</h3>
-            <span class="px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800 text-[10px] font-bold">Activo</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">Activo</span>
           </div>
 
           <div class="space-y-3 font-mono text-xs">
@@ -514,7 +692,6 @@
                   <span>Facturación Anual Acumulada:</span>
                   <span class="text-slate-200 font-bold">$3.450.000 / $20.500.000</span>
                 </div>
-                <!-- Progress Bar -->
                 <div class="w-full bg-obsidian-950 rounded-full h-2 overflow-hidden border border-obsidian-700">
                   <div class="bg-amber-500 h-2 rounded-full" style="width: 17%"></div>
                 </div>
@@ -523,12 +700,12 @@
 
             <div class="flex justify-between items-center p-3 bg-obsidian-850 rounded border border-obsidian-700">
               <span class="text-slate-400">Estado de Deuda CCMA:</span>
-              <span class="px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800 font-bold text-[11px]">Al día ($0,00)</span>
+              <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[11px]">Al día ($0,00)</span>
             </div>
           </div>
         </div>
 
-        <!-- Right: Domicilio Fiscal Electrónico (DFE) Inbox (6 Cols) -->
+        <!-- Right: DFE Communications -->
         <div class="lg:col-span-6 card-panel p-5 space-y-4">
           <div class="flex items-center justify-between border-b border-obsidian-700 pb-3 font-mono">
             <div class="flex items-center space-x-2">
@@ -541,14 +718,7 @@
           </div>
 
           <div id="dfeInboxList" class="space-y-2 text-xs font-mono">
-            <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 space-y-1">
-              <div class="flex justify-between text-[10px] text-slate-500">
-                <span>ARCA - Domicilio Fiscal</span>
-                <span>24/09/2026</span>
-              </div>
-              <div class="text-slate-200 font-semibold text-[11px]">Información sobre recategorización semestral</div>
-              <p class="text-[10px] text-slate-400">Recordatorio de parámetros de facturación e ingresos brutos vigentes...</p>
-            </div>
+            <div class="p-3 text-center text-slate-500">Sin notificaciones pendientes en ARCA.</div>
           </div>
         </div>
 
@@ -556,59 +726,50 @@
     </section>
 
     <!-- ========================================== -->
-    <!-- TAB 5: CONFIGURACIÓN & CLOUD CREDENTIALS   -->
+    <!-- TAB 9: CONFIGURACIÓN & CLOUD CREDENTIALS   -->
     <!-- ========================================== -->
     <section id="tab-settings" class="tab-content hidden space-y-4">
-      
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
         
-        <!-- ARCA Clave Fiscal Card (6 Cols) -->
+        <!-- Supabase Cloud Config (6 Cols) -->
         <div class="lg:col-span-6 card-panel p-5 space-y-4">
           <div class="border-b border-obsidian-700 pb-3">
             <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
-              <i class="fa-solid fa-key text-amber-400 mr-2"></i> Credenciales de ARCA (ex-AFIP)
+              <i class="fa-solid fa-database text-emerald-400 mr-2"></i> Base de Datos Cloud (Supabase)
             </h3>
-            <p class="text-[11px] text-slate-400 mt-0.5">Ingreso directo sin certificados digitales. Cifrado AES-256-GCM.</p>
+            <p class="text-[11px] text-slate-400 mt-0.5">Sincroniza usuarios, clientes, comprobantes y cola en la nube.</p>
           </div>
 
-          <form id="credsForm" onsubmit="handleSaveCreds(event)" class="space-y-3.5">
+          <form onsubmit="handleSaveSupabase(event)" class="space-y-3">
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">CUIT del Titular</label>
-              <input type="text" id="cfgCuit" placeholder="20301234569" class="input-field font-mono" required>
+              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Supabase Project URL</label>
+              <input type="url" id="cfgSupaUrl" placeholder="https://xyzcompany.supabase.co" class="input-field font-mono text-xs" required>
             </div>
 
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Clave Fiscal</label>
-              <input type="password" id="cfgClaveFiscal" placeholder="••••••••••••" class="input-field font-mono" required>
-              <span class="text-[10px] text-slate-500">La clave se encripta con AES-256 antes de guardarse en el backend.</span>
+              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Service Role / Anon Key</label>
+              <input type="password" id="cfgSupaKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5..." class="input-field font-mono text-xs" required>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Punto Venta Default</label>
-                <input type="number" id="cfgPuntoVenta" value="1" min="1" max="9999" class="input-field font-mono">
-              </div>
-              <div class="flex items-end">
-                <button type="submit" class="btn-gold w-full !py-2 text-xs">
-                  Guardar Credenciales
-                </button>
-              </div>
+            <div class="flex items-center justify-between pt-2">
+              <span id="supaStatusBadgeForm" class="text-xs font-mono text-slate-400">Estado: Sin conectar</span>
+              <button type="submit" class="btn-gold !py-1.5 !px-4 text-xs">
+                Conectar Supabase
+              </button>
             </div>
           </form>
         </div>
 
-        <!-- Keep-Alive & Render Anti-Sleep (6 Cols) -->
+        <!-- Keep-Alive 24/7 (6 Cols) -->
         <div class="lg:col-span-6 card-panel p-5 space-y-4">
-          <div class="border-b border-obsidian-700 pb-3 flex items-center justify-between">
-            <div>
-              <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
-                <i class="fa-solid fa-heart-pulse text-emerald-400 mr-2"></i> Keep-Alive 24/7 (Render)
-              </h3>
-              <p class="text-[11px] text-slate-400 mt-0.5">Pings continuos para evitar que Render free-tier se duerma.</p>
-            </div>
+          <div class="border-b border-obsidian-700 pb-3">
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
+              <i class="fa-solid fa-heart-pulse text-emerald-400 mr-2"></i> Keep-Alive 24/7 (UptimeRobot / Render)
+            </h3>
+            <p class="text-[11px] text-slate-400 mt-0.5">Pings automáticos cada 5 minutos para disponibilidad continua.</p>
           </div>
 
-          <form id="keepAliveForm" onsubmit="handleSaveKeepAlive(event)" class="space-y-3">
+          <form onsubmit="handleSaveKeepAlive(event)" class="space-y-3">
             <div>
               <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">URL Pública en Render</label>
               <input type="url" id="cfgExternalUrl" placeholder="https://botarca.onrender.com" class="input-field font-mono text-xs">
@@ -621,13 +782,9 @@
 
             <div class="flex items-center justify-between pt-2">
               <button type="button" onclick="syncUptimeRobotMonitor()" class="btn-secondary !py-1.5 !px-3 text-xs">
-                <i class="fa-solid fa-satellite-dish text-amber-400 text-[10px]"></i>
-                <span>Sincronizar Monitor</span>
+                <i class="fa-solid fa-satellite-dish text-amber-400 text-[10px]"></i> Sincronizar Monitor
               </button>
-              
-              <button type="submit" class="btn-gold !py-1.5 !px-4 text-xs">
-                Guardar
-              </button>
+              <button type="submit" class="btn-gold !py-1.5 !px-4 text-xs">Guardar</button>
             </div>
           </form>
         </div>
@@ -636,7 +793,7 @@
     </section>
 
     <!-- ========================================== -->
-    <!-- TAB 6: TERMINAL DE LOGS EN VIVO            -->
+    <!-- TAB 10: TERMINAL DE LOGS EN VIVO           -->
     <!-- ========================================== -->
     <section id="tab-logs" class="tab-content hidden space-y-4">
       <div class="card-panel p-4 space-y-3">
@@ -705,41 +862,87 @@
     </div>
   </div>
 
-  <!-- MODAL: SUCCESS CAE RESULT -->
-  <div id="caeSuccessModal" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-    <div class="card-panel max-w-md w-full p-6 space-y-4 shadow-2xl border-amber-500/30">
-      <div class="text-center space-y-1">
-        <div class="w-12 h-12 mx-auto rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xl">
-          <i class="fa-solid fa-check-double"></i>
-        </div>
-        <h3 class="text-base font-extrabold text-white font-mono uppercase tracking-wider">Comprobante Autorizado</h3>
-        <p class="text-xs text-slate-400">CAE obtenido exitosamente en ARCA.</p>
+  <!-- MODAL: NUEVA CUENTA ARCA (MULTI-CUIT) -->
+  <div id="accountModal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="card-panel max-w-md w-full p-5 space-y-4 shadow-2xl border-obsidian-600">
+      <div class="flex items-center justify-between border-b border-obsidian-700 pb-2 font-mono">
+        <h3 class="text-sm font-bold text-white uppercase">Agregar Cuenta CUIT ARCA</h3>
+        <button onclick="closeAccountModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
-      <div class="p-4 bg-obsidian-850 rounded border border-obsidian-700 space-y-2 font-mono text-xs">
-        <div class="flex justify-between border-b border-obsidian-800 pb-1.5">
-          <span class="text-slate-500">CAE Oficial:</span>
-          <span id="modalCaeNumber" class="text-amber-400 font-bold select-all text-sm">-</span>
+      <form onsubmit="handleSaveAccount(event)" class="space-y-3 font-mono">
+        <div>
+          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">CUIT Emisor (11 dígitos)</label>
+          <input type="text" id="accCuit" class="input-field text-xs" placeholder="20301234569" required>
         </div>
-        <div class="flex justify-between border-b border-obsidian-800 pb-1.5">
-          <span class="text-slate-500">Vencimiento CAE:</span>
-          <span id="modalCaeVto" class="text-slate-200 font-bold">-</span>
+
+        <div>
+          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Razón Social / Alias</label>
+          <input type="text" id="accRazonSocial" class="input-field text-xs" placeholder="ej: Mi Empresa SRL" required>
         </div>
-        <div class="flex justify-between border-b border-obsidian-800 pb-1.5">
-          <span class="text-slate-500">Comprobante:</span>
-          <span id="modalComprobanteNro" class="text-slate-200">-</span>
+
+        <div>
+          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Clave Fiscal</label>
+          <input type="password" id="accClaveFiscal" class="input-field text-xs" placeholder="••••••••••••" required>
         </div>
-        <div class="flex justify-between pt-0.5">
-          <span class="text-slate-500">Importe Total:</span>
-          <span id="modalTotalImporte" class="text-emerald-400 font-extrabold">-</span>
+
+        <div>
+          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Punto de Venta por Defecto</label>
+          <input type="number" id="accPuntoVenta" class="input-field text-xs" value="1" min="1" max="9999" required>
         </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t border-obsidian-700">
+          <button type="button" onclick="closeAccountModal()" class="btn-secondary text-xs">Cancelar</button>
+          <button type="submit" class="btn-gold text-xs">Guardar Cuenta</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: NUEVO USUARIO (ADMIN) -->
+  <div id="userModal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="card-panel max-w-md w-full p-5 space-y-4 shadow-2xl border-obsidian-600">
+      <div class="flex items-center justify-between border-b border-obsidian-700 pb-2 font-mono">
+        <h3 class="text-sm font-bold text-white uppercase">Crear Nuevo Usuario</h3>
+        <button onclick="closeUserModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
-      <div class="flex justify-end space-x-2 pt-2">
-        <button onclick="closeCaeSuccessModal()" class="btn-gold w-full text-xs">
-          Aceptar
-        </button>
-      </div>
+      <form onsubmit="handleSaveUser(event)" class="space-y-3 font-mono">
+        <div>
+          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Nombre Completo</label>
+          <input type="text" id="usrName" class="input-field text-xs" placeholder="Lucas González" required>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Usuario</label>
+            <input type="text" id="usrUsername" class="input-field text-xs" placeholder="lucasg" required>
+          </div>
+          <div>
+            <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Rol</label>
+            <select id="usrRole" class="input-field text-xs">
+              <option value="operator" selected>Operador</option>
+              <option value="admin">Administrador</option>
+              <option value="viewer">Solo Lectura</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Email</label>
+          <input type="email" id="usrEmail" class="input-field text-xs" placeholder="lucas@empresa.com" required>
+        </div>
+
+        <div>
+          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Contraseña</label>
+          <input type="password" id="usrPassword" class="input-field text-xs" placeholder="••••••••" required>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t border-obsidian-700">
+          <button type="button" onclick="closeUserModal()" class="btn-secondary text-xs">Cancelar</button>
+          <button type="submit" class="btn-gold text-xs">Crear</button>
+        </div>
+      </form>
     </div>
   </div>
 

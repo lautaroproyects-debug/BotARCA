@@ -15,6 +15,8 @@ import logsRoutes from './routes/logs.routes.js';
 import finanzasRoutes from './routes/finanzas.routes.js';
 import erpRoutes from './routes/erp.routes.js';
 import usersRoutes from './routes/users.routes.js';
+import queueRoutes from './routes/queue.routes.js';
+import accountsRoutes from './routes/accounts.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,8 +25,8 @@ const app = express();
 
 // Middlewares
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Archivos estáticos de la interfaz web
 const publicPath = path.join(__dirname, 'public');
@@ -38,6 +40,8 @@ app.use('/api/keepalive', keepaliveRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/finanzas', finanzasRoutes);
 app.use('/api/erp', erpRoutes);
+app.use('/api/queue', queueRoutes);
+app.use('/api/accounts', accountsRoutes);
 
 // Endpoint rápido /healthz y /ping para Render y UptimeRobot
 app.get('/healthz', (req, res) => res.status(200).send('OK'));

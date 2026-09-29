@@ -34,6 +34,9 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+// Confianza en proxies (Render, Cloudflare, Load Balancers)
+app.set('trust proxy', 1);
+
 // 1. Blindaje de cabeceras HTTP y Content-Security-Policy (CSP)
 app.use(securityHeaders);
 

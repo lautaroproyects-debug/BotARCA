@@ -137,7 +137,7 @@ export const validateLogin = validateBody([
 
 export const validateRegister = validateBody([
   { field: 'name', type: 'string', required: true, minLength: 2, maxLength: 100 },
-  { field: 'username', type: 'string', required: true, minLength: 3, maxLength: 30, pattern: /^[a-zA-Z0-9._-]+$/ },
+  { field: 'username', type: 'string', required: true, minLength: 2, maxLength: 50 },
   { field: 'email', type: 'email', required: true, maxLength: 100 },
   { field: 'password', type: 'string', required: true, minLength: 4, maxLength: 100 },
 ]);

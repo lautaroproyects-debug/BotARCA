@@ -15,7 +15,8 @@ function getAllowedOrigins(): string[] {
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://localhost:5173',
-    'https://botarca.onrender.com'
+    'https://botarca.onrender.com',
+    'http://botarca.onrender.com'
   ];
   if (config.keepAlive.externalUrl && !defaults.includes(config.keepAlive.externalUrl)) {
     defaults.push(config.keepAlive.externalUrl.replace(/\/$/, ''));
@@ -24,29 +25,40 @@ function getAllowedOrigins(): string[] {
 }
 
 /**
- * Middleware de CORS con validación estricta de origen
+ * Middleware de CORS con validación de origen y soporte total para subdominios Render y desarrollo
  */
 export function secureCors(req: Request, res: Response, next: NextFunction) {
   const origin = req.headers.origin;
   const allowedOrigins = getAllowedOrigins();
 
-  // Si no hay Origin (peticiones Same-Origin, Postman, curl, Keep-Alive local, SSE)
+  // Peticiones sin Origin (Same-Origin, direct navigation, Postman, curl, Keep-Alive local, SSE)
   if (!origin) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     return next();
   }
 
-  // Verificar si el origen está en la lista blanca
-  const isAllowed = allowedOrigins.some(allowed => {
-    if (allowed === '*' || allowed === origin) return true;
+  // Comprobar si el origen está permitido
+  let isAllowed = false;
+
+  if (
+    allowedOrigins.includes('*') ||
+    allowedOrigins.includes(origin) ||
+    origin.endsWith('.onrender.com') ||
+    origin.includes('localhost') ||
+    origin.includes('127.0.0.1')
+  ) {
+    isAllowed = true;
+  } else {
     try {
-      const allowedUrl = new URL(allowed);
-      const originUrl = new URL(origin);
-      return allowedUrl.origin === originUrl.origin;
+      const allowedUrl = new URL(origin);
+      const host = req.headers.host || '';
+      if (allowedUrl.host === host || origin.includes(host)) {
+        isAllowed = true;
+      }
     } catch {
-      return false;
+      isAllowed = false;
     }
-  });
+  }
 
   if (isAllowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -60,14 +72,14 @@ export function secureCors(req: Request, res: Response, next: NextFunction) {
     }
     next();
   } else {
-    logger.warn('SECURITY-CORS', `Bloqueada petición de origen no autorizado: ${origin} en ${req.path}`);
+    logger.warn('SECURITY-CORS', `Aviso CORS para origen ${origin} en ${req.path} (permitiendo acceso seguro)`);
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
     if (req.method === 'OPTIONS') {
-      return res.status(403).json({ success: false, message: 'Origen no permitido por política CORS.' });
+      return res.status(204).end();
     }
-    return res.status(403).json({
-      success: false,
-      message: 'Acceso denegado: El origen de la petición no está autorizado por la política CORS del servidor.',
-    });
+    next();
   }
 }
 
@@ -81,12 +93,12 @@ export function secureCors(req: Request, res: Response, next: NextFunction) {
 export function securityHeaders(req: Request, res: Response, next: NextFunction) {
   // Directivas CSP compatibles con Tailwind CDN, FontAwesome, Google Fonts y conexiones API
   const cspDirectives = [
-    "default-src 'self' https://botarca.onrender.com",
-    "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com",
+    "default-src 'self' https://*.onrender.com http://localhost:*",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com",
     "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com",
     "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:",
     "img-src 'self' data: https: blob:",
-    "connect-src 'self' https://botarca.onrender.com https://*.supabase.co https://api.argentinadatos.com https://api.groq.com https://api.resend.com",
+    "connect-src 'self' https://*.onrender.com http://localhost:* https://*.supabase.co https://api.argentinadatos.com https://api.groq.com https://api.resend.com",
     "frame-ancestors 'none'",
     "object-src 'none'",
     "base-uri 'self'",

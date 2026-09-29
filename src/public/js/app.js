@@ -54,7 +54,30 @@ function hideLoginOverlay() {
   document.getElementById('loginOverlay')?.classList.add('hidden');
 }
 
+function showAuthAlert(message, type = 'error') {
+  const alertEl = document.getElementById('authAlert');
+  if (!alertEl) return;
+  alertEl.className = 'p-3.5 rounded-xl text-xs font-bold border flex items-start space-x-2.5 transition-all mb-3';
+  
+  if (type === 'error') {
+    alertEl.classList.add('bg-rose-50', 'border-rose-300', 'text-rose-900');
+    alertEl.innerHTML = `<i class="fa-solid fa-circle-exclamation text-rose-600 text-base mt-0.5 flex-shrink-0"></i> <div class="flex-1 leading-snug"><span class="font-extrabold block uppercase tracking-wide text-[10px] text-rose-700 mb-0.5">Acceso Denegado / Error:</span>${escapeHtml(message)}</div>`;
+  } else {
+    alertEl.classList.add('bg-emerald-50', 'border-emerald-300', 'text-emerald-900');
+    alertEl.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600 text-base mt-0.5 flex-shrink-0"></i> <div class="flex-1 leading-snug"><span class="font-extrabold block uppercase tracking-wide text-[10px] text-emerald-700 mb-0.5">Completado:</span>${escapeHtml(message)}</div>`;
+  }
+}
+
+function hideAuthAlert() {
+  const alertEl = document.getElementById('authAlert');
+  if (alertEl) {
+    alertEl.className = 'hidden p-3.5 rounded-xl text-xs font-bold border flex items-start space-x-2.5 transition-all';
+    alertEl.innerHTML = '';
+  }
+}
+
 function switchAuthMode(mode) {
+  hideAuthAlert();
   const loginForm = document.getElementById('loginForm');
   const registerForm = document.getElementById('registerForm');
   const tabLogin = document.getElementById('tabBtnLogin');
@@ -64,22 +87,22 @@ function switchAuthMode(mode) {
     loginForm?.classList.add('hidden');
     registerForm?.classList.remove('hidden');
 
-    tabLogin?.classList.remove('text-amber-400', 'border-b-2', 'border-amber-400');
-    tabLogin?.classList.add('text-slate-400', 'border-transparent');
+    tabLogin?.classList.remove('text-indigo-700', 'bg-white', 'shadow-sm');
+    tabLogin?.classList.add('text-slate-600');
 
-    tabRegister?.classList.remove('text-slate-400', 'border-transparent');
-    tabRegister?.classList.add('text-amber-400', 'border-b-2', 'border-amber-400');
+    tabRegister?.classList.remove('text-slate-600');
+    tabRegister?.classList.add('text-indigo-700', 'bg-white', 'shadow-sm');
 
     document.getElementById('regName')?.focus();
   } else {
     registerForm?.classList.add('hidden');
     loginForm?.classList.remove('hidden');
 
-    tabRegister?.classList.remove('text-amber-400', 'border-b-2', 'border-amber-400');
-    tabRegister?.classList.add('text-slate-400', 'border-transparent');
+    tabRegister?.classList.remove('text-indigo-700', 'bg-white', 'shadow-sm');
+    tabRegister?.classList.add('text-slate-600');
 
-    tabLogin?.classList.remove('text-slate-400', 'border-transparent');
-    tabLogin?.classList.add('text-amber-400', 'border-b-2', 'border-amber-400');
+    tabLogin?.classList.remove('text-slate-600');
+    tabLogin?.classList.add('text-indigo-700', 'bg-white', 'shadow-sm');
 
     document.getElementById('loginUsername')?.focus();
   }
@@ -87,6 +110,7 @@ function switchAuthMode(mode) {
 
 async function handleUserLogin(e) {
   e.preventDefault();
+  hideAuthAlert();
   const username = document.getElementById('loginUsername').value.trim();
   const password = document.getElementById('loginPassword').value;
   const btn = document.getElementById('btnLoginSubmit');
@@ -101,7 +125,7 @@ async function handleUserLogin(e) {
       body: JSON.stringify({ username, password })
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({ success: false, message: 'Respuesta inválida del servidor.' }));
     if (data.success && data.token) {
       authToken = data.token;
       localStorage.setItem('botarca_token', authToken);
@@ -110,18 +134,22 @@ async function handleUserLogin(e) {
       showToast(`¡Bienvenido, ${data.user.name || data.user.username}!`, 'success');
       await initApp();
     } else {
-      showToast(data.message || 'Usuario o contraseña incorrectos.', 'error');
+      const errMsg = data.message || 'Usuario o contraseña incorrectos.';
+      showAuthAlert(errMsg, 'error');
+      showToast(errMsg, 'error');
     }
   } catch (err) {
+    showAuthAlert('Error conectando con el servidor. Revisa tu conexión a internet.', 'error');
     showToast('Error conectando con el servidor.', 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span>Ingresar al Sistema</span> <i class="fa-solid fa-arrow-right text-xs"></i>';
+    btn.innerHTML = '<span>Ingresar a la Plataforma</span> <i class="fa-solid fa-arrow-right text-xs"></i>';
   }
 }
 
 async function handleUserRegister(e) {
   e.preventDefault();
+  hideAuthAlert();
   const name = document.getElementById('regName').value.trim();
   const username = document.getElementById('regUsername').value.trim();
   const email = document.getElementById('regEmail').value.trim();
@@ -130,12 +158,13 @@ async function handleUserRegister(e) {
   const btn = document.getElementById('btnRegisterSubmit');
 
   if (password !== confirm) {
+    showAuthAlert('Las contraseñas no coinciden. Por favor verifícalas.', 'error');
     showToast('Las contraseñas no coinciden.', 'warn');
     return;
   }
 
   btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Creando y enviando email...';
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Creando cuenta...';
 
   try {
     const res = await fetch('/api/auth/register', {
@@ -144,9 +173,9 @@ async function handleUserRegister(e) {
       body: JSON.stringify({ name, username, email, password })
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({ success: false, message: 'Respuesta inválida del servidor.' }));
     if (data.success) {
-      showToast(data.message, 'success');
+      showToast(data.message || '¡Cuenta creada con éxito!', 'success');
       if (data.token) {
         authToken = data.token;
         localStorage.setItem('botarca_token', authToken);
@@ -157,15 +186,19 @@ async function handleUserRegister(e) {
         switchAuthMode('login');
         document.getElementById('loginUsername').value = username;
         document.getElementById('loginPassword').value = '';
+        showAuthAlert('Cuenta creada con éxito. Ya podés iniciar sesión con tus datos.', 'success');
       }
     } else {
-      showToast(data.message || 'Error al crear la cuenta.', 'error');
+      const errMsg = data.message || (data.errors ? data.errors.join(' | ') : 'Error al registrar usuario.');
+      showAuthAlert(errMsg, 'error');
+      showToast(errMsg, 'error');
     }
   } catch (err) {
+    showAuthAlert('Error en la comunicación con el servidor al registrar cuenta.', 'error');
     showToast('Error en la comunicación con el servidor.', 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span>Crear Usuario & Activar</span> <i class="fa-solid fa-paper-plane text-xs"></i>';
+    btn.innerHTML = '<span>Crear Usuario & Empezar</span> <i class="fa-solid fa-paper-plane text-xs"></i>';
   }
 }
 
@@ -1388,10 +1421,10 @@ function showToast(message, type = 'info') {
 
   const toast = document.createElement('div');
   const colors = {
-    success: 'bg-white border-emerald-200 text-emerald-950 shadow-emerald-500/10',
-    error: 'bg-white border-rose-200 text-rose-950 shadow-rose-500/10',
-    warn: 'bg-white border-amber-200 text-amber-950 shadow-amber-500/10',
-    info: 'bg-white border-slate-200 text-slate-900 shadow-slate-500/10',
+    success: 'bg-white border-2 border-emerald-500 text-emerald-950 shadow-2xl ring-1 ring-emerald-500/20',
+    error: 'bg-white border-2 border-rose-500 text-rose-950 shadow-2xl ring-1 ring-rose-500/20',
+    warn: 'bg-white border-2 border-amber-500 text-amber-950 shadow-2xl ring-1 ring-amber-500/20',
+    info: 'bg-white border-2 border-indigo-500 text-slate-900 shadow-2xl ring-1 ring-indigo-500/20',
   };
 
   const icons = {
@@ -1401,10 +1434,10 @@ function showToast(message, type = 'info') {
     info: 'fa-circle-info text-indigo-600',
   };
 
-  toast.className = `pointer-events-auto p-3.5 rounded-xl border shadow-xl flex items-center space-x-3 text-xs font-semibold transition-all duration-300 translate-y-2 opacity-0 ${colors[type] || colors.info}`;
+  toast.className = `pointer-events-auto p-4 rounded-xl border-2 shadow-2xl flex items-center space-x-3.5 text-xs font-bold transition-all duration-200 translate-y-2 opacity-0 ${colors[type] || colors.info}`;
   toast.innerHTML = `
-    <i class="fa-solid ${icons[type] || icons.info} text-base flex-shrink-0"></i>
-    <span class="flex-1 leading-snug">${escapeHtml(message)}</span>
+    <i class="fa-solid ${icons[type] || icons.info} text-lg flex-shrink-0"></i>
+    <span class="flex-1 leading-snug tracking-normal text-slate-900">${escapeHtml(message)}</span>
   `;
 
   container.appendChild(toast);
@@ -1412,7 +1445,7 @@ function showToast(message, type = 'info') {
   setTimeout(() => {
     toast.classList.add('opacity-0', 'translate-y-2');
     setTimeout(() => toast.remove(), 300);
-  }, 4500);
+  }, 5000);
 }
 
 function escapeHtml(str) {

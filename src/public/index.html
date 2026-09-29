@@ -1,33 +1,35 @@
 <!DOCTYPE html>
-<html lang="es" class="dark">
+<html lang="es" class="h-full">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BotArca - Facturación Fácil y Automática en ARCA</title>
+  <title>BotArca - Facturación Inteligente y Automática en ARCA</title>
+  
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- FontAwesome 6 -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="css/style.css">
+
   <script>
     tailwind.config = {
-      darkMode: 'class',
       theme: {
         extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
           colors: {
-            obsidian: {
-              950: '#060709',
-              900: '#090a0d',
-              850: '#101217',
-              800: '#161922',
-              700: '#1f242e',
-              600: '#2a303d',
-            },
-            gold: {
-              400: '#fbbf24',
-              500: '#f59e0b',
-              600: '#d97706',
-              700: '#b45309',
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
             }
           }
         }
@@ -35,314 +37,377 @@
     }
   </script>
 </head>
-<body class="bg-[#08090c] text-slate-100 min-h-screen font-sans antialiased flex flex-col selection:bg-amber-500 selection:text-black">
+<body class="bg-[#f8fafc] text-slate-900 min-h-full font-sans antialiased flex flex-col selection:bg-indigo-500 selection:text-white">
 
-  <!-- LOGIN & REGISTRATION OVERLAY -->
-  <div id="loginOverlay" class="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-    <div class="card-panel max-w-md w-full p-6 shadow-2xl space-y-5 border-obsidian-700">
+  <!-- LOGIN & REGISTRATION MODAL OVERLAY -->
+  <div id="loginOverlay" class="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 transition-all">
+    <div class="bg-white max-w-md w-full p-8 rounded-2xl shadow-2xl space-y-6 border border-slate-100">
       
       <!-- Brand Header -->
-      <div class="text-center space-y-1.5">
-        <div class="w-10 h-10 mx-auto rounded-lg bg-obsidian-800 border border-obsidian-600 flex items-center justify-center text-amber-400 text-lg shadow-inner">
+      <div class="text-center space-y-2">
+        <div class="w-12 h-12 mx-auto rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xl shadow-lg shadow-indigo-200">
           <i class="fa-solid fa-bolt"></i>
         </div>
-        <h2 class="text-lg font-bold tracking-tight text-white font-mono">BOTARCA</h2>
-        <p class="text-xs text-slate-400">Facturación Automática e Inteligente en ARCA</p>
+        <h2 class="text-2xl font-extrabold tracking-tight text-slate-900">BotArca</h2>
+        <p class="text-sm text-slate-500">Sistema de Facturación Automática e Inteligente en ARCA</p>
       </div>
 
       <!-- Auth Mode Tabs -->
-      <div class="flex border-b border-obsidian-700 font-mono text-xs">
-        <button type="button" id="tabBtnLogin" onclick="switchAuthMode('login')" class="flex-1 pb-2 font-bold text-amber-400 border-b-2 border-amber-400 transition">
+      <div class="flex bg-slate-100 p-1 rounded-xl text-sm font-semibold">
+        <button type="button" id="tabBtnLogin" onclick="switchAuthMode('login')" class="flex-1 py-2 rounded-lg font-bold text-indigo-700 bg-white shadow-sm transition">
           <i class="fa-solid fa-right-to-bracket mr-1.5"></i> Iniciar Sesión
         </button>
-        <button type="button" id="tabBtnRegister" onclick="switchAuthMode('register')" class="flex-1 pb-2 font-bold text-slate-400 hover:text-slate-200 border-b-2 border-transparent transition">
-          <i class="fa-solid fa-user-plus mr-1.5"></i> Crear Usuario
+        <button type="button" id="tabBtnRegister" onclick="switchAuthMode('register')" class="flex-1 py-2 rounded-lg font-bold text-slate-600 hover:text-slate-900 transition">
+          <i class="fa-solid fa-user-plus mr-1.5"></i> Crear Cuenta
         </button>
       </div>
 
       <!-- Login Form -->
-      <form id="loginForm" onsubmit="handleUserLogin(event)" class="space-y-3.5 font-mono">
+      <form id="loginForm" onsubmit="handleUserLogin(event)" class="space-y-4">
         <div>
-          <label class="block text-xs font-semibold text-slate-300 mb-1">Usuario o Email</label>
-          <input type="text" id="loginUsername" class="input-field" placeholder="ej: admin" required autofocus>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Usuario o Correo Electrónico</label>
+          <input type="text" id="loginUsername" class="input-field" placeholder="ej: admin o tu@email.com" required autofocus>
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-slate-300 mb-1">Contraseña</label>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Contraseña</label>
           <input type="password" id="loginPassword" class="input-field" placeholder="••••••••" required>
         </div>
 
-        <button type="submit" id="btnLoginSubmit" class="btn-gold w-full py-2.5 mt-2">
-          <span>Ingresar al Sistema</span>
+        <button type="submit" id="btnLoginSubmit" class="btn-primary w-full !py-3 text-base mt-2">
+          <span>Ingresar a la Plataforma</span>
           <i class="fa-solid fa-arrow-right text-xs"></i>
         </button>
       </form>
 
       <!-- Registration Form -->
-      <form id="registerForm" onsubmit="handleUserRegister(event)" class="space-y-3 font-mono hidden">
+      <form id="registerForm" onsubmit="handleUserRegister(event)" class="space-y-3.5 hidden">
         <div>
-          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Nombre Completo</label>
-          <input type="text" id="regName" class="input-field text-xs" placeholder="ej: Laura Martínez" required>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Nombre Completo</label>
+          <input type="text" id="regName" class="input-field" placeholder="ej: Laura Martínez" required>
         </div>
 
         <div>
-          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Nombre de Usuario</label>
-          <input type="text" id="regUsername" class="input-field text-xs" placeholder="ej: laura" required>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Nombre de Usuario</label>
+          <input type="text" id="regUsername" class="input-field" placeholder="ej: lauram" required>
         </div>
 
         <div>
-          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Correo Electrónico</label>
-          <input type="email" id="regEmail" class="input-field text-xs" placeholder="ej: laura@empresa.com" required>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Correo Electrónico</label>
+          <input type="email" id="regEmail" class="input-field" placeholder="ej: laura@empresa.com" required>
         </div>
 
         <div class="grid grid-cols-2 gap-2">
           <div>
-            <label class="block text-[11px] font-semibold text-slate-300 mb-1">Contraseña</label>
-            <input type="password" id="regPassword" class="input-field text-xs" placeholder="••••••••" minlength="4" required>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Contraseña</label>
+            <input type="password" id="regPassword" class="input-field" placeholder="••••••••" minlength="4" required>
           </div>
           <div>
-            <label class="block text-[11px] font-semibold text-slate-300 mb-1">Confirmar</label>
-            <input type="password" id="regPasswordConfirm" class="input-field text-xs" placeholder="••••••••" minlength="4" required>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Confirmar</label>
+            <input type="password" id="regPasswordConfirm" class="input-field" placeholder="••••••••" minlength="4" required>
           </div>
         </div>
 
-        <button type="submit" id="btnRegisterSubmit" class="btn-gold w-full py-2.5 mt-2">
-          <span>Crear Usuario & Activar</span>
+        <button type="submit" id="btnRegisterSubmit" class="btn-primary w-full !py-3 text-base mt-2">
+          <span>Crear Usuario & Empezar</span>
           <i class="fa-solid fa-paper-plane text-xs"></i>
         </button>
 
-        <div class="text-center pt-2 text-[11px] text-slate-500 font-mono">
-          ¿Ya tienes cuenta? <a href="javascript:void(0)" onclick="switchAuthMode('login')" class="text-amber-400 hover:underline font-bold">Iniciar Sesión</a>
+        <div class="text-center pt-2 text-xs text-slate-500">
+          ¿Ya tenés cuenta? <a href="javascript:void(0)" onclick="switchAuthMode('login')" class="text-indigo-600 font-bold hover:underline">Iniciar Sesión</a>
         </div>
       </form>
 
     </div>
   </div>
 
-  <!-- MAIN APP HEADER -->
-  <header class="border-b border-obsidian-700 bg-obsidian-900/95 sticky top-0 z-40 backdrop-blur">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+  <!-- MAIN APP TOP NAVBAR -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       
-      <!-- Brand Logo -->
-      <div class="flex items-center space-x-3">
-        <div class="w-8 h-8 rounded-md bg-obsidian-800 border border-obsidian-600 flex items-center justify-center text-amber-400 font-black text-sm">
-          <i class="fa-solid fa-bolt"></i>
-        </div>
-        <div>
-          <div class="flex items-center space-x-2">
-            <span class="text-base font-extrabold tracking-tight text-white font-mono">BOTARCA</span>
-            <span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono uppercase font-bold">En Línea</span>
+      <!-- Top Row: Brand, Active Account, Dollar, Profile -->
+      <div class="h-16 flex items-center justify-between gap-4">
+        
+        <!-- Brand & Health Badge -->
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-700 flex items-center justify-center text-white font-extrabold text-lg shadow-md shadow-indigo-100">
+            <i class="fa-solid fa-bolt"></i>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <span class="text-lg font-extrabold text-slate-900 tracking-tight">BotArca</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 animate-pulse"></span>
+                ARCA Conectado
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 hidden sm:block">Facturación Electrónica Automática</p>
           </div>
         </div>
-      </div>
 
-      <!-- Active CUIT Selector & Quick Stats -->
-      <div class="flex items-center space-x-2 sm:space-x-4">
-        
-        <!-- Multi-Account / Active CUIT Selector -->
-        <div class="flex items-center space-x-2 bg-obsidian-800 border border-obsidian-600 px-3 py-1.5 rounded text-xs font-mono">
-          <span class="text-slate-400 text-[11px] hidden md:inline">Empresa:</span>
-          <i class="fa-solid fa-building text-amber-400 text-[11px]"></i>
-          <select id="headerAccountSelect" onchange="switchActiveCuitAccount(this.value)" class="bg-transparent text-slate-100 outline-none text-xs font-bold cursor-pointer max-w-[200px] sm:max-w-[280px]">
-            <option value="">Cargando CUIT...</option>
-          </select>
-        </div>
+        <!-- Controls: Multi-Account Selector, Dollar Ticker, Actions -->
+        <div class="flex items-center space-x-3 sm:space-x-4">
+          
+          <!-- Multi-Account / Emisor Picker -->
+          <div class="flex items-center space-x-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl text-xs transition">
+            <i class="fa-solid fa-building text-indigo-600"></i>
+            <span class="text-slate-500 font-medium hidden md:inline">Emisor:</span>
+            <select id="headerAccountSelect" onchange="switchActiveCuitAccount(this.value)" class="bg-transparent font-bold text-slate-800 outline-none cursor-pointer max-w-[180px] sm:max-w-[240px]">
+              <option value="">Cargando empresas...</option>
+            </select>
+          </div>
 
-        <!-- Dollar Chip -->
-        <div class="hidden lg:flex items-center space-x-2 px-2.5 py-1 rounded bg-obsidian-850 border border-obsidian-700 text-[11px] font-mono">
-          <span class="text-slate-400">Dólar Blue:</span>
-          <strong id="tickBlue" class="text-amber-400 font-bold">$1.220</strong>
-        </div>
+          <!-- Dollar Ticker Badge -->
+          <div class="hidden lg:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-900">
+            <i class="fa-solid fa-dollar-sign text-amber-600"></i>
+            <span class="text-amber-700">Dólar Blue:</span>
+            <strong id="tickBlue" class="font-bold text-amber-900">$1.220</strong>
+          </div>
 
-        <!-- Test Connection Button -->
-        <button onclick="testArcaConnection()" class="btn-secondary !py-1 !px-2.5 text-xs hidden sm:flex items-center space-x-1" title="Probar conexión con portal de ARCA">
-          <i class="fa-solid fa-plug text-amber-400 text-[11px]"></i>
-          <span>Test ARCA</span>
-        </button>
-
-        <!-- User Profile & Logout -->
-        <div class="flex items-center space-x-2 pl-2 border-l border-obsidian-700 font-mono">
-          <span id="headerUserName" class="text-xs font-semibold text-slate-300 hidden sm:inline">admin</span>
-          <button onclick="handleUserLogout()" title="Cerrar Sesión" class="text-slate-400 hover:text-rose-400 text-xs transition p-1.5 rounded bg-obsidian-800 hover:bg-obsidian-700">
-            <i class="fa-solid fa-power-off"></i>
+          <!-- Test Connection Button -->
+          <button onclick="testArcaConnection()" class="btn-secondary !py-1.5 !px-3 text-xs hidden sm:inline-flex" title="Verificar acceso a portal de ARCA">
+            <i class="fa-solid fa-plug text-indigo-600"></i>
+            <span>Test ARCA</span>
           </button>
+
+          <!-- User Menu & Logout -->
+          <div class="flex items-center space-x-3 pl-3 border-l border-slate-200">
+            <div class="hidden sm:block text-right">
+              <span id="headerUserName" class="text-xs font-bold text-slate-800 block">admin</span>
+              <span class="text-[10px] text-slate-500 block">Operador Activo</span>
+            </div>
+            <button onclick="handleUserLogout()" title="Cerrar Sesión" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 flex items-center justify-center transition">
+              <i class="fa-solid fa-power-off text-xs"></i>
+            </button>
+          </div>
+
         </div>
-
       </div>
-    </div>
 
-    <!-- STREAMLINED 4-TAB NAVIGATION -->
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-2 overflow-x-auto border-t border-obsidian-800 py-1.5 font-mono">
-      <button onclick="switchTab('facturar')" class="nav-tab-btn active" data-tab="facturar">
-        <i class="fa-solid fa-bolt text-amber-400"></i> Nueva Factura
-      </button>
-      <button onclick="switchTab('comprobantes')" class="nav-tab-btn" data-tab="comprobantes">
-        <i class="fa-solid fa-receipt text-emerald-400"></i> Historial de Facturas
-      </button>
-      <button onclick="switchTab('crm')" class="nav-tab-btn" data-tab="crm">
-        <i class="fa-solid fa-address-book text-blue-400"></i> Mis Clientes
-      </button>
-      <button onclick="switchTab('settings')" class="nav-tab-btn" data-tab="settings">
-        <i class="fa-solid fa-sliders text-slate-300"></i> Mi Cuenta & Ajustes
-      </button>
+      <!-- Navigation Tabs (Didactic 4-Tabs Bar) -->
+      <div class="flex space-x-2 overflow-x-auto py-2 border-t border-slate-100">
+        <button onclick="switchTab('facturar')" class="nav-tab-btn active" data-tab="facturar">
+          <i class="fa-solid fa-bolt"></i>
+          <span>Nueva Factura</span>
+        </button>
+        <button onclick="switchTab('comprobantes')" class="nav-tab-btn" data-tab="comprobantes">
+          <i class="fa-solid fa-receipt"></i>
+          <span>Historial de Facturas</span>
+        </button>
+        <button onclick="switchTab('crm')" class="nav-tab-btn" data-tab="crm">
+          <i class="fa-solid fa-address-book"></i>
+          <span>Mis Clientes</span>
+        </button>
+        <button onclick="switchTab('settings')" class="nav-tab-btn" data-tab="settings">
+          <i class="fa-solid fa-sliders"></i>
+          <span>Mi Cuenta & Ajustes</span>
+        </button>
+      </div>
+
     </div>
   </header>
 
-  <!-- MAIN CONTAINER -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex-1 w-full">
+  <!-- MAIN APP CONTAINER -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
 
-    <!-- ========================================== -->
-    <!-- TAB 1: EMITIR FACTURAS (UNIFICADO)         -->
-    <!-- ========================================== -->
-    <section id="tab-facturar" class="tab-content block space-y-4">
+    <!-- ============================================================= -->
+    <!-- SECCIÓN 1: NUEVA FACTURA (DIDÁCTICO & 100% VISUAL)           -->
+    <!-- ============================================================= -->
+    <section id="tab-facturar" class="tab-content block space-y-6">
       
-      <!-- Submode Switcher -->
-      <div class="card-panel p-2 flex items-center space-x-2 bg-obsidian-900 border-obsidian-700 font-mono text-xs">
-        <button type="button" id="btnSubmodeLote" onclick="setInvoiceSubmode('lote')" class="flex-1 py-2 px-3 rounded font-bold text-center transition bg-amber-500/20 text-amber-300 border border-amber-500/40">
-          <i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i> Facturación por Lote (WhatsApp o Excel con IA)
+      <!-- Sub-Mode Selector Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        
+        <button type="button" id="btnSubmodeLote" onclick="setInvoiceSubmode('lote')" class="p-4 rounded-2xl border-2 text-left transition flex items-center space-x-4 bg-indigo-50/80 border-indigo-600 shadow-sm cursor-pointer">
+          <div class="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xl shadow-md shadow-indigo-200">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <strong class="text-sm font-bold text-slate-900">Facturar por Lote con Inteligencia Artificial</strong>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-indigo-600 text-white">Recomendado</span>
+            </div>
+            <p class="text-xs text-slate-600 mt-0.5">Pegá mensajes de WhatsApp o filas de Excel y la IA hace el trabajo por vos.</p>
+          </div>
         </button>
-        <button type="button" id="btnSubmodeManual" onclick="setInvoiceSubmode('manual')" class="flex-1 py-2 px-3 rounded font-bold text-center text-slate-400 hover:text-slate-200 transition border border-transparent">
-          <i class="fa-solid fa-pen-to-square mr-1.5"></i> Factura Individual Rápida (1 por 1)
+
+        <button type="button" id="btnSubmodeManual" onclick="setInvoiceSubmode('manual')" class="p-4 rounded-2xl border-2 text-left transition flex items-center space-x-4 bg-white border-slate-200 hover:border-slate-300 shadow-sm cursor-pointer">
+          <div class="w-12 h-12 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-file-pen"></i>
+          </div>
+          <div>
+            <strong class="text-sm font-bold text-slate-800">Factura Individual Rápida</strong>
+            <p class="text-xs text-slate-500 mt-0.5">Cargá una sola factura manualmente completando cliente e importe.</p>
+          </div>
         </button>
+
       </div>
 
-      <!-- SUBVIEW 1: LOTE (WHATSAPP / EXCEL) -->
-      <div id="subviewLote" class="space-y-4">
+      <!-- ========================================= -->
+      <!-- VISTA A: FACTURACIÓN POR LOTE (IA / EXCEL)-->
+      <!-- ========================================= -->
+      <div id="subviewLote" class="space-y-6">
         
-        <div class="card-panel p-5 space-y-4">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-obsidian-700 pb-3">
-            <div>
-              <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center">
-                <i class="fa-solid fa-wand-magic-sparkles text-amber-400 mr-2"></i> Pega aquí lo que querés facturar
-              </h3>
-              <p class="text-xs text-slate-400 mt-0.5">Copia y pega los mensajes de WhatsApp donde te piden facturar o filas de Excel. La Inteligencia Artificial detectará automáticamente el CUIT, cliente, monto y concepto.</p>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-1.5">
-              <button type="button" onclick="loadSampleWhatsAppMsg()" class="btn-secondary !py-1 !px-2.5 text-xs">
-                <i class="fa-brands fa-whatsapp text-emerald-400 text-xs mr-1"></i> Probar con WhatsApp
-              </button>
-              <button type="button" onclick="loadSampleExcelData()" class="btn-secondary !py-1 !px-2.5 text-xs">
-                <i class="fa-solid fa-table-cells text-emerald-400 text-xs mr-1"></i> Probar con Excel
-              </button>
-              <button type="button" id="btnParseWithAi" onclick="handleParseWithGroq()" class="btn-gold !py-1 !px-3 text-xs shadow">
-                <i class="fa-solid fa-brain text-[10px] mr-1"></i> ✨ Interpretar con IA
-              </button>
-              <button type="button" onclick="clearExcelPasteArea()" class="btn-secondary !py-1 !px-2 text-xs" title="Limpiar texto">
-                <i class="fa-solid fa-trash-can text-xs"></i>
-              </button>
-            </div>
-          </div>
-
-          <!-- Textarea -->
-          <div class="space-y-2">
-            <textarea id="excelPasteArea" oninput="handleExcelPasteChange(this.value)" rows="5" class="w-full bg-[#050608] border border-obsidian-700 rounded p-3 font-mono text-xs text-slate-200 outline-none focus:border-amber-500 transition placeholder:text-slate-600" placeholder="Ejemplo WhatsApp: 'Hola, facturale a Tech Solutions CUIT 30-71122334-4 el monto de $180.000 por honorarios de desarrollo de software'&#10;&#10;O pega directamente filas de tu planilla de Excel..."></textarea>
-            
-            <div class="flex flex-wrap items-center justify-between text-xs text-slate-400 font-mono gap-2">
-              <span id="parserBadge" class="px-2 py-0.5 rounded bg-obsidian-800 border border-obsidian-700 text-[11px] text-slate-400">
-                <i class="fa-solid fa-microchip mr-1 text-amber-400"></i> Detección Automática Lista
-              </span>
-              <span id="excelParsedCountText" class="text-amber-400 font-bold">0 facturas listas</span>
-            </div>
-          </div>
-
-          <!-- Preview & Emit Table -->
-          <div id="excelPreviewContainer" class="space-y-3 pt-2">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <span class="text-xs font-bold text-slate-200 uppercase font-mono tracking-wider">Facturas listas para emitir</span>
-              <div class="font-mono text-xs bg-obsidian-850 px-3 py-1.5 rounded border border-obsidian-700 flex items-center space-x-2">
-                <span class="text-slate-400">Total a Facturar:</span>
-                <strong id="excelPreviewTotal" class="text-amber-400 text-sm font-bold">$0,00</strong>
+        <!-- Step 1 Card: Pega y Detecta -->
+        <div class="card-panel p-6 space-y-4">
+          
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div class="flex items-center space-x-3">
+              <span class="step-number-badge">1</span>
+              <div>
+                <h3 class="text-base font-bold text-slate-900">Pegá lo que querés facturar</h3>
+                <p class="text-xs text-slate-500">Copiá mensajes de WhatsApp de tus clientes o filas de Excel. El sistema interpreta CUIT, nombre, montos y conceptos.</p>
               </div>
             </div>
 
-            <div class="overflow-x-auto max-h-72 overflow-y-auto border border-obsidian-700 rounded bg-[#050608]">
-              <table class="w-full text-left text-xs font-mono">
-                <thead class="bg-obsidian-850 sticky top-0 border-b border-obsidian-700 z-10 text-slate-500 uppercase text-[10px]">
+            <!-- Quick Action Chips -->
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button" onclick="loadSampleWhatsAppMsg()" class="btn-secondary !py-1.5 !px-3 text-xs">
+                <i class="fa-brands fa-whatsapp text-emerald-600 mr-1"></i> Probar con WhatsApp
+              </button>
+              <button type="button" onclick="loadSampleExcelData()" class="btn-secondary !py-1.5 !px-3 text-xs">
+                <i class="fa-solid fa-table text-indigo-600 mr-1"></i> Probar con Excel
+              </button>
+              <button type="button" id="btnParseWithAi" onclick="handleParseWithGroq()" class="btn-gold !py-1.5 !px-3 text-xs">
+                <i class="fa-solid fa-brain text-amber-600 mr-1"></i> ✨ Interpretar con IA
+              </button>
+              <button type="button" onclick="clearExcelPasteArea()" class="btn-secondary !py-1.5 !px-2.5 text-xs text-slate-400 hover:text-rose-600" title="Limpiar texto">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Textarea Area -->
+          <div class="space-y-2.5">
+            <textarea id="excelPasteArea" oninput="handleExcelPasteChange(this.value)" rows="4" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-800 outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 transition placeholder:text-slate-400 font-sans" placeholder="💬 Ejemplo WhatsApp:&#10;'Hola, facturale a Tech Solutions SRL CUIT 30-71234567-8 la suma de $185.000 por honorarios de desarrollo de software.'&#10;&#10;📊 O pegá directamente celdas copiadas de tu archivo Excel..."></textarea>
+            
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
+              <span id="parserBadge" class="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                <i class="fa-solid fa-microchip text-indigo-600 mr-1.5"></i> Esperando texto o planilla...
+              </span>
+              <span id="excelParsedCountText" class="text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full">
+                0 facturas detectadas
+              </span>
+            </div>
+          </div>
+
+          <!-- Step 2: Live Preview Table -->
+          <div id="excelPreviewContainer" class="space-y-4 pt-4 border-t border-slate-100">
+            
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="flex items-center space-x-3">
+                <span class="step-number-badge">2</span>
+                <h4 class="text-sm font-bold text-slate-800 uppercase tracking-wide">Comprobantes listos para emitir</h4>
+              </div>
+
+              <!-- Total Card -->
+              <div class="bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl flex items-center space-x-3">
+                <span class="text-xs font-bold text-emerald-800 uppercase tracking-wider">Total a Facturar:</span>
+                <strong id="excelPreviewTotal" class="text-lg font-extrabold text-emerald-700">$ 0,00</strong>
+              </div>
+            </div>
+
+            <!-- Table -->
+            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+              <table class="clean-table">
+                <thead>
                   <tr>
-                    <th class="py-2.5 px-2.5 w-8">#</th>
-                    <th class="py-2.5 px-2.5 w-36">CUIT / Doc</th>
-                    <th class="py-2.5 px-2.5 w-48">Razón Social / Cliente</th>
-                    <th class="py-2.5 px-2.5 w-28">Tipo</th>
-                    <th class="py-2.5 px-2.5">Detalle / Concepto</th>
-                    <th class="py-2.5 px-2.5 w-28 text-right">Monto Total</th>
-                    <th class="py-2.5 px-2 w-10 text-center"></th>
+                    <th class="w-10 text-center">#</th>
+                    <th class="w-40">CUIT / DNI</th>
+                    <th>Cliente / Razón Social</th>
+                    <th class="w-32">Tipo</th>
+                    <th>Detalle de Factura</th>
+                    <th class="w-36 text-right">Importe</th>
+                    <th class="w-12 text-center"></th>
                   </tr>
                 </thead>
-                <tbody id="excelPreviewTbody" class="divide-y divide-obsidian-800">
-                  <tr><td colspan="7" class="py-8 text-center text-slate-500">Pega texto o un mensaje arriba para previsualizar.</td></tr>
+                <tbody id="excelPreviewTbody">
+                  <tr>
+                    <td colspan="7" class="py-10 text-center text-slate-400 text-sm">
+                      <i class="fa-solid fa-clipboard-list text-3xl text-slate-300 block mb-2"></i>
+                      Pegá mensajes de WhatsApp o filas de Excel arriba para ver la vista previa.
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
 
-            <!-- Action: Facturar Todo -->
-            <div class="flex flex-col sm:flex-row items-center justify-between pt-2 gap-3">
-              <div class="text-xs text-slate-400 font-mono">
-                <i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i> El sistema emitirá los comprobantes oficiales directamente en el portal de ARCA.
+            <!-- Step 3: Big Execution Button -->
+            <div class="bg-gradient-to-r from-slate-50 to-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div class="flex items-center space-x-2 text-xs text-slate-600">
+                <i class="fa-solid fa-shield-halved text-emerald-600 text-base"></i>
+                <span>Los comprobantes se autorizan en tiempo real directamente en los servidores de ARCA.</span>
               </div>
-              <button type="button" id="btnAddToQueue" onclick="submitAndStartBatch()" disabled class="btn-gold !py-3 !px-8 text-xs font-bold w-full sm:w-auto shadow-xl">
-                <i class="fa-solid fa-bolt text-xs mr-1.5"></i>
+
+              <button type="button" id="btnAddToQueue" onclick="submitAndStartBatch()" disabled class="btn-emerald-action w-full sm:w-auto shadow-lg">
+                <i class="fa-solid fa-bolt text-sm"></i>
                 <span id="btnAddToQueueText">⚡ FACTURAR TODO EN ARCA AHORA</span>
               </button>
             </div>
+
           </div>
 
         </div>
 
-        <!-- Live Batch Progress Banner & Queue View -->
-        <div id="cockpitBanner" class="hidden card-panel p-5 bg-amber-950/20 border-amber-500/40 space-y-3 font-mono">
+        <!-- Live Progress Banner (Active during batch run) -->
+        <div id="cockpitBanner" class="hidden card-panel p-6 bg-indigo-900 text-white space-y-3">
           <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-2">
-              <span class="w-3 h-3 rounded-full bg-amber-400 animate-ping"></span>
-              <strong class="text-xs font-bold text-amber-200 uppercase">Emitiendo comprobantes en ARCA en vivo...</strong>
+            <div class="flex items-center space-x-3">
+              <span class="w-3 h-3 rounded-full bg-emerald-400 animate-ping"></span>
+              <strong class="text-sm font-bold uppercase tracking-wider">Emitiendo comprobantes en ARCA en vivo...</strong>
             </div>
-            <span id="cockpitPercent" class="text-xs font-bold text-amber-400">0%</span>
+            <span id="cockpitPercent" class="text-sm font-extrabold text-emerald-300">0%</span>
           </div>
-          <div class="w-full bg-obsidian-950 rounded-full h-2.5 overflow-hidden border border-obsidian-700">
-            <div id="cockpitProgressBar" class="bg-amber-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+
+          <div class="w-full bg-indigo-950 rounded-full h-3 overflow-hidden border border-indigo-800">
+            <div id="cockpitProgressBar" class="bg-emerald-400 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
           </div>
-          <p id="cockpitStatusMsg" class="text-xs text-slate-300">Iniciando sesión segura en ARCA...</p>
+          <p id="cockpitStatusMsg" class="text-xs text-indigo-200">Iniciando sesión segura con ARCA...</p>
         </div>
 
-        <!-- Live Results of Current Batch -->
-        <div class="card-panel p-5 space-y-4">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-obsidian-700 pb-3 font-mono">
+        <!-- Live Emission Results Table -->
+        <div class="card-panel p-6 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
             <div class="flex items-center space-x-3">
-              <h3 class="text-sm font-bold text-white uppercase tracking-wider">Estado de Emisión del Lote</h3>
-              <div class="flex items-center space-x-2 text-xs">
-                <span id="queueCountPendientes" class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 font-bold">0 pendientes</span>
-                <span id="queueCountEmitidas" class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">0 emitidas</span>
+              <h3 class="text-base font-bold text-slate-900">Estado de Emisión del Lote</h3>
+              <div class="flex items-center space-x-2 text-xs font-bold">
+                <span id="queueCountPendientes" class="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">0 pendientes</span>
+                <span id="queueCountEmitidas" class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">0 emitidas</span>
               </div>
             </div>
 
             <div class="flex items-center space-x-2">
-              <button onclick="loadQueueItems()" class="btn-secondary !py-1 !px-2.5 text-xs" title="Actualizar">
-                <i class="fa-solid fa-rotate text-xs"></i>
+              <button onclick="loadQueueItems()" class="btn-secondary !py-1.5 !px-3 text-xs" title="Actualizar estado">
+                <i class="fa-solid fa-rotate mr-1"></i> Actualizar
               </button>
-              <button onclick="clearQueueCompleted()" class="btn-secondary !py-1 !px-2.5 text-xs text-slate-400" title="Limpiar emitidas">
-                <i class="fa-solid fa-broom text-xs"></i> Limpiar Finalizadas
+              <button onclick="clearQueueCompleted()" class="btn-secondary !py-1.5 !px-3 text-xs text-slate-500 hover:text-slate-800" title="Limpiar emitidas">
+                <i class="fa-solid fa-broom mr-1"></i> Limpiar Finalizadas
               </button>
-              <button type="button" id="btnProcessQueue" onclick="startProcessingQueue()" class="btn-gold !py-1.5 !px-4 text-xs font-bold">
-                <i class="fa-solid fa-bolt text-xs"></i> Facturar Pendientes
+              <button type="button" id="btnProcessQueue" onclick="startProcessingQueue()" class="btn-primary !py-1.5 !px-4 text-xs font-bold">
+                <i class="fa-solid fa-bolt mr-1"></i> Facturar Pendientes
               </button>
             </div>
           </div>
 
-          <div class="overflow-x-auto max-h-80 overflow-y-auto">
-            <table class="w-full text-left text-xs font-mono">
-              <thead class="border-b border-obsidian-700 text-slate-500 uppercase text-[10px]">
+          <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <table class="clean-table">
+              <thead>
                 <tr>
-                  <th class="py-2.5 px-3">Estado</th>
-                  <th class="py-2.5 px-3">Receptor</th>
-                  <th class="py-2.5 px-3">Concepto</th>
-                  <th class="py-2.5 px-3">Tipo</th>
-                  <th class="py-2.5 px-3 text-right">Importe</th>
-                  <th class="py-2.5 px-3">CAE Autorizado / Mensaje</th>
-                  <th class="py-2.5 px-3 text-center"></th>
+                  <th class="w-32">Estado</th>
+                  <th>Receptor</th>
+                  <th>Concepto / Detalle</th>
+                  <th class="w-28">Tipo</th>
+                  <th class="w-32 text-right">Importe</th>
+                  <th>CAE Autorizado / Mensaje</th>
+                  <th class="w-12 text-center"></th>
                 </tr>
               </thead>
-              <tbody id="queueTableBody" class="divide-y divide-obsidian-800">
-                <tr><td colspan="7" class="py-6 text-center text-slate-500">No hay facturas en proceso.</td></tr>
+              <tbody id="queueTableBody">
+                <tr>
+                  <td colspan="7" class="py-8 text-center text-slate-400 text-sm">
+                    No hay facturas en proceso en este momento.
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -350,40 +415,43 @@
 
       </div>
 
-      <!-- SUBVIEW 2: INDIVIDUAL RÁPIDA (1 POR 1) -->
-      <div id="subviewManual" class="space-y-4 hidden">
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <!-- ========================================= -->
+      <!-- VISTA B: FACTURA INDIVIDUAL RÁPIDA (1 A 1)-->
+      <!-- ========================================= -->
+      <div id="subviewManual" class="space-y-6 hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          <div class="lg:col-span-8 space-y-4">
-            <form id="invoiceForm" onsubmit="handleEmitirFactura(event)" class="card-panel p-5 space-y-4 font-mono">
+          <!-- Form Left Column -->
+          <div class="lg:col-span-8">
+            <form id="invoiceForm" onsubmit="handleEmitirFactura(event)" class="card-panel p-6 space-y-6">
               
-              <div class="flex items-center justify-between border-b border-obsidian-700 pb-3">
-                <div class="flex items-center space-x-2">
-                  <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-                  <h3 class="text-sm font-bold text-white uppercase tracking-wider">Factura Individual Rápida</h3>
+              <div class="pb-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 class="text-base font-bold text-slate-900">Emisión de Factura Individual</h3>
+                  <p class="text-xs text-slate-500">Completá los datos del cliente y los productos o servicios a facturar.</p>
                 </div>
               </div>
 
-              <!-- Header Parameters: Tipo Comprobante, Punto de Venta, Concepto -->
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <!-- General Parameters -->
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                  <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Tipo Comprobante</label>
-                  <select id="facTipo" class="input-field font-semibold text-amber-300 text-xs">
+                  <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Tipo de Comprobante</label>
+                  <select id="facTipo" class="input-field font-bold text-indigo-700">
                     <option value="Factura C" selected>Factura C (Monotributo / Consumidor Final)</option>
-                    <option value="Factura B">Factura B (Resp. Inscripto a Consumidor Final)</option>
-                    <option value="Factura A">Factura A (Entre Resp. Inscriptos)</option>
+                    <option value="Factura B">Factura B (RI a Consumidor Final)</option>
+                    <option value="Factura A">Factura A (Entre Responsables Inscriptos)</option>
                     <option value="Recibo C">Recibo C</option>
                   </select>
                 </div>
 
                 <div>
-                  <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Punto de Venta</label>
-                  <input type="number" id="facPuntoVenta" value="1" min="1" max="9999" class="input-field text-xs font-bold" required>
+                  <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Punto de Venta</label>
+                  <input type="number" id="facPuntoVenta" value="1" min="1" max="9999" class="input-field font-bold" required>
                 </div>
 
                 <div>
-                  <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Concepto</label>
-                  <select id="facConcepto" class="input-field text-xs">
+                  <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Concepto</label>
+                  <select id="facConcepto" class="input-field">
                     <option value="2" selected>2: Servicios</option>
                     <option value="1">1: Productos / Mercadería</option>
                     <option value="3">3: Productos y Servicios</option>
@@ -391,23 +459,22 @@
                 </div>
               </div>
 
-              <!-- Recipient Section -->
-              <div class="p-3.5 bg-obsidian-850 border border-obsidian-700 rounded space-y-3">
-                <div class="flex items-center justify-between">
-                  <span class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center">
-                    <i class="fa-solid fa-user text-amber-400 mr-1.5"></i> Datos del Receptor
+              <!-- Client Details Box -->
+              <div class="form-section-card space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                  <span class="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center">
+                    <i class="fa-solid fa-user text-indigo-600 mr-2"></i> Datos del Cliente / Receptor
                   </span>
                   
-                  <!-- Quick client select -->
-                  <select id="facQuickClientSelect" onchange="applySelectedClientToInvoice(this.value)" class="text-[11px] bg-obsidian-900 border border-obsidian-600 rounded px-2 py-1 text-slate-300 max-w-[200px]">
+                  <select id="facQuickClientSelect" onchange="applySelectedClientToInvoice(this.value)" class="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-700 font-medium">
                     <option value="">-- Cargar de Mis Clientes --</option>
                   </select>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
                   <div class="sm:col-span-3">
-                    <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Tipo Doc</label>
-                    <select id="facTipoDoc" class="input-field text-xs">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Tipo Doc</label>
+                    <select id="facTipoDoc" class="input-field">
                       <option value="CUIT" selected>CUIT</option>
                       <option value="DNI">DNI</option>
                       <option value="Consumidor Final">Consumidor Final</option>
@@ -415,29 +482,30 @@
                   </div>
 
                   <div class="sm:col-span-4">
-                    <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Nro CUIT / DNI</label>
-                    <input type="text" id="facNroDoc" class="input-field text-xs font-bold" placeholder="20-30123456-9" onblur="formatInputCuit(this)" required>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nro CUIT / DNI</label>
+                    <input type="text" id="facNroDoc" class="input-field font-mono font-bold" placeholder="20-30123456-9" onblur="formatInputCuit(this)" required>
                   </div>
 
                   <div class="sm:col-span-5">
-                    <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Razón Social / Nombre</label>
-                    <input type="text" id="facRazonSocial" class="input-field text-xs" placeholder="ej: Tech Solutions SA" required>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Razón Social / Nombre</label>
+                    <input type="text" id="facRazonSocial" class="input-field" placeholder="ej: Tech Solutions SA" required>
                   </div>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Condición IVA</label>
-                    <select id="facCondIva" class="input-field text-xs">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Condición Frente al IVA</label>
+                    <select id="facCondIva" class="input-field">
                       <option value="Consumidor Final" selected>Consumidor Final</option>
                       <option value="Responsable Inscripto">Responsable Inscripto</option>
                       <option value="Monotributo">Monotributo</option>
                       <option value="Exento">Exento</option>
                     </select>
                   </div>
+
                   <div>
-                    <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Condición de Venta</label>
-                    <select id="facCondVenta" class="input-field text-xs">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Condición de Venta</label>
+                    <select id="facCondVenta" class="input-field">
                       <option value="Contado" selected>Contado / Transferencia</option>
                       <option value="Cuenta Corriente">Cuenta Corriente</option>
                       <option value="Tarjeta de Débito">Tarjeta de Débito</option>
@@ -447,49 +515,47 @@
                 </div>
               </div>
 
-              <!-- Invoice Items Table -->
-              <div class="space-y-2.5">
-                <div class="flex items-center justify-between">
-                  <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">Detalle del Comprobante</span>
-                </div>
+              <!-- Invoice Lines Items -->
+              <div class="space-y-3">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-800 block">Detalle de Renglones</span>
 
                 <div id="invoiceItemsContainer" class="space-y-2">
-                  <div class="invoice-item-row grid grid-cols-12 gap-2 items-center bg-obsidian-850 p-2.5 rounded border border-obsidian-700">
+                  <div class="invoice-item-row grid grid-cols-12 gap-2 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <div class="col-span-12 sm:col-span-6">
-                      <input type="text" class="item-desc input-field text-xs" placeholder="Descripción del servicio o producto..." value="Servicios profesionales" required>
+                      <input type="text" class="item-desc input-field text-sm" placeholder="Descripción del servicio o producto..." value="Servicios profesionales" required>
                     </div>
                     <div class="col-span-3 sm:col-span-2">
-                      <input type="number" class="item-qty input-field text-xs text-center" placeholder="Cant." value="1" min="1" step="1" oninput="calculateInvoiceTotals()" required>
+                      <input type="number" class="item-qty input-field text-sm text-center font-bold" placeholder="Cant." value="1" min="1" step="1" oninput="calculateInvoiceTotals()" required>
                     </div>
                     <div class="col-span-7 sm:col-span-3">
                       <div class="relative">
-                        <span class="absolute inset-y-0 left-0 pl-2 flex items-center text-slate-500 text-xs">$</span>
-                        <input type="number" class="item-price input-field text-xs !pl-6 font-bold text-amber-400" placeholder="Precio" value="150000" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
+                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-bold">$</span>
+                        <input type="number" class="item-price input-field text-sm !pl-7 font-bold text-slate-900" placeholder="Precio" value="150000" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
                       </div>
                     </div>
                     <div class="col-span-2 sm:col-span-1 text-center">
-                      <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-500 hover:text-rose-400 transition text-sm">
+                      <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-400 hover:text-rose-600 transition p-2" title="Eliminar renglón">
                         <i class="fa-solid fa-trash-can"></i>
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <button type="button" onclick="addInvoiceItem()" class="text-xs font-semibold text-amber-400/90 hover:text-amber-300 transition flex items-center space-x-1 pt-1">
-                  <i class="fa-solid fa-plus text-[10px]"></i>
-                  <span>Agregar otro renglón</span>
+                <button type="button" onclick="addInvoiceItem()" class="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition inline-flex items-center space-x-1.5 pt-1">
+                  <i class="fa-solid fa-circle-plus"></i>
+                  <span>Agregar otro renglón a la factura</span>
                 </button>
               </div>
 
-              <!-- Summary & Emit Action Bar -->
-              <div class="border-t border-obsidian-700 pt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div class="flex items-baseline space-x-3">
-                  <span class="text-xs text-slate-400 uppercase font-semibold">Total:</span>
-                  <span id="facTotalDisplay" class="text-xl font-extrabold text-white tracking-tight">$150.000,00</span>
+              <!-- Summary & Emit Button -->
+              <div class="pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div class="flex items-baseline space-x-2">
+                  <span class="text-xs font-bold text-slate-500 uppercase">Monto Total:</span>
+                  <span id="facTotalDisplay" class="text-2xl font-extrabold text-slate-900 tracking-tight">$ 150.000,00</span>
                 </div>
 
-                <button type="submit" id="btnEmitirComprobante" class="btn-gold w-full sm:w-auto px-8 py-2.5 text-xs font-bold shadow-xl">
-                  <i class="fa-solid fa-paper-plane text-xs mr-1"></i>
+                <button type="submit" id="btnEmitirComprobante" class="btn-emerald-action w-full sm:w-auto shadow-md">
+                  <i class="fa-solid fa-paper-plane mr-1"></i>
                   <span>EMITIR EN ARCA AHORA</span>
                 </button>
               </div>
@@ -498,20 +564,21 @@
           </div>
 
           <!-- Right Column: Last CAE Box -->
-          <div class="lg:col-span-4 space-y-4">
-            <div class="card-panel p-4 space-y-3 font-mono">
-              <div class="flex items-center justify-between border-b border-obsidian-700 pb-2">
-                <span class="text-xs font-bold text-slate-300 uppercase">Último CAE Autorizado</span>
-                <span id="caeStatusDot" class="w-2 h-2 rounded-full bg-slate-600"></span>
+          <div class="lg:col-span-4 space-y-6">
+            <div class="card-panel p-6 space-y-4">
+              <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h4 class="text-xs font-bold text-slate-800 uppercase tracking-wider">Último CAE Autorizado</h4>
+                <span id="caeStatusDot" class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
               </div>
 
-              <div id="lastCaeCard" class="space-y-2 text-xs">
-                <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 space-y-1">
-                  <div class="text-[10px] text-slate-500 uppercase">CAE Número:</div>
-                  <div id="lastCaeNumber" class="text-sm font-bold text-amber-400 select-all">-</div>
-                  <div class="flex justify-between text-[11px] text-slate-400 pt-1">
-                    <span>Vto CAE: <strong id="lastCaeVto" class="text-slate-200">-</strong></span>
-                    <span id="lastComprobanteNro" class="text-slate-300 font-semibold">-</span>
+              <div id="lastCaeCard" class="space-y-3">
+                <div class="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2">
+                  <div class="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">Código de Autorización (CAE):</div>
+                  <div id="lastCaeNumber" class="text-lg font-mono font-extrabold text-emerald-900 select-all">-</div>
+                  
+                  <div class="flex justify-between text-xs text-emerald-800 pt-2 border-t border-emerald-200/60">
+                    <span>Vto CAE: <strong id="lastCaeVto">-</strong></span>
+                    <span id="lastComprobanteNro" class="font-bold">-</span>
                   </div>
                 </div>
               </div>
@@ -523,40 +590,46 @@
 
     </section>
 
-    <!-- ========================================== -->
-    <!-- TAB 2: COMPROBANTES EMITIDOS (HISTORIAL)   -->
-    <!-- ========================================== -->
-    <section id="tab-comprobantes" class="tab-content hidden space-y-4">
-      <div class="card-panel p-5 space-y-4 font-mono">
+    <!-- ============================================================= -->
+    <!-- SECCIÓN 2: HISTORIAL DE FACTURAS                              -->
+    <!-- ============================================================= -->
+    <section id="tab-comprobantes" class="tab-content hidden space-y-6">
+      <div class="card-panel p-6 space-y-4">
         
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-obsidian-700 pb-3">
-          <div class="flex items-center space-x-2">
-            <i class="fa-solid fa-receipt text-emerald-400"></i>
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider">Historial de Comprobantes Emitidos</h3>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Historial de Comprobantes Emitidos</h3>
+            <p class="text-xs text-slate-500">Registro de todas las facturas autorizadas con su número oficial y CAE.</p>
           </div>
 
           <div class="flex items-center space-x-2">
-            <input type="text" id="comprobantesSearchInput" oninput="filterComprobantesTable(this.value)" placeholder="Buscar por CUIT, Cliente o CAE..." class="input-field !py-1 text-xs max-w-[260px]">
-            <button onclick="loadComprobantesList()" class="btn-secondary !py-1 !px-2.5 text-xs" title="Actualizar">
-              <i class="fa-solid fa-rotate text-xs"></i>
+            <div class="relative">
+              <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+              <input type="text" id="comprobantesSearchInput" oninput="filterComprobantesTable(this.value)" placeholder="Buscar por CUIT, Cliente o CAE..." class="input-field !py-2 !pl-9 text-xs w-64">
+            </div>
+            <button onclick="loadComprobantesList()" class="btn-secondary !py-2 !px-3 text-xs" title="Actualizar lista">
+              <i class="fa-solid fa-rotate"></i>
             </button>
           </div>
         </div>
 
-        <!-- Table -->
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-xs">
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <table class="clean-table">
             <thead>
-              <tr class="border-b border-obsidian-700 text-slate-500 uppercase text-[10px]">
-                <th class="py-2.5 px-3">Fecha</th>
-                <th class="py-2.5 px-3">Tipo & Nro</th>
-                <th class="py-2.5 px-3">Receptor</th>
-                <th class="py-2.5 px-3 text-right">Importe Total</th>
-                <th class="py-2.5 px-3">CAE / Estado</th>
+              <tr>
+                <th class="w-28">Fecha</th>
+                <th class="w-48">Tipo & Número</th>
+                <th>Cliente / Receptor</th>
+                <th class="w-36 text-right">Importe Total</th>
+                <th class="w-48">CAE Oficial</th>
               </tr>
             </thead>
-            <tbody id="comprobantesTableBody" class="divide-y divide-obsidian-800">
-              <tr><td colspan="5" class="py-8 text-center text-slate-500">Cargando comprobantes...</td></tr>
+            <tbody id="comprobantesTableBody">
+              <tr>
+                <td colspan="5" class="py-10 text-center text-slate-400 text-sm">
+                  Cargando historial de comprobantes...
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -564,77 +637,72 @@
       </div>
     </section>
 
-    <!-- ========================================== -->
-    <!-- TAB 3: CLIENTES (CRM)                      -->
-    <!-- ========================================== -->
-    <section id="tab-crm" class="tab-content hidden space-y-4">
-      <div class="card-panel p-5 space-y-4 font-mono">
+    <!-- ============================================================= -->
+    <!-- SECCIÓN 3: MIS CLIENTES (CRM)                                 -->
+    <!-- ============================================================= -->
+    <section id="tab-crm" class="tab-content hidden space-y-6">
+      <div class="card-panel p-6 space-y-4">
         
-        <div class="flex items-center justify-between border-b border-obsidian-700 pb-3">
-          <div class="flex items-center space-x-2">
-            <i class="fa-solid fa-address-book text-blue-400"></i>
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider">Directorio de Clientes Frecuentes</h3>
+        <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Directorio de Clientes Frecuentes</h3>
+            <p class="text-xs text-slate-500">Guardá los datos de tus clientes para facturarles en 1 solo clic.</p>
           </div>
-          <button onclick="openClientModal()" class="btn-gold !py-1 !px-3 text-xs">
-            <i class="fa-solid fa-plus text-[10px] mr-1"></i>
-            <span>Nuevo Cliente</span>
+
+          <button onclick="openClientModal()" class="btn-primary !py-2 !px-4 text-xs font-bold">
+            <i class="fa-solid fa-plus mr-1"></i> Nuevo Cliente
           </button>
         </div>
 
-        <!-- Clients Grid -->
-        <div id="clientsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div id="clientsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <!-- Rendered dynamically -->
         </div>
 
       </div>
     </section>
 
-    <!-- ========================================== -->
-    <!-- TAB 4: MI CUENTA & CONFIGURACIÓN           -->
-    <!-- ========================================== -->
-    <section id="tab-settings" class="tab-content hidden space-y-5">
+    <!-- ============================================================= -->
+    <!-- SECCIÓN 4: MI CUENTA & AJUSTES                                -->
+    <!-- ============================================================= -->
+    <section id="tab-settings" class="tab-content hidden space-y-6">
       
-      <!-- Section 1: Cuentas Fiscales ARCA -->
-      <div class="card-panel p-5 space-y-4 font-mono">
-        <div class="flex items-center justify-between border-b border-obsidian-700 pb-3">
+      <!-- Box 1: Cuentas Fiscales Multi-CUIT -->
+      <div class="card-panel p-6 space-y-4">
+        <div class="flex items-center justify-between pb-4 border-b border-slate-100">
           <div>
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center">
-              <i class="fa-solid fa-building text-amber-400 mr-2"></i> Mis Empresas y CUITs Emisores (ARCA)
-            </h3>
-            <p class="text-xs text-slate-400 mt-0.5">Podés administrar varios CUITs y cambiar de empresa emisora en 1 solo clic.</p>
+            <h3 class="text-base font-bold text-slate-900">Mis Empresas y CUITs Emisores (ARCA)</h3>
+            <p class="text-xs text-slate-500">Podés administrar varios CUITs y cambiar de empresa emisora en 1 clic.</p>
           </div>
-          <button onclick="openNewAccountModal()" class="btn-gold !py-1 !px-3 text-xs">
-            <i class="fa-solid fa-plus text-[10px] mr-1"></i>
-            <span>Agregar CUIT</span>
+
+          <button onclick="openNewAccountModal()" class="btn-primary !py-2 !px-4 text-xs font-bold">
+            <i class="fa-solid fa-plus mr-1"></i> Agregar CUIT
           </button>
         </div>
 
-        <div id="accountsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div id="accountsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <!-- Rendered dynamically -->
         </div>
       </div>
 
-      <!-- Section 2: Preferencias de Facturación y Estado Cloud -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <!-- Box 2 & 3: Preferencias y Cloud Health -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        <!-- Preferences -->
-        <div class="lg:col-span-6 card-panel p-5 space-y-4 font-mono">
-          <div class="border-b border-obsidian-700 pb-3">
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center">
-              <i class="fa-solid fa-sliders text-amber-400 mr-2"></i> Preferencias de Facturación
-            </h3>
-            <p class="text-[11px] text-slate-400 mt-0.5">Valores predeterminados para no tener que escribirlos cada vez.</p>
+        <!-- Preferences Form -->
+        <div class="lg:col-span-6 card-panel p-6 space-y-4">
+          <div class="pb-3 border-b border-slate-100">
+            <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">Preferencias de Facturación</h3>
+            <p class="text-xs text-slate-500 mt-0.5">Valores predeterminados para no tener que escribirlos cada vez.</p>
           </div>
 
-          <form onsubmit="handleSaveGeneralPreferences(event)" class="space-y-3">
+          <form onsubmit="handleSaveGeneralPreferences(event)" class="space-y-3.5">
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Punto de Venta por Defecto</label>
-              <input type="number" id="prefPuntoVenta" value="1" min="1" max="9999" class="input-field text-xs font-bold" required>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Punto de Venta por Defecto</label>
+              <input type="number" id="prefPuntoVenta" value="1" min="1" max="9999" class="input-field font-bold" required>
             </div>
 
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Concepto Predeterminado</label>
-              <select id="prefConcepto" class="input-field text-xs">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Concepto Predeterminado</label>
+              <select id="prefConcepto" class="input-field">
                 <option value="2" selected>2: Servicios (Honorarios, Consultoría, Desarrollo)</option>
                 <option value="1">1: Productos / Mercadería</option>
                 <option value="3">3: Productos y Servicios</option>
@@ -642,8 +710,8 @@
             </div>
 
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Condición de Venta Habitual</label>
-              <select id="prefCondicionVenta" class="input-field text-xs">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Condición de Venta Habitual</label>
+              <select id="prefCondicionVenta" class="input-field">
                 <option value="Contado" selected>Contado / Transferencia</option>
                 <option value="Cuenta Corriente">Cuenta Corriente</option>
                 <option value="Tarjeta de Débito">Tarjeta de Débito</option>
@@ -652,8 +720,8 @@
             </div>
 
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Tipo de Comprobante Habitual</label>
-              <select id="prefTipoComprobante" class="input-field text-xs font-bold text-amber-400">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Tipo de Comprobante Habitual</label>
+              <select id="prefTipoComprobante" class="input-field font-bold text-indigo-700">
                 <option value="Factura C" selected>Factura C (Monotributo / Consumidor Final)</option>
                 <option value="Factura A">Factura A (Responsable Inscripto)</option>
                 <option value="Factura B">Factura B (RI a Consumidor Final)</option>
@@ -661,8 +729,8 @@
               </select>
             </div>
 
-            <div class="pt-2 border-t border-obsidian-700 flex justify-end">
-              <button type="submit" class="btn-gold !py-2 !px-6 text-xs shadow">
+            <div class="pt-3 border-t border-slate-100 flex justify-end">
+              <button type="submit" class="btn-primary !py-2 !px-5 text-xs">
                 Guardar Preferencias
               </button>
             </div>
@@ -670,126 +738,110 @@
         </div>
 
         <!-- Cloud Health -->
-        <div class="lg:col-span-6 card-panel p-5 space-y-4 font-mono">
-          <div class="border-b border-obsidian-700 pb-3 flex items-center justify-between">
+        <div class="lg:col-span-6 card-panel p-6 space-y-4">
+          <div class="pb-3 border-b border-slate-100 flex items-center justify-between">
             <div>
-              <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center">
-                <i class="fa-solid fa-cloud-bolt text-emerald-400 mr-2"></i> Estado de los Servicios Cloud
-              </h3>
-              <p class="text-[11px] text-slate-400 mt-0.5">Toda la infraestructura opera 100% en automático.</p>
+              <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">Estado de Servicios Cloud</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Toda la infraestructura opera 100% en automático.</p>
             </div>
-            <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">
+            <span class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
               En Línea 24/7
             </span>
           </div>
 
-          <div class="space-y-2.5 text-xs">
-            <div class="p-2.5 bg-obsidian-850 rounded border border-obsidian-700 flex items-center justify-between">
-              <div class="flex items-center space-x-2.5">
-                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <div class="space-y-3 text-xs">
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+              <div class="flex items-center space-x-3">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 <div>
-                  <div class="text-slate-200 font-bold">Servidor Cloud & Keep-Alive</div>
-                  <div class="text-[10px] text-slate-500">Ejecución continua en Render sin descargas</div>
+                  <strong class="text-slate-800 text-sm block">Servidor Cloud & Keep-Alive</strong>
+                  <span class="text-slate-500">Ejecución continua en Render sin apagados</span>
                 </div>
               </div>
-              <span class="text-emerald-400 text-[11px] font-bold">Activo</span>
+              <span class="text-emerald-700 font-bold">Activo</span>
             </div>
 
-            <div class="p-2.5 bg-obsidian-850 rounded border border-obsidian-700 flex items-center justify-between">
-              <div class="flex items-center space-x-2.5">
-                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+              <div class="flex items-center space-x-3">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 <div>
-                  <div class="text-slate-200 font-bold">Base de Datos Cloud</div>
-                  <div class="text-[10px] text-slate-500">Sincronización en tiempo real con Supabase</div>
+                  <strong class="text-slate-800 text-sm block">Base de Datos & Supabase Storage</strong>
+                  <span class="text-slate-500">Persistencia permanente en la nube</span>
                 </div>
               </div>
-              <span class="text-emerald-400 text-[11px] font-bold">Conectada</span>
+              <span class="text-emerald-700 font-bold">Conectado</span>
             </div>
 
-            <div class="p-2.5 bg-obsidian-850 rounded border border-obsidian-700 flex items-center justify-between">
-              <div class="flex items-center space-x-2.5">
-                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+              <div class="flex items-center space-x-3">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 <div>
-                  <div class="text-slate-200 font-bold">Inteligencia Artificial (Groq IA)</div>
-                  <div class="text-[10px] text-slate-500">Lectura instantánea de chats y Excel</div>
+                  <strong class="text-slate-800 text-sm block">Inteligencia Artificial (Groq Llama)</strong>
+                  <span class="text-slate-500">Lectura instantánea de chats y Excel</span>
                 </div>
               </div>
-              <span class="text-emerald-400 text-[11px] font-bold">Lista</span>
-            </div>
-
-            <div class="p-2.5 bg-obsidian-850 rounded border border-obsidian-700 flex items-center justify-between">
-              <div class="flex items-center space-x-2.5">
-                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <div>
-                  <div class="text-slate-200 font-bold">Motor de Facturación ARCA</div>
-                  <div class="text-[10px] text-slate-500">Emisión automática con evasión Anti-WAF</div>
-                </div>
-              </div>
-              <span class="text-emerald-400 text-[11px] font-bold">Operativo</span>
+              <span class="text-emerald-700 font-bold">Lista</span>
             </div>
           </div>
 
-          <div class="pt-1 flex justify-end">
-            <button type="button" onclick="checkCloudHealthStatus()" class="btn-secondary !py-1.5 !px-3 text-xs">
-              <i class="fa-solid fa-rotate text-amber-400 mr-1 text-[10px]"></i> Verificar Conexión
+          <div class="pt-2 flex justify-end">
+            <button type="button" onclick="checkCloudHealthStatus()" class="btn-secondary !py-2 !px-4 text-xs font-semibold">
+              <i class="fa-solid fa-rotate mr-1.5 text-indigo-600"></i> Verificar Conexión
             </button>
           </div>
         </div>
 
       </div>
 
-      <!-- Section 3: Usuarios del Sistema (Admin) -->
-      <div id="sectionUsersAdmin" class="card-panel p-5 space-y-4 font-mono">
-        <div class="flex items-center justify-between border-b border-obsidian-700 pb-3">
+      <!-- Box 4: System Users (Admin only) -->
+      <div id="sectionUsersAdmin" class="card-panel p-6 space-y-4">
+        <div class="flex items-center justify-between pb-4 border-b border-slate-100">
           <div>
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center">
-              <i class="fa-solid fa-user-shield text-amber-400 mr-2"></i> Usuarios del Sistema & Roles
-            </h3>
-            <p class="text-xs text-slate-400 mt-0.5">Administra los operadores con permisos de facturación.</p>
+            <h3 class="text-base font-bold text-slate-900">Usuarios del Sistema & Operadores</h3>
+            <p class="text-xs text-slate-500">Administrá los operadores que tienen acceso a emitir facturas.</p>
           </div>
-          <button onclick="openNewUserModal()" class="btn-gold !py-1 !px-3 text-xs">
-            <i class="fa-solid fa-user-plus text-[10px] mr-1"></i>
-            <span>Crear Usuario</span>
+          <button onclick="openNewUserModal()" class="btn-primary !py-2 !px-4 text-xs font-bold">
+            <i class="fa-solid fa-user-plus mr-1"></i> Crear Usuario
           </button>
         </div>
 
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-xs">
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <table class="clean-table">
             <thead>
-              <tr class="border-b border-obsidian-700 text-slate-500 uppercase text-[10px]">
-                <th class="py-2.5 px-3">Usuario / Nombre</th>
-                <th class="py-2.5 px-3">Email</th>
-                <th class="py-2.5 px-3">Rol</th>
-                <th class="py-2.5 px-3">Estado</th>
-                <th class="py-2.5 px-3">Último Login</th>
-                <th class="py-2.5 px-3 text-right">Acciones</th>
+              <tr>
+                <th>Usuario / Nombre</th>
+                <th>Email</th>
+                <th>Rol</th>
+                <th>Estado</th>
+                <th>Último Login</th>
+                <th class="text-right">Acciones</th>
               </tr>
             </thead>
-            <tbody id="usersTableBody" class="divide-y divide-obsidian-800">
+            <tbody id="usersTableBody">
               <!-- Rendered dynamically -->
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- Section 4: Consola Técnica Opcional (Collapsible) -->
-      <div class="card-panel p-4 font-mono text-xs">
+      <!-- Box 5: Technical Logs Console (Collapsible) -->
+      <div class="card-panel p-5">
         <details class="group">
-          <summary class="flex items-center justify-between cursor-pointer list-none text-slate-400 hover:text-slate-200">
+          <summary class="flex items-center justify-between cursor-pointer list-none text-slate-700 hover:text-slate-900 font-semibold text-sm">
             <span class="flex items-center space-x-2">
-              <i class="fa-solid fa-terminal text-amber-400"></i>
-              <span class="font-bold">Registro de Actividad Técnica (Logs en Vivo)</span>
+              <i class="fa-solid fa-terminal text-indigo-600"></i>
+              <span>Registro de Actividad Técnica (Logs en Vivo)</span>
             </span>
-            <span class="text-[10px] bg-obsidian-800 border border-obsidian-700 px-2 py-0.5 rounded text-slate-400 group-open:hidden">Mostrar</span>
-            <span class="text-[10px] bg-obsidian-800 border border-obsidian-700 px-2 py-0.5 rounded text-slate-400 hidden group-open:inline">Ocultar</span>
+            <span class="text-xs bg-slate-100 px-2.5 py-1 rounded-lg text-slate-600 group-open:hidden">Mostrar Consola</span>
+            <span class="text-xs bg-slate-100 px-2.5 py-1 rounded-lg text-slate-600 hidden group-open:inline">Ocultar Consola</span>
           </summary>
-          <div class="pt-3 space-y-2">
+          <div class="pt-4 space-y-3">
             <div class="flex justify-end space-x-2">
-              <button onclick="clearLogsConsole()" class="btn-secondary !py-0.5 !px-2 text-[10px]">Limpiar</button>
-              <button onclick="reconnectLogsSSE()" class="btn-secondary !py-0.5 !px-2 text-[10px]">Reconectar</button>
+              <button onclick="clearLogsConsole()" class="btn-secondary !py-1 !px-2.5 text-xs">Limpiar</button>
+              <button onclick="reconnectLogsSSE()" class="btn-secondary !py-1 !px-2.5 text-xs">Reconectar</button>
             </div>
-            <div id="terminalScreen" class="bg-[#050608] border border-obsidian-800 rounded p-3 text-[11px] text-slate-300 h-64 overflow-y-auto space-y-1 select-text">
-              <div class="text-slate-600">[SISTEMA] Conectado al registro de actividad...</div>
+            <div id="terminalScreen" class="select-text">
+              <div class="text-slate-400">[SISTEMA] Conectado al registro de actividad...</div>
             </div>
           </div>
         </details>
@@ -799,37 +851,37 @@
 
   </main>
 
-  <!-- MODAL: CLIENTE CRM RÁPIDO -->
-  <div id="clientModal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="card-panel max-w-md w-full p-5 space-y-4 shadow-2xl border-obsidian-600 font-mono">
-      <div class="flex items-center justify-between border-b border-obsidian-700 pb-2">
-        <h3 class="text-sm font-bold text-white uppercase">Registrar Cliente</h3>
-        <button onclick="closeClientModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+  <!-- MODAL: REGISTRAR CLIENTE CRM -->
+  <div id="clientModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white max-w-md w-full p-6 rounded-2xl shadow-2xl space-y-4 border border-slate-100">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">Registrar Nuevo Cliente</h3>
+        <button onclick="closeClientModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
-      <form onsubmit="handleSaveClient(event)" class="space-y-3">
+      <form onsubmit="handleSaveClient(event)" class="space-y-3.5">
         <div>
-          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Razón Social / Nombre</label>
-          <input type="text" id="crmRazonSocial" class="input-field text-xs" placeholder="ej: Tech Solutions SA" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Razón Social / Nombre</label>
+          <input type="text" id="crmRazonSocial" class="input-field" placeholder="ej: Tech Solutions SA" required>
         </div>
 
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Tipo Doc</label>
-            <select id="crmTipoDoc" class="input-field text-xs">
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Tipo Doc</label>
+            <select id="crmTipoDoc" class="input-field">
               <option value="CUIT" selected>CUIT</option>
               <option value="DNI">DNI</option>
             </select>
           </div>
           <div>
-            <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Número</label>
-            <input type="text" id="crmCuit" class="input-field text-xs font-bold" placeholder="30-71234567-8" required>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Número</label>
+            <input type="text" id="crmCuit" class="input-field font-mono font-bold" placeholder="30-71234567-8" required>
           </div>
         </div>
 
         <div>
-          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Condición IVA</label>
-          <select id="crmCondIva" class="input-field text-xs">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Condición Frente al IVA</label>
+          <select id="crmCondIva" class="input-field">
             <option value="Responsable Inscripto" selected>Responsable Inscripto</option>
             <option value="Monotributo">Monotributo</option>
             <option value="Consumidor Final">Consumidor Final</option>
@@ -837,73 +889,73 @@
           </select>
         </div>
 
-        <div class="flex justify-end space-x-2 pt-2 border-t border-obsidian-700">
+        <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
           <button type="button" onclick="closeClientModal()" class="btn-secondary text-xs">Cancelar</button>
-          <button type="submit" class="btn-gold text-xs">Guardar Cliente</button>
+          <button type="submit" class="btn-primary text-xs font-bold">Guardar Cliente</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- MODAL: NUEVA CUENTA ARCA (MULTI-CUIT) -->
-  <div id="accountModal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="card-panel max-w-md w-full p-5 space-y-4 shadow-2xl border-obsidian-600 font-mono">
-      <div class="flex items-center justify-between border-b border-obsidian-700 pb-2">
-        <h3 class="text-sm font-bold text-white uppercase">Agregar Cuenta CUIT ARCA</h3>
-        <button onclick="closeAccountModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+  <!-- MODAL: AGREGAR CUENTA ARCA (MULTI-CUIT) -->
+  <div id="accountModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white max-w-md w-full p-6 rounded-2xl shadow-2xl space-y-4 border border-slate-100">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">Agregar Empresa / CUIT Emisor</h3>
+        <button onclick="closeAccountModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
-      <form onsubmit="handleSaveAccount(event)" class="space-y-3">
+      <form onsubmit="handleSaveAccount(event)" class="space-y-3.5">
         <div>
-          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">CUIT Emisor (11 dígitos)</label>
-          <input type="text" id="accCuit" class="input-field text-xs font-bold" placeholder="20301234569" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">CUIT Emisor (11 dígitos sin guiones)</label>
+          <input type="text" id="accCuit" class="input-field font-mono font-bold" placeholder="20301234569" required>
         </div>
 
         <div>
-          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Razón Social / Nombre de Fantasía</label>
-          <input type="text" id="accRazonSocial" class="input-field text-xs" placeholder="ej: Mi Empresa SRL" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Razón Social / Nombre de Fantasía</label>
+          <input type="text" id="accRazonSocial" class="input-field" placeholder="ej: Mi Empresa SRL" required>
         </div>
 
         <div>
-          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Clave Fiscal</label>
-          <input type="password" id="accClaveFiscal" class="input-field text-xs" placeholder="••••••••••••" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Clave Fiscal ARCA</label>
+          <input type="password" id="accClaveFiscal" class="input-field" placeholder="••••••••••••" required>
         </div>
 
         <div>
-          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Punto de Venta por Defecto</label>
-          <input type="number" id="accPuntoVenta" class="input-field text-xs font-bold" value="1" min="1" max="9999" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Punto de Venta Predeterminado</label>
+          <input type="number" id="accPuntoVenta" class="input-field font-bold" value="1" min="1" max="9999" required>
         </div>
 
-        <div class="flex justify-end space-x-2 pt-2 border-t border-obsidian-700">
+        <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
           <button type="button" onclick="closeAccountModal()" class="btn-secondary text-xs">Cancelar</button>
-          <button type="submit" class="btn-gold text-xs">Guardar Cuenta</button>
+          <button type="submit" class="btn-primary text-xs font-bold">Guardar Cuenta</button>
         </div>
       </form>
     </div>
   </div>
 
   <!-- MODAL: NUEVO USUARIO (ADMIN) -->
-  <div id="userModal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="card-panel max-w-md w-full p-5 space-y-4 shadow-2xl border-obsidian-600 font-mono">
-      <div class="flex items-center justify-between border-b border-obsidian-700 pb-2">
-        <h3 class="text-sm font-bold text-white uppercase">Crear Nuevo Usuario</h3>
-        <button onclick="closeUserModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+  <div id="userModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white max-w-md w-full p-6 rounded-2xl shadow-2xl space-y-4 border border-slate-100">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">Crear Usuario del Sistema</h3>
+        <button onclick="closeUserModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
-      <form onsubmit="handleSaveUser(event)" class="space-y-3">
+      <form onsubmit="handleSaveUser(event)" class="space-y-3.5">
         <div>
-          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Nombre Completo</label>
-          <input type="text" id="usrName" class="input-field text-xs" placeholder="Laura Martínez" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Nombre Completo</label>
+          <input type="text" id="usrName" class="input-field" placeholder="Laura Martínez" required>
         </div>
 
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Usuario</label>
-            <input type="text" id="usrUsername" class="input-field text-xs" placeholder="lauram" required>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Usuario</label>
+            <input type="text" id="usrUsername" class="input-field" placeholder="lauram" required>
           </div>
           <div>
-            <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Rol</label>
-            <select id="usrRole" class="input-field text-xs">
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Rol</label>
+            <select id="usrRole" class="input-field">
               <option value="operator" selected>Operador</option>
               <option value="admin">Administrador</option>
               <option value="viewer">Solo Lectura</option>
@@ -912,27 +964,27 @@
         </div>
 
         <div>
-          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Email</label>
-          <input type="email" id="usrEmail" class="input-field text-xs" placeholder="laura@empresa.com" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Correo Electrónico</label>
+          <input type="email" id="usrEmail" class="input-field" placeholder="laura@empresa.com" required>
         </div>
 
         <div>
-          <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Contraseña</label>
-          <input type="password" id="usrPassword" class="input-field text-xs" placeholder="••••••••" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Contraseña</label>
+          <input type="password" id="usrPassword" class="input-field" placeholder="••••••••" required>
         </div>
 
-        <div class="flex justify-end space-x-2 pt-2 border-t border-obsidian-700">
+        <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
           <button type="button" onclick="closeUserModal()" class="btn-secondary text-xs">Cancelar</button>
-          <button type="submit" class="btn-gold text-xs">Crear Usuario</button>
+          <button type="submit" class="btn-primary text-xs font-bold">Crear Usuario</button>
         </div>
       </form>
     </div>
   </div>
 
   <!-- TOAST NOTIFICATION CONTAINER -->
-  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm pointer-events-none"></div>
+  <div id="toastContainer" class="fixed bottom-6 right-6 z-50 space-y-2 max-w-sm pointer-events-none"></div>
 
-  <!-- SCRIPTS -->
+  <!-- JAVASCRIPT CONTROLLER -->
   <script src="js/app.js"></script>
 </body>
 </html>

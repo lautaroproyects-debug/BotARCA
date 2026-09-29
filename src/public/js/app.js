@@ -239,17 +239,21 @@ function setInvoiceSubmode(mode) {
   if (mode === 'manual') {
     viewLote?.classList.add('hidden');
     viewManual?.classList.remove('hidden');
-    btnManual?.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
-    btnManual?.classList.remove('text-slate-400', 'border-transparent');
-    btnLote?.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
-    btnLote?.classList.add('text-slate-400', 'border-transparent');
+    
+    btnManual?.classList.add('bg-indigo-50/80', 'border-indigo-600', 'shadow-sm');
+    btnManual?.classList.remove('bg-white', 'border-slate-200');
+    
+    btnLote?.classList.remove('bg-indigo-50/80', 'border-indigo-600', 'shadow-sm');
+    btnLote?.classList.add('bg-white', 'border-slate-200');
   } else {
     viewManual?.classList.add('hidden');
     viewLote?.classList.remove('hidden');
-    btnLote?.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
-    btnLote?.classList.remove('text-slate-400', 'border-transparent');
-    btnManual?.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
-    btnManual?.classList.add('text-slate-400', 'border-transparent');
+    
+    btnLote?.classList.add('bg-indigo-50/80', 'border-indigo-600', 'shadow-sm');
+    btnLote?.classList.remove('bg-white', 'border-slate-200');
+    
+    btnManual?.classList.remove('bg-indigo-50/80', 'border-indigo-600', 'shadow-sm');
+    btnManual?.classList.add('bg-white', 'border-slate-200');
   }
 }
 
@@ -261,15 +265,10 @@ async function loadFinancialTicker() {
     const data = await res.json();
 
     const d = data.dolares || {};
-    if (d.oficial) document.getElementById('tickOficial').innerText = `$${d.oficial.compra} / $${d.oficial.venta}`;
-    if (d.blue) document.getElementById('tickBlue').innerText = `$${d.blue.venta}`;
-    if (d.mep) document.getElementById('tickMep').innerText = `$${d.mep.venta || d.mep.compra}`;
-    if (d.ccl) document.getElementById('tickCcl').innerText = `$${d.ccl.venta || d.ccl.compra}`;
-    if (data.inflacion?.ultimoIpc) document.getElementById('tickIpc').innerText = `${data.inflacion.ultimoIpc.valor}%`;
-    if (data.uva?.ultimoValor) document.getElementById('tickUva').innerText = `$${data.uva.ultimoValor.valor}`;
-
-    const updatedEl = document.getElementById('tickerUpdated');
-    if (updatedEl) updatedEl.innerText = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    if (d.oficial) document.getElementById('tickOficial') && (document.getElementById('tickOficial').innerText = `$${d.oficial.compra} / $${d.oficial.venta}`);
+    if (d.blue) document.getElementById('tickBlue') && (document.getElementById('tickBlue').innerText = `$${d.blue.venta}`);
+    if (d.mep) document.getElementById('tickMep') && (document.getElementById('tickMep').innerText = `$${d.mep.venta || d.mep.compra}`);
+    if (d.ccl) document.getElementById('tickCcl') && (document.getElementById('tickCcl').innerText = `$${d.ccl.venta || d.ccl.compra}`);
   } catch (e) {}
 }
 
@@ -289,7 +288,7 @@ async function loadAccounts() {
       } else {
         headerSel.innerHTML = allAccounts.map(a => `
           <option value="${a.cuit}" ${a.cuit === data.activeCuit ? 'selected' : ''}>
-            CUIT: ${formatCuit(a.cuit)} (${escapeHtml(a.razonSocial || 'Cuenta')})
+            ${escapeHtml(a.razonSocial || 'Empresa')} (${formatCuit(a.cuit)})
           </option>
         `).join('');
       }
@@ -299,18 +298,18 @@ async function loadAccounts() {
     const grid = document.getElementById('accountsGrid');
     if (grid) {
       if (allAccounts.length === 0) {
-        grid.innerHTML = '<div class="col-span-full py-8 text-center text-slate-500">No hay cuentas fiscales registradas aún.</div>';
+        grid.innerHTML = '<div class="col-span-full py-8 text-center text-slate-400">No hay cuentas fiscales registradas aún.</div>';
       } else {
         grid.innerHTML = allAccounts.map(a => `
-          <div class="p-4 bg-obsidian-850 border ${a.cuit === data.activeCuit ? 'border-amber-500/60 bg-amber-950/10' : 'border-obsidian-700'} rounded space-y-2">
+          <div class="p-4 bg-white border ${a.cuit === data.activeCuit ? 'border-indigo-600 ring-2 ring-indigo-100 bg-indigo-50/20' : 'border-slate-200'} rounded-xl shadow-sm space-y-2.5">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-slate-200 truncate">${escapeHtml(a.razonSocial || 'Empresa')}</span>
-              ${a.cuit === data.activeCuit ? '<span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[10px] font-bold">ACTIVA</span>' : ''}
+              <strong class="text-sm font-bold text-slate-900 truncate">${escapeHtml(a.razonSocial || 'Empresa')}</strong>
+              ${a.cuit === data.activeCuit ? '<span class="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold uppercase">Emisor Activo</span>' : ''}
             </div>
-            <div class="text-[11px] text-slate-400">CUIT: <strong class="text-white select-all">${formatCuit(a.cuit)}</strong></div>
-            <div class="text-[10px] text-slate-500">Punto de Venta: ${a.puntoVentaDefault || 1}</div>
-            <div class="pt-2 border-t border-obsidian-800 flex justify-between items-center">
-              ${a.cuit !== data.activeCuit ? `<button onclick="switchActiveCuitAccount('${a.cuit}')" class="text-[11px] text-amber-400 hover:text-amber-300 font-bold">Seleccionar como Emisor</button>` : '<span class="text-[10px] text-emerald-400">Emisor por defecto</span>'}
+            <div class="text-xs text-slate-600">CUIT: <strong class="text-slate-900 font-mono select-all">${formatCuit(a.cuit)}</strong></div>
+            <div class="text-xs text-slate-500">Punto de Venta: <strong>${a.puntoVentaDefault || 1}</strong></div>
+            <div class="pt-2 border-t border-slate-100 flex justify-between items-center">
+              ${a.cuit !== data.activeCuit ? `<button onclick="switchActiveCuitAccount('${a.cuit}')" class="text-xs text-indigo-600 hover:text-indigo-800 font-bold">Seleccionar como Emisor</button>` : '<span class="text-xs text-emerald-600 font-bold flex items-center"><i class="fa-solid fa-circle-check mr-1"></i> Seleccionada</span>'}
             </div>
           </div>
         `).join('');
@@ -446,14 +445,14 @@ function updateParserBadge(parserUsed, count) {
   if (!badge) return;
 
   if (parserUsed === 'groq_ai') {
-    badge.innerHTML = '<i class="fa-solid fa-brain text-emerald-400 mr-1"></i> Groq IA (Llama-3.3-70B)';
-    badge.className = 'px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700 text-[10px] text-emerald-300 font-bold';
+    badge.innerHTML = '<i class="fa-solid fa-brain text-indigo-600 mr-1.5"></i> <strong class="text-indigo-900">Inteligencia Artificial Groq (Llama-3.3-70B)</strong>';
+    badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold';
   } else if (parserUsed === 'heuristic_nlp') {
-    badge.innerHTML = '<i class="fa-brands fa-whatsapp text-emerald-400 mr-1"></i> Parser Inteligente WhatsApp';
-    badge.className = 'px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700 text-[10px] text-emerald-300 font-bold';
+    badge.innerHTML = '<i class="fa-brands fa-whatsapp text-emerald-600 mr-1.5"></i> <strong class="text-emerald-900">Parser Inteligente WhatsApp</strong>';
+    badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold';
   } else {
-    badge.innerHTML = '<i class="fa-solid fa-table-cells text-amber-400 mr-1"></i> Formato Tabular Excel / CSV';
-    badge.className = 'px-2 py-0.5 rounded bg-obsidian-800 border border-obsidian-700 text-[10px] text-slate-300';
+    badge.innerHTML = '<i class="fa-solid fa-table text-slate-600 mr-1.5"></i> Formato Tabular Excel / CSV';
+    badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold';
   }
 }
 
@@ -468,49 +467,44 @@ function renderExcelPreview(items) {
 
   let sum = 0;
   items.forEach(i => sum += (Number(i.importeTotal) || 0));
-  if (totalDisplay) totalDisplay.innerText = `$${sum.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+  if (totalDisplay) totalDisplay.innerText = `$ ${sum.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
 
   if (btnAdd) btnAdd.disabled = items.length === 0;
-  if (btnAddText) btnAddText.innerText = items.length > 0 ? `AGREGAR ${items.length} FACTURAS A LA COLA` : 'AGREGAR A LA COLA DE FACTURACIÓN';
+  if (btnAddText) btnAddText.innerText = items.length > 0 ? `⚡ FACTURAR ${items.length} COMPROBANTES EN ARCA` : '⚡ FACTURAR TODO EN ARCA AHORA';
 
   if (!tbody) return;
   if (items.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="py-8 text-center text-slate-500">Pega filas de Excel o mensajes de WhatsApp arriba para previsualizar.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="py-10 text-center text-slate-400 text-sm"><i class="fa-solid fa-clipboard-list text-3xl text-slate-300 block mb-2"></i>Pegá mensajes de WhatsApp o filas de Excel arriba para ver la vista previa.</td></tr>';
     return;
   }
 
   tbody.innerHTML = items.map((it, idx) => `
-    <tr class="hover:bg-obsidian-850/60 transition group">
-      <td class="py-2 px-2.5 text-slate-500 text-center">${idx + 1}</td>
-      <td class="py-1.5 px-2">
-        <input type="text" value="${escapeHtml(it.docNro || '')}" oninput="updateDraftRow(${idx}, 'docNro', this.value)" class="input-field !py-1 text-xs font-mono font-bold text-slate-200" placeholder="CUIT / DNI">
+    <tr class="hover:bg-slate-50 transition group">
+      <td class="py-3 px-3 text-slate-400 font-bold text-center text-xs">${idx + 1}</td>
+      <td class="py-2 px-2">
+        <input type="text" value="${escapeHtml(it.docNro || '')}" oninput="updateDraftRow(${idx}, 'docNro', this.value)" class="input-field !py-1 text-xs font-mono font-bold text-slate-800" placeholder="CUIT / DNI">
       </td>
-      <td class="py-1.5 px-2">
-        <input type="text" value="${escapeHtml(it.razonSocial || '')}" oninput="updateDraftRow(${idx}, 'razonSocial', this.value)" class="input-field !py-1 text-xs text-slate-200" placeholder="Nombre / Razón Social">
+      <td class="py-2 px-2">
+        <input type="text" value="${escapeHtml(it.razonSocial || '')}" oninput="updateDraftRow(${idx}, 'razonSocial', this.value)" class="input-field !py-1 text-xs font-semibold text-slate-800" placeholder="Nombre / Razón Social">
       </td>
-      <td class="py-1.5 px-2">
-        <select onchange="updateDraftRow(${idx}, 'concepto', this.value)" class="input-field !py-1 text-xs">
-          <option value="1" ${it.concepto === 1 ? 'selected' : ''}>1: Productos</option>
-          <option value="2" ${it.concepto === 2 ? 'selected' : ''}>2: Servicios</option>
-          <option value="3" ${it.concepto === 3 ? 'selected' : ''}>3: Ambos</option>
-        </select>
-      </td>
-      <td class="py-1.5 px-2">
-        <select onchange="updateDraftRow(${idx}, 'tipoComprobante', this.value)" class="input-field !py-1 text-xs font-semibold text-amber-400">
+      <td class="py-2 px-2">
+        <select onchange="updateDraftRow(${idx}, 'tipoComprobante', this.value)" class="input-field !py-1 text-xs font-bold text-indigo-700">
           <option value="Factura C" ${it.tipoComprobante === 'Factura C' ? 'selected' : ''}>Factura C</option>
           <option value="Factura A" ${it.tipoComprobante === 'Factura A' ? 'selected' : ''}>Factura A</option>
           <option value="Factura B" ${it.tipoComprobante === 'Factura B' ? 'selected' : ''}>Factura B</option>
           <option value="Recibo C" ${it.tipoComprobante === 'Recibo C' ? 'selected' : ''}>Recibo C</option>
         </select>
       </td>
-      <td class="py-1.5 px-2">
-        <input type="text" value="${escapeHtml(it.descripcion || '')}" oninput="updateDraftRow(${idx}, 'descripcion', this.value)" class="input-field !py-1 text-xs text-slate-300" placeholder="Descripción del item">
+      <td class="py-2 px-2">
+        <input type="text" value="${escapeHtml(it.descripcion || '')}" oninput="updateDraftRow(${idx}, 'descripcion', this.value)" class="input-field !py-1 text-xs text-slate-700" placeholder="Descripción del item">
       </td>
-      <td class="py-1.5 px-2 text-right">
-        <input type="number" step="any" value="${it.importeTotal || 0}" oninput="updateDraftRow(${idx}, 'importeTotal', this.value)" class="input-field !py-1 text-xs font-bold text-amber-400 text-right w-24">
+      <td class="py-2 px-2 text-right">
+        <div class="relative inline-block w-32">
+          <input type="number" step="any" value="${it.importeTotal || 0}" oninput="updateDraftRow(${idx}, 'importeTotal', this.value)" class="input-field !py-1 text-xs font-bold text-emerald-700 text-right">
+        </div>
       </td>
-      <td class="py-1.5 px-2 text-center">
-        <button type="button" onclick="deleteDraftRow(${idx})" class="text-slate-500 hover:text-red-400 p-1 transition" title="Eliminar fila">
+      <td class="py-2 px-2 text-center">
+        <button type="button" onclick="deleteDraftRow(${idx})" class="text-slate-400 hover:text-rose-600 p-1.5 transition" title="Eliminar fila">
           <i class="fa-solid fa-trash-can text-xs"></i>
         </button>
       </td>
@@ -665,35 +659,37 @@ function renderQueueTable(items) {
   if (!tbody) return;
 
   if (items.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-500 font-mono text-xs">La cola de facturación está vacía. Pega una planilla en "Carga Masiva".</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-400 text-sm">No hay facturas en proceso en este momento.</td></tr>';
     return;
   }
 
   tbody.innerHTML = items.map(it => {
-    let statusBadge = '<span class="px-2 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 text-[10px] font-bold uppercase">Pendiente</span>';
+    let statusBadge = '<span class="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold uppercase"><i class="fa-solid fa-clock mr-1"></i> Pendiente</span>';
     if (it.estado === 'procesando') {
-      statusBadge = '<span class="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800 text-[10px] font-bold uppercase animate-pulse"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Emitiendo</span>';
+      statusBadge = '<span class="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold uppercase animate-pulse"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Emitiendo</span>';
     } else if (it.estado === 'emitida') {
-      statusBadge = '<span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold uppercase">Emitida</span>';
+      statusBadge = '<span class="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold uppercase"><i class="fa-solid fa-circle-check mr-1"></i> Emitida</span>';
     } else if (it.estado === 'error') {
-      statusBadge = '<span class="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800 text-[10px] font-bold uppercase">Error</span>';
+      statusBadge = '<span class="inline-flex items-center px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold uppercase"><i class="fa-solid fa-circle-xmark mr-1"></i> Error</span>';
     }
 
-    let resultado = it.cae ? `<span class="text-amber-400 font-bold select-all text-xs">CAE: ${it.cae}</span> <span class="text-slate-500 text-[10px]">(${it.comprobanteNro || ''})</span>` : (it.errorMensaje ? `<span class="text-rose-400 text-[11px] truncate max-w-[200px] block" title="${escapeHtml(it.errorMensaje)}">${escapeHtml(it.errorMensaje)}</span>` : '<span class="text-slate-500">-</span>');
+    let resultado = it.cae 
+      ? `<span class="text-emerald-700 font-bold select-all text-xs">CAE: ${it.cae}</span> <span class="text-slate-400 text-xs font-semibold">(${it.comprobanteNro || ''})</span>` 
+      : (it.errorMensaje ? `<span class="text-rose-600 text-xs font-medium truncate max-w-[220px] block" title="${escapeHtml(it.errorMensaje)}">${escapeHtml(it.errorMensaje)}</span>` : '<span class="text-slate-400">-</span>');
 
     return `
-      <tr class="hover:bg-obsidian-850/60 transition">
-        <td class="py-2.5 px-3">${statusBadge}</td>
-        <td class="py-2.5 px-3">
-          <div class="text-slate-200 font-semibold truncate max-w-[180px]">${escapeHtml(it.razonSocial)}</div>
-          <div class="text-[10px] text-slate-500 font-mono">Doc: ${it.docNro}</div>
+      <tr class="hover:bg-slate-50 transition">
+        <td class="py-3 px-3">${statusBadge}</td>
+        <td class="py-3 px-3">
+          <div class="text-slate-900 font-bold text-xs truncate max-w-[200px]">${escapeHtml(it.razonSocial)}</div>
+          <div class="text-[11px] text-slate-500 font-mono">Doc: ${it.docNro}</div>
         </td>
-        <td class="py-2.5 px-3 text-slate-300 truncate max-w-[180px]">${escapeHtml(it.descripcion)}</td>
-        <td class="py-2.5 px-3 text-slate-400">${it.tipoComprobante} (Pto ${it.puntoVenta})</td>
-        <td class="py-2.5 px-3 text-right font-bold text-slate-100">$${(it.importeTotal || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
-        <td class="py-2.5 px-3">${resultado}</td>
-        <td class="py-2.5 px-3 text-center">
-          ${it.estado === 'pendiente' ? `<button onclick="deleteQueueItem('${it.id}')" class="text-slate-600 hover:text-rose-400 transition" title="Eliminar de la cola"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
+        <td class="py-3 px-3 text-slate-700 text-xs truncate max-w-[200px]">${escapeHtml(it.descripcion)}</td>
+        <td class="py-3 px-3 text-slate-600 text-xs font-semibold">${it.tipoComprobante} (Pto ${it.puntoVenta})</td>
+        <td class="py-3 px-3 text-right font-extrabold text-slate-900 text-xs">$ ${(it.importeTotal || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+        <td class="py-3 px-3">${resultado}</td>
+        <td class="py-3 px-3 text-center">
+          ${it.estado === 'pendiente' ? `<button onclick="deleteQueueItem('${it.id}')" class="text-slate-400 hover:text-rose-600 transition p-1" title="Eliminar de la cola"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
         </td>
       </tr>
     `;
@@ -706,7 +702,7 @@ async function startProcessingQueue() {
     const res = await fetchWithAuth('/api/queue/process', { method: 'POST' });
     const data = await res.json();
     if (data.success) {
-      showToast('Motor iniciado. Puedes ver el avance en la terminal y en la barra superior.', 'success');
+      showToast('Motor iniciado. Procesando comprobantes en ARCA...', 'success');
       await loadQueueItems();
     }
   } catch (e) {
@@ -740,25 +736,26 @@ async function loadUsersList() {
     if (!tbody) return;
 
     tbody.innerHTML = (data.users || []).map(u => `
-      <tr class="hover:bg-obsidian-850/60 transition">
-        <td class="py-2.5 px-3">
-          <strong class="text-slate-200 block">${escapeHtml(u.name)}</strong>
+      <tr class="hover:bg-slate-50 transition">
+        <td class="py-3 px-4">
+          <strong class="text-slate-900 text-xs block">${escapeHtml(u.name)}</strong>
           <span class="text-slate-500 text-[11px]">@${escapeHtml(u.username)}</span>
         </td>
-        <td class="py-2.5 px-3 text-slate-300">${escapeHtml(u.email)}</td>
-        <td class="py-2.5 px-3">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-amber-950 text-amber-400 border border-amber-800' : 'bg-obsidian-800 text-slate-300 border border-obsidian-600'}">
+        <td class="py-3 px-4 text-slate-600 text-xs">${escapeHtml(u.email)}</td>
+        <td class="py-3 px-4">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${u.role === 'admin' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
             ${u.role}
           </span>
         </td>
-        <td class="py-2.5 px-3">
-          <span class="text-xs ${u.active ? 'text-emerald-400' : 'text-rose-400'} font-semibold">
-            ${u.active ? '● Activo' : '○ Inactivo'}
+        <td class="py-3 px-4">
+          <span class="inline-flex items-center text-xs font-semibold ${u.active ? 'text-emerald-600' : 'text-rose-600'}">
+            <span class="w-1.5 h-1.5 rounded-full ${u.active ? 'bg-emerald-500' : 'bg-rose-500'} mr-1.5"></span>
+            ${u.active ? 'Activo' : 'Inactivo'}
           </span>
         </td>
-        <td class="py-2.5 px-3 text-slate-400 text-[11px]">${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('es-AR') : 'Nunca'}</td>
-        <td class="py-2.5 px-3 text-right">
-          ${u.id !== currentUser.id ? `<button onclick="deleteUser('${u.id}')" class="text-slate-600 hover:text-rose-400 p-1" title="Eliminar"><i class="fa-solid fa-trash-can text-xs"></i></button>` : '<span class="text-[10px] text-slate-500">Tú</span>'}
+        <td class="py-3 px-4 text-slate-500 text-xs">${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('es-AR') : 'Nunca'}</td>
+        <td class="py-3 px-4 text-right">
+          ${u.id !== currentUser.id ? `<button onclick="deleteUser('${u.id}')" class="text-slate-400 hover:text-rose-600 p-1 transition" title="Eliminar"><i class="fa-solid fa-trash-can text-xs"></i></button>` : '<span class="text-xs text-slate-400 font-bold">Tú</span>'}
         </td>
       </tr>
     `).join('');
@@ -817,19 +814,19 @@ async function deleteUser(id) {
 function addInvoiceItem() {
   const container = document.getElementById('invoiceItemsContainer');
   const div = document.createElement('div');
-  div.className = 'invoice-item-row grid grid-cols-12 gap-2 items-center bg-obsidian-850 p-2.5 rounded border border-obsidian-700';
+  div.className = 'invoice-item-row grid grid-cols-12 gap-2 items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200';
   div.innerHTML = `
     <div class="col-span-12 sm:col-span-6">
-      <input type="text" class="item-desc input-field text-xs" placeholder="Descripción..." required>
+      <input type="text" class="item-desc input-field text-xs" placeholder="Descripción del producto o servicio..." required>
     </div>
     <div class="col-span-3 sm:col-span-2">
-      <input type="number" class="item-qty input-field font-mono text-xs text-center" value="1" min="1" oninput="calculateInvoiceTotals()" required>
+      <input type="number" class="item-qty input-field text-xs text-center" value="1" min="1" oninput="calculateInvoiceTotals()" required>
     </div>
     <div class="col-span-7 sm:col-span-3">
-      <input type="number" class="item-price input-field font-mono text-xs" value="0" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
+      <input type="number" class="item-price input-field text-xs" value="0" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
     </div>
     <div class="col-span-2 sm:col-span-1 text-center">
-      <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-500 hover:text-rose-400 transition text-sm">
+      <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-400 hover:text-rose-600 transition text-sm p-1" title="Quitar ítem">
         <i class="fa-solid fa-trash-can"></i>
       </button>
     </div>
@@ -909,7 +906,7 @@ async function handleEmitirFactura(e) {
       document.getElementById('lastCaeNumber').innerText = data.cae || '-';
       document.getElementById('lastCaeVto').innerText = data.caeVencimiento || '-';
       document.getElementById('lastComprobanteNro').innerText = data.comprobanteNro || '-';
-      document.getElementById('caeStatusDot').className = 'w-2 h-2 rounded-full bg-emerald-400';
+      document.getElementById('caeStatusDot').className = 'w-2 h-2 rounded-full bg-emerald-500';
       loadComprobantesList();
     } else {
       showToast(`Error de emisión: ${data.message}`, 'error');
@@ -938,24 +935,24 @@ function renderComprobantesTable(list) {
   if (!tbody) return;
 
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-slate-500 font-mono text-xs">No hay comprobantes emitidos registrados aún.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-slate-400 text-xs">No hay comprobantes emitidos registrados aún.</td></tr>';
     return;
   }
 
   tbody.innerHTML = list.map(c => `
-    <tr class="hover:bg-obsidian-850/60 transition">
-      <td class="py-2.5 px-3 text-slate-400">${c.fechaEmision || c.fecha_emision || '-'}</td>
-      <td class="py-2.5 px-3">
-        <strong class="text-amber-400 font-semibold">${escapeHtml(c.tipoComprobante || c.tipo_comprobante || 'Factura C')}</strong>
-        <span class="text-slate-500 ml-1 font-mono">${c.comprobanteFormato || c.comprobante_formato || '-'}</span>
+    <tr class="hover:bg-slate-50/80 transition">
+      <td class="py-3 px-4 text-slate-500 text-xs">${c.fechaEmision || c.fecha_emision || '-'}</td>
+      <td class="py-3 px-4">
+        <strong class="text-indigo-600 font-bold text-xs">${escapeHtml(c.tipoComprobante || c.tipo_comprobante || 'Factura C')}</strong>
+        <span class="text-slate-500 ml-1 font-mono text-xs font-semibold">${c.comprobanteFormato || c.comprobante_formato || '-'}</span>
       </td>
-      <td class="py-2.5 px-3">
-        <div class="text-slate-200 font-semibold truncate max-w-[200px]">${escapeHtml(c.razonSocialReceptor || c.razon_social_receptor || 'Consumidor Final')}</div>
-        <div class="text-[10px] text-slate-500 font-mono">CUIT: ${c.cuitReceptor || c.cuit_receptor || '-'}</div>
+      <td class="py-3 px-4">
+        <div class="text-slate-900 font-bold text-xs truncate max-w-[220px]">${escapeHtml(c.razonSocialReceptor || c.razon_social_receptor || 'Consumidor Final')}</div>
+        <div class="text-[11px] text-slate-500 font-mono">CUIT: ${c.cuitReceptor || c.cuit_receptor || '-'}</div>
       </td>
-      <td class="py-2.5 px-3 text-right font-bold text-slate-100">$${(c.importeTotal || c.importe_total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
-      <td class="py-2.5 px-3">
-        <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">CAE: ${c.cae || '-'}</span>
+      <td class="py-3 px-4 text-right font-extrabold text-slate-900 text-xs">$${(c.importeTotal || c.importe_total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+      <td class="py-3 px-4">
+        <span class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold font-mono">CAE: ${c.cae || '-'}</span>
       </td>
     </tr>
   `).join('');
@@ -988,22 +985,22 @@ function renderClientsGrid(clients) {
   if (!container) return;
 
   if (clients.length === 0) {
-    container.innerHTML = '<div class="col-span-full py-6 text-center text-slate-500 font-mono text-xs">No hay clientes frecuentes registrados.</div>';
+    container.innerHTML = '<div class="col-span-full py-8 text-center text-slate-400 text-xs">No hay clientes frecuentes registrados.</div>';
     return;
   }
 
   container.innerHTML = clients.map(c => `
-    <div class="p-3.5 bg-obsidian-850 border border-obsidian-700 rounded space-y-2 font-mono text-xs hover:border-obsidian-600 transition">
+    <div class="p-4 bg-white border border-slate-200/90 rounded-xl space-y-2.5 text-xs shadow-sm hover:border-slate-300 hover:shadow transition">
       <div class="flex items-start justify-between">
         <div class="truncate">
-          <strong class="text-slate-200 text-[13px] font-bold block truncate">${escapeHtml(c.razonSocial)}</strong>
-          <span class="text-slate-500 text-[11px]">CUIT: ${c.cuit}</span>
+          <strong class="text-slate-900 text-sm font-bold block truncate">${escapeHtml(c.razonSocial)}</strong>
+          <span class="text-slate-500 text-xs font-mono">CUIT: ${c.cuit}</span>
         </div>
-        <button onclick="deleteClient('${c.id}')" class="text-slate-600 hover:text-rose-400 transition p-1"><i class="fa-solid fa-trash-can text-xs"></i></button>
+        <button onclick="deleteClient('${c.id}')" class="text-slate-400 hover:text-rose-600 transition p-1" title="Eliminar"><i class="fa-solid fa-trash-can text-xs"></i></button>
       </div>
-      <div class="text-[11px] text-slate-400">Condición: <span class="text-amber-400/90">${c.condicionIva}</span></div>
-      <div class="pt-1 border-t border-obsidian-700 flex justify-end">
-        <button onclick="selectClientAndInvoice('${c.id}')" class="text-[11px] text-amber-400 hover:text-amber-300 font-bold flex items-center space-x-1">
+      <div class="text-xs text-slate-600">Condición: <span class="font-semibold text-slate-800">${escapeHtml(c.condicionIva || 'Consumidor Final')}</span></div>
+      <div class="pt-2 border-t border-slate-100 flex justify-end">
+        <button onclick="selectClientAndInvoice('${c.id}')" class="text-xs text-indigo-600 hover:text-indigo-700 font-bold flex items-center space-x-1.5 transition">
           <span>Facturar a este cliente</span>
           <i class="fa-solid fa-arrow-right text-[10px]"></i>
         </button>
@@ -1198,14 +1195,14 @@ function appendTerminalLog(log) {
 
   const div = document.createElement('div');
   const levelClass = `log-level-${log.level.toLowerCase()}`;
-  div.innerHTML = `<span class="text-slate-500">[${log.timestamp.split('T')[1].split('.')[0]}]</span> <strong class="${levelClass}">[${log.module}]</strong> <span>${escapeHtml(log.message)}</span>`;
+  div.innerHTML = `<span class="text-slate-400 font-mono">[${log.timestamp.split('T')[1].split('.')[0]}]</span> <strong class="${levelClass}">[${log.module}]</strong> <span class="text-slate-700">${escapeHtml(log.message)}</span>`;
   screen.appendChild(div);
   screen.scrollTop = screen.scrollHeight;
 }
 
 function clearLogsConsole() {
   const screen = document.getElementById('terminalScreen');
-  if (screen) screen.innerHTML = '<div class="text-slate-600">[SISTEMA] Consola limpia.</div>';
+  if (screen) screen.innerHTML = '<div class="text-slate-400 font-mono text-xs">[SISTEMA] Consola limpia.</div>';
 }
 
 function reconnectLogsSSE() {
@@ -1229,23 +1226,23 @@ function showToast(message, type = 'info') {
 
   const toast = document.createElement('div');
   const colors = {
-    success: 'bg-obsidian-850 border-emerald-500/60 text-emerald-300',
-    error: 'bg-obsidian-850 border-rose-500/60 text-rose-300',
-    warn: 'bg-obsidian-850 border-amber-500/60 text-amber-300',
-    info: 'bg-obsidian-850 border-obsidian-600 text-slate-200',
+    success: 'bg-white border-emerald-200 text-emerald-950 shadow-emerald-500/10',
+    error: 'bg-white border-rose-200 text-rose-950 shadow-rose-500/10',
+    warn: 'bg-white border-amber-200 text-amber-950 shadow-amber-500/10',
+    info: 'bg-white border-slate-200 text-slate-900 shadow-slate-500/10',
   };
 
   const icons = {
-    success: 'fa-circle-check text-emerald-400',
-    error: 'fa-circle-exclamation text-rose-400',
-    warn: 'fa-triangle-exclamation text-amber-400',
-    info: 'fa-circle-info text-amber-400',
+    success: 'fa-circle-check text-emerald-600',
+    error: 'fa-circle-exclamation text-rose-600',
+    warn: 'fa-triangle-exclamation text-amber-500',
+    info: 'fa-circle-info text-indigo-600',
   };
 
-  toast.className = `pointer-events-auto p-3 rounded border shadow-xl flex items-center space-x-2.5 text-xs font-mono transition-all duration-300 translate-y-2 opacity-0 ${colors[type] || colors.info}`;
+  toast.className = `pointer-events-auto p-3.5 rounded-xl border shadow-xl flex items-center space-x-3 text-xs font-semibold transition-all duration-300 translate-y-2 opacity-0 ${colors[type] || colors.info}`;
   toast.innerHTML = `
-    <i class="fa-solid ${icons[type] || icons.info} text-sm"></i>
-    <span class="flex-1">${escapeHtml(message)}</span>
+    <i class="fa-solid ${icons[type] || icons.info} text-base flex-shrink-0"></i>
+    <span class="flex-1 leading-snug">${escapeHtml(message)}</span>
   `;
 
   container.appendChild(toast);
@@ -1253,7 +1250,7 @@ function showToast(message, type = 'info') {
   setTimeout(() => {
     toast.classList.add('opacity-0', 'translate-y-2');
     setTimeout(() => toast.remove(), 300);
-  }, 4000);
+  }, 4500);
 }
 
 function escapeHtml(str) {

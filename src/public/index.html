@@ -954,28 +954,32 @@
     </div>
   </div>
 
-  <!-- MODAL: AGREGAR CUENTA ARCA (MULTI-CUIT) -->
+  <!-- MODAL: AGREGAR / EDITAR CUENTA ARCA (MULTI-CUIT) -->
   <div id="accountModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-white max-w-md w-full p-6 rounded-2xl shadow-2xl space-y-4 border border-slate-100">
       <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 class="text-base font-bold text-slate-900">Agregar Empresa / CUIT Emisor</h3>
+        <h3 id="accountModalTitle" class="text-base font-bold text-slate-900">Agregar Empresa / CUIT Emisor</h3>
         <button onclick="closeAccountModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
       <form onsubmit="handleSaveAccount(event)" class="space-y-3.5">
         <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">CUIT Emisor (11 dígitos sin guiones)</label>
-          <input type="text" id="accCuit" class="input-field font-mono font-bold" placeholder="20301234569" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">CUIT Emisor / Representado (11 dígitos sin guiones)</label>
+          <input type="text" id="accCuit" class="input-field font-mono font-bold" placeholder="ej: 30712345678" required>
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Razón Social / Nombre de Fantasía</label>
-          <input type="text" id="accRazonSocial" class="input-field" placeholder="ej: Mi Empresa SRL" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Razón Social / Nombre de la Empresa</label>
+          <input type="text" id="accRazonSocial" class="input-field" placeholder="ej: Tech Solutions SRL" required>
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Clave Fiscal ARCA</label>
-          <input type="password" id="accClaveFiscal" class="input-field" placeholder="••••••••••••" required>
+          <label class="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+            <span>Clave Fiscal ARCA</span>
+            <span class="text-[10px] text-slate-400 font-normal">(Opcional)</span>
+          </label>
+          <input type="password" id="accClaveFiscal" class="input-field" placeholder="Dejar en blanco para usar la Clave de Render">
+          <p class="text-[11px] text-slate-500 mt-1">Si este CUIT está delegado o representado bajo tu cuenta principal, dejá la clave en blanco.</p>
         </div>
 
         <div>
@@ -985,7 +989,7 @@
 
         <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
           <button type="button" onclick="closeAccountModal()" class="btn-secondary text-xs">Cancelar</button>
-          <button type="submit" class="btn-primary text-xs font-bold">Guardar Cuenta</button>
+          <button type="submit" id="btnSubmitAccount" class="btn-primary text-xs font-bold">Guardar Empresa</button>
         </div>
       </form>
     </div>

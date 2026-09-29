@@ -351,18 +351,29 @@ async function loadAccounts() {
     const grid = document.getElementById('accountsGrid');
     if (grid) {
       if (allAccounts.length === 0) {
-        grid.innerHTML = '<div class="col-span-full py-8 text-center text-slate-400">No hay cuentas fiscales registradas aún.</div>';
+        grid.innerHTML = '<div class="col-span-full py-8 text-center text-slate-400">No hay empresas ni CUITs registrados aún.</div>';
       } else {
         grid.innerHTML = allAccounts.map(a => `
-          <div class="p-4 bg-white border ${a.cuit === data.activeCuit ? 'border-indigo-600 ring-2 ring-indigo-100 bg-indigo-50/20' : 'border-slate-200'} rounded-xl shadow-sm space-y-2.5">
+          <div class="p-4 bg-white border ${a.cuit === data.activeCuit ? 'border-indigo-600 ring-2 ring-indigo-100 bg-indigo-50/20' : 'border-slate-200'} rounded-xl shadow-sm space-y-2.5 transition">
             <div class="flex items-center justify-between">
               <strong class="text-sm font-bold text-slate-900 truncate">${escapeHtml(a.razonSocial || 'Empresa')}</strong>
               ${a.cuit === data.activeCuit ? '<span class="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold uppercase">Emisor Activo</span>' : ''}
             </div>
             <div class="text-xs text-slate-600">CUIT: <strong class="text-slate-900 font-mono select-all">${formatCuit(a.cuit)}</strong></div>
             <div class="text-xs text-slate-500">Punto de Venta: <strong>${a.puntoVentaDefault || 1}</strong></div>
-            <div class="pt-2 border-t border-slate-100 flex justify-between items-center">
-              ${a.cuit !== data.activeCuit ? `<button onclick="switchActiveCuitAccount('${a.cuit}')" class="text-xs text-indigo-600 hover:text-indigo-800 font-bold">Seleccionar como Emisor</button>` : '<span class="text-xs text-emerald-600 font-bold flex items-center"><i class="fa-solid fa-circle-check mr-1"></i> Seleccionada</span>'}
+            <div class="pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
+              <div class="flex items-center space-x-2">
+                <button onclick="openEditAccountModal('${a.cuit}')" class="text-slate-500 hover:text-indigo-600 font-semibold p-1" title="Editar empresa">
+                  <i class="fa-solid fa-pen-to-square"></i> Editar
+                </button>
+                <button onclick="deleteAccount('${a.cuit}')" class="text-slate-400 hover:text-rose-600 font-semibold p-1" title="Eliminar CUIT">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+
+              <div>
+                ${a.cuit !== data.activeCuit ? `<button onclick="switchActiveCuitAccount('${a.cuit}')" class="text-xs text-indigo-600 hover:text-indigo-800 font-bold">Usar como Emisor</button>` : '<span class="text-xs text-emerald-600 font-bold flex items-center"><i class="fa-solid fa-circle-check mr-1"></i> Seleccionada</span>'}
+              </div>
             </div>
           </div>
         `).join('');
@@ -390,11 +401,72 @@ async function switchActiveCuitAccount(cuit) {
 }
 
 function openNewAccountModal() {
-  document.getElementById('accountModal')?.classList.remove('hidden');
+  const modal = document.getElementById('accountModal');
+  const title = document.getElementById('accountModalTitle');
+  const cuitInp = document.getElementById('accCuit');
+  const rsInp = document.getElementById('accRazonSocial');
+  const passInp = document.getElementById('accClaveFiscal');
+  const ptoInp = document.getElementById('accPuntoVenta');
+  const btnSubmit = document.getElementById('btnSubmitAccount');
+
+  if (title) title.innerText = 'Agregar Empresa / CUIT Emisor';
+  if (cuitInp) {
+    cuitInp.value = '';
+    cuitInp.disabled = false;
+  }
+  if (rsInp) rsInp.value = '';
+  if (passInp) passInp.value = '';
+  if (ptoInp) ptoInp.value = '1';
+  if (btnSubmit) btnSubmit.innerText = 'Guardar Empresa';
+
+  modal?.classList.remove('hidden');
+  cuitInp?.focus();
+}
+
+function openEditAccountModal(cuit) {
+  const acc = allAccounts.find(a => a.cuit === cuit);
+  if (!acc) return;
+
+  const modal = document.getElementById('accountModal');
+  const title = document.getElementById('accountModalTitle');
+  const cuitInp = document.getElementById('accCuit');
+  const rsInp = document.getElementById('accRazonSocial');
+  const passInp = document.getElementById('accClaveFiscal');
+  const ptoInp = document.getElementById('accPuntoVenta');
+  const btnSubmit = document.getElementById('btnSubmitAccount');
+
+  if (title) title.innerText = 'Editar Empresa / CUIT Emisor';
+  if (cuitInp) {
+    cuitInp.value = acc.cuit;
+    cuitInp.disabled = false;
+  }
+  if (rsInp) rsInp.value = acc.razonSocial || '';
+  if (passInp) passInp.value = '';
+  if (ptoInp) ptoInp.value = acc.puntoVentaDefault || 1;
+  if (btnSubmit) btnSubmit.innerText = 'Actualizar Empresa';
+
+  modal?.classList.remove('hidden');
 }
 
 function closeAccountModal() {
   document.getElementById('accountModal')?.classList.add('hidden');
+}
+
+async function deleteAccount(cuit) {
+  if (!confirm(`¿Eliminar la empresa con CUIT ${formatCuit(cuit)} de la lista?`)) return;
+  try {
+    const res = await fetchWithAuth(`/api/accounts/${cuit}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Empresa con CUIT ${formatCuit(cuit)} eliminada.`, 'info');
+      await loadAccounts();
+      await loadAuthStatus();
+    } else {
+      showToast(data.message || 'Error al eliminar cuenta.', 'error');
+    }
+  } catch (e) {
+    showToast('Error al eliminar cuenta.', 'error');
+  }
 }
 
 async function handleSaveAccount(e) {
@@ -411,7 +483,7 @@ async function handleSaveAccount(e) {
     });
     const data = await res.json();
     if (data.success) {
-      showToast('Cuenta fiscal guardada y activada con éxito.', 'success');
+      showToast('Empresa guardada y configurada correctamente.', 'success');
       closeAccountModal();
       await loadAccounts();
       await loadAuthStatus();

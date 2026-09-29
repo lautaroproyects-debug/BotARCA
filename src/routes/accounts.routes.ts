@@ -66,4 +66,17 @@ router.post('/switch', (req: Request, res: Response) => {
   }
 });
 
+// Eliminar cuenta CUIT
+router.delete('/:cuit', (req: Request, res: Response) => {
+  const { cuit } = req.params;
+  if (!cuit) return res.status(400).json({ success: false, message: 'Falta especificar el CUIT.' });
+
+  const deleted = db.deleteAccount(String(cuit));
+  if (deleted) {
+    res.json({ success: true, message: `Cuenta CUIT ${cuit} eliminada.`, accounts: db.getAccounts() });
+  } else {
+    res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+  }
+});
+
 export default router;

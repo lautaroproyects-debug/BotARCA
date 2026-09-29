@@ -330,6 +330,33 @@ class DatabaseManager {
     return false;
   }
 
+  public deleteAccount(cuit: string) {
+    const cleanCuit = cuit.replace(/\D/g, '');
+    const idx = (this.data.accounts || []).findIndex(a => a.cuit === cleanCuit);
+    if (idx !== -1) {
+      this.data.accounts.splice(idx, 1);
+      if (this.data.credentials.cuit === cleanCuit) {
+        if (this.data.accounts.length > 0) {
+          const first = this.data.accounts[0];
+          this.data.credentials = {
+            cuit: first.cuit,
+            encryptedClaveFiscal: first.encryptedClaveFiscal,
+            puntoVentaDefault: first.puntoVentaDefault,
+            razonSocial: first.razonSocial,
+            sessionValid: true,
+          };
+        } else {
+          this.data.credentials.cuit = '';
+          this.data.credentials.encryptedClaveFiscal = '';
+          this.data.credentials.razonSocial = undefined;
+        }
+      }
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
   public updateSessionStatus(valid: boolean, lastLoginAt?: string, razonSocial?: string) {
     this.data.credentials.sessionValid = valid;
     if (lastLoginAt) this.data.credentials.lastLoginAt = lastLoginAt;

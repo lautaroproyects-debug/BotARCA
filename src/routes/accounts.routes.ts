@@ -17,10 +17,10 @@ router.get('/', (req: Request, res: Response) => {
 
 // Agregar o actualizar cuenta CUIT
 router.post('/', async (req: Request, res: Response) => {
-  const { cuit, claveFiscal, puntoVentaDefault, razonSocial } = req.body;
+  const { cuit, claveFiscal, puntoVentaDefault, razonSocial, cuitRepresentante, nombreRepresentante, emailNotificaciones } = req.body;
 
   if (!cuit) {
-    return res.status(400).json({ success: false, message: 'El CUIT es obligatorio.' });
+    return res.status(400).json({ success: false, message: 'El CUIT de la empresa o cliente es obligatorio.' });
   }
 
   const cleanCuit = cuit.replace(/\D/g, '');
@@ -28,7 +28,15 @@ router.post('/', async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'El CUIT debe tener 11 dígitos numéricos.' });
   }
 
-  db.setCredentials(cleanCuit, claveFiscal, Number(puntoVentaDefault) || 1, razonSocial);
+  db.saveAccount({
+    cuit: cleanCuit,
+    razonSocial,
+    cuitRepresentante,
+    nombreRepresentante,
+    emailNotificaciones,
+    claveFiscal,
+    puntoVentaDefault: Number(puntoVentaDefault) || 1,
+  });
 
   // Sincronizar en Supabase cuentas_arca
   const supa = supabase.getClient();

@@ -5,8 +5,11 @@ import { encrypt, decrypt } from './crypto.js';
 
 export interface ArcaAccountRecord {
   id: string;
-  cuit: string;
+  cuit: string; // CUIT Representado / Empresa Emisora
   razonSocial?: string;
+  cuitRepresentante?: string; // CUIT Persona Humana con Clave Fiscal
+  nombreRepresentante?: string; // Nombre del Administrador / Contador
+  emailNotificaciones?: string; // Email de la empresa para enviar facturas
   encryptedClaveFiscal: string;
   puntoVentaDefault: number;
   activa: boolean;
@@ -254,31 +257,58 @@ class DatabaseManager {
   }
 
   public setCredentials(cuit: string, claveFiscal: string, puntoVentaDefault: number = 1, razonSocial?: string) {
-    this.data.credentials.cuit = cuit.replace(/\D/g, '');
-    if (claveFiscal) {
-      this.data.credentials.encryptedClaveFiscal = encrypt(claveFiscal);
-    }
-    this.data.credentials.puntoVentaDefault = puntoVentaDefault;
-    if (razonSocial) {
-      this.data.credentials.razonSocial = razonSocial;
+    return this.saveAccount({ cuit, claveFiscal, puntoVentaDefault, razonSocial });
+  }
+
+  public saveAccount(accountData: {
+    cuit: string;
+    razonSocial?: string;
+    cuitRepresentante?: string;
+    nombreRepresentante?: string;
+    emailNotificaciones?: string;
+    claveFiscal?: string;
+    puntoVentaDefault?: number;
+  }) {
+    const cleanCuit = accountData.cuit.replace(/\D/g, '');
+    const cleanCuitRep = accountData.cuitRepresentante ? accountData.cuitRepresentante.replace(/\D/g, '') : undefined;
+    const pto = Number(accountData.puntoVentaDefault) || 1;
+
+    let encrypted = this.data.credentials.encryptedClaveFiscal;
+    if (accountData.claveFiscal) {
+      encrypted = encrypt(accountData.claveFiscal);
     }
 
-    // Agregar o actualizar en accounts
-    const existingIdx = this.data.accounts.findIndex(a => a.cuit === this.data.credentials.cuit);
+    if (!this.data.accounts) this.data.accounts = [];
+
+    const existingIdx = this.data.accounts.findIndex(a => a.cuit === cleanCuit);
     if (existingIdx !== -1) {
-      this.data.accounts[existingIdx].encryptedClaveFiscal = this.data.credentials.encryptedClaveFiscal;
-      this.data.accounts[existingIdx].puntoVentaDefault = puntoVentaDefault;
-      if (razonSocial) this.data.accounts[existingIdx].razonSocial = razonSocial;
-    } else if (this.data.credentials.cuit) {
+      if (encrypted) this.data.accounts[existingIdx].encryptedClaveFiscal = encrypted;
+      this.data.accounts[existingIdx].puntoVentaDefault = pto;
+      if (accountData.razonSocial) this.data.accounts[existingIdx].razonSocial = accountData.razonSocial;
+      if (cleanCuitRep) this.data.accounts[existingIdx].cuitRepresentante = cleanCuitRep;
+      if (accountData.nombreRepresentante) this.data.accounts[existingIdx].nombreRepresentante = accountData.nombreRepresentante;
+      if (accountData.emailNotificaciones !== undefined) this.data.accounts[existingIdx].emailNotificaciones = accountData.emailNotificaciones;
+    } else {
       this.data.accounts.push({
         id: 'acc_' + Date.now(),
-        cuit: this.data.credentials.cuit,
-        razonSocial: razonSocial || `Cuenta ${this.data.credentials.cuit}`,
-        encryptedClaveFiscal: this.data.credentials.encryptedClaveFiscal,
-        puntoVentaDefault,
+        cuit: cleanCuit,
+        razonSocial: accountData.razonSocial || `Empresa ${cleanCuit}`,
+        cuitRepresentante: cleanCuitRep || this.data.credentials.cuit,
+        nombreRepresentante: accountData.nombreRepresentante || this.data.credentials.razonSocial,
+        emailNotificaciones: accountData.emailNotificaciones,
+        encryptedClaveFiscal: encrypted,
+        puntoVentaDefault: pto,
         activa: true,
         createdAt: new Date().toISOString(),
       });
+    }
+
+    // Si no había cuenta activa configurada, activar esta
+    if (!this.data.credentials.cuit || this.data.credentials.cuit === cleanCuit) {
+      this.data.credentials.cuit = cleanCuit;
+      if (encrypted) this.data.credentials.encryptedClaveFiscal = encrypted;
+      this.data.credentials.puntoVentaDefault = pto;
+      if (accountData.razonSocial) this.data.credentials.razonSocial = accountData.razonSocial;
     }
 
     this.save();
@@ -290,10 +320,12 @@ class DatabaseManager {
         if (client && this.data.credentials.cuit) {
           try {
             await client.from('cuentas_arca').upsert({
-              cuit: this.data.credentials.cuit,
-              razon_social: this.data.credentials.razonSocial,
-              encrypted_clave_fiscal: this.data.credentials.encryptedClaveFiscal,
-              punto_venta_default: this.data.credentials.puntoVentaDefault,
+              cuit: cleanCuit,
+              razon_social: accountData.razonSocial || this.data.credentials.razonSocial,
+              cuit_representante: cleanCuitRep || this.data.credentials.cuit,
+              email_notificaciones: accountData.emailNotificaciones,
+              encrypted_clave_fiscal: encrypted,
+              punto_venta_default: pto,
               activa: true,
               updated_at: new Date().toISOString(),
             }, { onConflict: 'cuit' });
@@ -308,6 +340,9 @@ class DatabaseManager {
       id: a.id,
       cuit: a.cuit,
       razonSocial: a.razonSocial,
+      cuitRepresentante: a.cuitRepresentante,
+      nombreRepresentante: a.nombreRepresentante,
+      emailNotificaciones: a.emailNotificaciones,
       puntoVentaDefault: a.puntoVentaDefault,
       activa: a.activa,
       createdAt: a.createdAt,

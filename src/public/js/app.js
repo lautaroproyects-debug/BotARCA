@@ -359,7 +359,15 @@ async function loadAccounts() {
               <strong class="text-sm font-bold text-slate-900 truncate">${escapeHtml(a.razonSocial || 'Empresa')}</strong>
               ${a.cuit === data.activeCuit ? '<span class="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold uppercase">Emisor Activo</span>' : ''}
             </div>
-            <div class="text-xs text-slate-600">CUIT: <strong class="text-slate-900 font-mono select-all">${formatCuit(a.cuit)}</strong></div>
+            <div class="text-xs text-slate-600">CUIT Empresa: <strong class="text-slate-900 font-mono select-all">${formatCuit(a.cuit)}</strong></div>
+            <div class="text-[11px] text-slate-500">
+              <span class="text-slate-400">Representante:</span> 
+              <strong class="text-slate-700 font-mono">${a.cuitRepresentante ? formatCuit(a.cuitRepresentante) : 'Operador Principal'}</strong>
+            </div>
+            <div class="text-[11px] text-slate-500 truncate">
+              <span class="text-slate-400">Email:</span> 
+              <span class="text-slate-700 font-medium">${escapeHtml(a.emailNotificaciones || 'Sin email de avisos')}</span>
+            </div>
             <div class="text-xs text-slate-500">Punto de Venta: <strong>${a.puntoVentaDefault || 1}</strong></div>
             <div class="pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
               <div class="flex items-center space-x-2">
@@ -405,6 +413,8 @@ function openNewAccountModal() {
   const title = document.getElementById('accountModalTitle');
   const cuitInp = document.getElementById('accCuit');
   const rsInp = document.getElementById('accRazonSocial');
+  const repInp = document.getElementById('accCuitRepresentante');
+  const emailInp = document.getElementById('accEmailNotificaciones');
   const passInp = document.getElementById('accClaveFiscal');
   const ptoInp = document.getElementById('accPuntoVenta');
   const btnSubmit = document.getElementById('btnSubmitAccount');
@@ -415,6 +425,8 @@ function openNewAccountModal() {
     cuitInp.disabled = false;
   }
   if (rsInp) rsInp.value = '';
+  if (repInp) repInp.value = '';
+  if (emailInp) emailInp.value = '';
   if (passInp) passInp.value = '';
   if (ptoInp) ptoInp.value = '1';
   if (btnSubmit) btnSubmit.innerText = 'Guardar Empresa';
@@ -431,6 +443,8 @@ function openEditAccountModal(cuit) {
   const title = document.getElementById('accountModalTitle');
   const cuitInp = document.getElementById('accCuit');
   const rsInp = document.getElementById('accRazonSocial');
+  const repInp = document.getElementById('accCuitRepresentante');
+  const emailInp = document.getElementById('accEmailNotificaciones');
   const passInp = document.getElementById('accClaveFiscal');
   const ptoInp = document.getElementById('accPuntoVenta');
   const btnSubmit = document.getElementById('btnSubmitAccount');
@@ -441,6 +455,8 @@ function openEditAccountModal(cuit) {
     cuitInp.disabled = false;
   }
   if (rsInp) rsInp.value = acc.razonSocial || '';
+  if (repInp) repInp.value = acc.cuitRepresentante || '';
+  if (emailInp) emailInp.value = acc.emailNotificaciones || '';
   if (passInp) passInp.value = '';
   if (ptoInp) ptoInp.value = acc.puntoVentaDefault || 1;
   if (btnSubmit) btnSubmit.innerText = 'Actualizar Empresa';
@@ -473,13 +489,15 @@ async function handleSaveAccount(e) {
   e.preventDefault();
   const cuit = document.getElementById('accCuit').value.trim();
   const razonSocial = document.getElementById('accRazonSocial').value.trim();
+  const cuitRepresentante = document.getElementById('accCuitRepresentante')?.value?.trim();
+  const emailNotificaciones = document.getElementById('accEmailNotificaciones')?.value?.trim();
   const claveFiscal = document.getElementById('accClaveFiscal').value;
   const puntoVentaDefault = parseInt(document.getElementById('accPuntoVenta').value || '1', 10);
 
   try {
     const res = await fetchWithAuth('/api/accounts', {
       method: 'POST',
-      body: JSON.stringify({ cuit, razonSocial, claveFiscal, puntoVentaDefault })
+      body: JSON.stringify({ cuit, razonSocial, cuitRepresentante, emailNotificaciones, claveFiscal, puntoVentaDefault })
     });
     const data = await res.json();
     if (data.success) {

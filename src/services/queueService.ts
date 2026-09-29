@@ -107,6 +107,8 @@ class QueueService {
             tipoComprobante: item.tipoComprobante as any,
             concepto: item.concepto as any,
             condicionVenta: item.condicionVenta as any,
+            cuitEmisor: item.cuitEmisor || creds.cuit,
+            razonSocialEmisor: item.razonSocialEmisor || creds.razonSocial,
             receptor: {
               tipoDoc: item.docTipo as any,
               nroDoc: item.docNro,

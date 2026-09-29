@@ -10,6 +10,8 @@ export interface FacturaRequest {
   periodoDesde?: string;
   periodoHasta?: string;
   vencimientoPago?: string;
+  cuitEmisor?: string;
+  razonSocialEmisor?: string;
   receptor: {
     tipoDoc: 'CUIT' | 'DNI' | 'Consumidor Final' | 'Sin Identificar';
     nroDoc?: string;
@@ -83,10 +85,48 @@ class FacturacionModule {
 
       logger.info('FACTURACION', 'Accediendo al menú de emisión de comprobantes...');
 
-      // Simulación de interacción con el sistema RCEL (Régimen de Comprobantes en Línea)
-      // Seleccionar empresa / titular
-      const btnEmpresa = activePage.locator('input[value*="Ingresar"], input[type="submit"], input.btn_empresa, table tr td input').first();
-      if (await btnEmpresa.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // 3. Selección de Empresa a Representar en RCEL (Delegación / Representación)
+      logger.info('FACTURACION', 'Accediendo a la selección de empresa a representar en RCEL...');
+      const targetCuit = datos.cuitEmisor?.replace(/\D/g, '') || session.cuit || '';
+      let btnEmpresa = null;
+
+      if (targetCuit && targetCuit.length === 11) {
+        const cuitDashed = `${targetCuit.substring(0, 2)}-${targetCuit.substring(2, 10)}-${targetCuit.substring(10, 11)}`;
+        logger.info('FACTURACION', `Buscando empresa representada con CUIT ${cuitDashed} (${targetCuit})...`);
+        
+        const matchSelectors = [
+          `input[type="button"][value*="${targetCuit}"]`,
+          `input[type="button"][value*="${cuitDashed}"]`,
+          `input[type="submit"][value*="${targetCuit}"]`,
+          `input[type="submit"][value*="${cuitDashed}"]`,
+          `tr:has-text("${targetCuit}") input`,
+          `tr:has-text("${cuitDashed}") input`,
+        ];
+
+        for (const sel of matchSelectors) {
+          const loc = activePage.locator(sel).first();
+          if (await loc.isVisible({ timeout: 1500 }).catch(() => false)) {
+            btnEmpresa = loc;
+            break;
+          }
+        }
+      }
+
+      // Si no se encontró por CUIT específico, intentar por razón social o tomar el primero disponible
+      if (!btnEmpresa && datos.razonSocialEmisor) {
+        const loc = activePage.locator(`input[value*="${datos.razonSocialEmisor}"], tr:has-text("${datos.razonSocialEmisor}") input`).first();
+        if (await loc.isVisible({ timeout: 1500 }).catch(() => false)) {
+          btnEmpresa = loc;
+        }
+      }
+
+      if (!btnEmpresa) {
+        btnEmpresa = activePage.locator('input[value*="Ingresar"], input[type="submit"], input.btn_empresa, table tr td input').first();
+      }
+
+      if (btnEmpresa && await btnEmpresa.isVisible({ timeout: 5000 }).catch(() => false)) {
+        const val = await btnEmpresa.getAttribute('value').catch(() => '') || 'Empresa seleccionada';
+        logger.info('FACTURACION', `Ingresando a la empresa representada en ARCA: ${val}`);
         await btnEmpresa.click();
         await activePage.waitForLoadState('domcontentloaded');
       }

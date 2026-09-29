@@ -16,6 +16,7 @@ export interface ArcaAccountRecord {
 export interface InvoicingQueueItem {
   id: string;
   cuitEmisor?: string;
+  razonSocialEmisor?: string;
   puntoVenta: number;
   tipoComprobante: string;
   concepto: number; // 1, 2, 3

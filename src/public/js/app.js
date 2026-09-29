@@ -28,7 +28,6 @@ async function initApp() {
   await loadQueueItems();
   await loadCRMClientes();
   await loadComprobantesList();
-  await loadMonotributoStats();
   loadGeneralPreferences();
   if (currentUser && currentUser.role === 'admin') {
     await loadUsersList();
@@ -182,10 +181,10 @@ async function loadCurrentUser() {
       const el = document.getElementById('headerUserName');
       if (el) el.innerText = currentUser.username;
 
-      const navUsers = document.getElementById('navTabUsers');
-      if (navUsers) {
-        if (currentUser.role === 'admin') navUsers.classList.remove('hidden');
-        else navUsers.classList.add('hidden');
+      const secUsers = document.getElementById('sectionUsersAdmin');
+      if (secUsers) {
+        if (currentUser.role === 'admin') secUsers.classList.remove('hidden');
+        else secUsers.classList.add('hidden');
       }
     }
   } catch (e) {}
@@ -217,12 +216,41 @@ function switchTab(tabId) {
   const targetBtn = document.querySelector(`.nav-tab-btn[data-tab="${tabId}"]`);
   if (targetBtn) targetBtn.classList.add('active');
 
-  if (tabId === 'cola') loadQueueItems();
+  if (tabId === 'facturar') {
+    loadQueueItems();
+    loadAccounts();
+  }
   if (tabId === 'comprobantes') loadComprobantesList();
   if (tabId === 'crm') loadCRMClientes();
-  if (tabId === 'cuentas') loadAccounts();
-  if (tabId === 'users' && currentUser && currentUser.role === 'admin') loadUsersList();
-  if (tabId === 'settings') loadGeneralPreferences();
+  if (tabId === 'settings') {
+    loadAccounts();
+    loadGeneralPreferences();
+    if (currentUser && currentUser.role === 'admin') loadUsersList();
+  }
+}
+
+// --- SUBMODE SWITCHER (LOTE vs INDIVIDUAL) ---
+function setInvoiceSubmode(mode) {
+  const btnLote = document.getElementById('btnSubmodeLote');
+  const btnManual = document.getElementById('btnSubmodeManual');
+  const viewLote = document.getElementById('subviewLote');
+  const viewManual = document.getElementById('subviewManual');
+
+  if (mode === 'manual') {
+    viewLote?.classList.add('hidden');
+    viewManual?.classList.remove('hidden');
+    btnManual?.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+    btnManual?.classList.remove('text-slate-400', 'border-transparent');
+    btnLote?.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+    btnLote?.classList.add('text-slate-400', 'border-transparent');
+  } else {
+    viewManual?.classList.add('hidden');
+    viewLote?.classList.remove('hidden');
+    btnLote?.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+    btnLote?.classList.remove('text-slate-400', 'border-transparent');
+    btnManual?.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+    btnManual?.classList.add('text-slate-400', 'border-transparent');
+  }
 }
 
 // --- FINANCIAL TICKER (ArgentinaDatos) ---
@@ -550,12 +578,14 @@ function clearExcelPasteArea() {
 async function submitExcelBatchToQueue() {
   if (parsedExcelItems.length === 0) {
     showToast('No hay facturas para agregar a la cola.', 'warn');
-    return;
+    return false;
   }
 
   const btn = document.getElementById('btnAddToQueue');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Encolando comprobantes...';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Preparando facturas...';
+  }
 
   try {
     const res = await fetchWithAuth('/api/queue/add', {
@@ -564,18 +594,33 @@ async function submitExcelBatchToQueue() {
     });
     const data = await res.json();
     if (data.success) {
-      showToast(`¡${data.count} facturas agregadas a la cola de emisión con éxito!`, 'success');
+      showToast(`¡${data.count} facturas preparadas para emitir!`, 'success');
       clearExcelPasteArea();
-      switchTab('cola');
       await loadQueueItems();
+      return true;
     } else {
       showToast(data.message, 'error');
+      return false;
     }
   } catch (e) {
     showToast('Error al agregar a la cola.', 'error');
+    return false;
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-plus text-[11px]"></i> <span>AGREGAR A LA COLA DE FACTURACIÓN</span>';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-bolt text-xs mr-1.5"></i> <span id="btnAddToQueueText">⚡ FACTURAR TODO EN ARCA AHORA</span>';
+    }
+  }
+}
+
+async function submitAndStartBatch() {
+  if (parsedExcelItems.length === 0) {
+    showToast('Pega texto, tabla o un mensaje de WhatsApp antes de emitir.', 'warn');
+    return;
+  }
+  const ok = await submitExcelBatchToQueue();
+  if (ok) {
+    await startProcessingQueue();
   }
 }
 
@@ -985,7 +1030,8 @@ function applySelectedClientToInvoice(clientId) {
 }
 
 function selectClientAndInvoice(clientId) {
-  switchTab('facturacion');
+  switchTab('facturar');
+  setInvoiceSubmode('manual');
   const select = document.getElementById('facQuickClientSelect');
   if (select) select.value = clientId;
   applySelectedClientToInvoice(clientId);

@@ -222,7 +222,6 @@ function switchTab(tabId) {
   if (tabId === 'crm') loadCRMClientes();
   if (tabId === 'cuentas') loadAccounts();
   if (tabId === 'users' && currentUser && currentUser.role === 'admin') loadUsersList();
-  if (tabId === 'monotributo') loadMonotributoStats();
   if (tabId === 'settings') loadGeneralPreferences();
 }
 
@@ -1031,46 +1030,6 @@ async function deleteClient(id) {
     await fetchWithAuth(`/api/erp/clientes/${id}`, { method: 'DELETE' });
     showToast('Cliente eliminado.', 'info');
     await loadCRMClientes();
-  } catch (e) {}
-}
-
-// --- MONOTRIBUTO & DFE ---
-async function loadMonotributoStats() {
-  try {
-    const res = await fetchWithAuth('/api/erp/monotributo/status');
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.categoria) {
-      const badge = document.getElementById('monoCategoriaBadge');
-      if (badge) badge.innerText = `Categoría ${data.categoria} (${data.tipoActividad || 'Servicios'})`;
-    }
-  } catch (e) {}
-}
-
-async function loadDfeNotifications() {
-  try {
-    const res = await fetchWithAuth('/api/erp/dfe/notificaciones');
-    if (!res.ok) return;
-    const data = await res.json();
-    const list = data.notificaciones || [];
-    const container = document.getElementById('dfeInboxList');
-    if (!container) return;
-
-    if (list.length === 0) {
-      container.innerHTML = '<div class="p-3 text-center text-slate-500 text-xs font-mono">Sin notificaciones pendientes en ARCA.</div>';
-      return;
-    }
-
-    container.innerHTML = list.map(n => `
-      <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 space-y-1 font-mono">
-        <div class="flex justify-between text-[10px] text-slate-500">
-          <span>${escapeHtml(n.organismo || 'ARCA')}</span>
-          <span>${n.fecha || '-'}</span>
-        </div>
-        <div class="text-slate-200 font-semibold text-[11px]">${escapeHtml(n.asunto || 'Notificación Oficial')}</div>
-        <p class="text-[10px] text-slate-400">${escapeHtml(n.resumen || '')}</p>
-      </div>
-    `).join('');
   } catch (e) {}
 }
 

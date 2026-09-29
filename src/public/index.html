@@ -252,9 +252,6 @@
       <button id="navTabUsers" onclick="switchTab('users')" class="nav-tab-btn" data-tab="users">
         <i class="fa-solid fa-user-shield"></i> Usuarios
       </button>
-      <button onclick="switchTab('monotributo')" class="nav-tab-btn" data-tab="monotributo">
-        <i class="fa-solid fa-building-columns"></i> Estado Fiscal
-      </button>
       <button onclick="switchTab('settings')" class="nav-tab-btn" data-tab="settings">
         <i class="fa-solid fa-sliders"></i> Configuración
       </button>
@@ -748,64 +745,7 @@
     </section>
 
     <!-- ========================================== -->
-    <!-- TAB 8: ESTADO FISCAL & DFE                 -->
-    <!-- ========================================== -->
-    <section id="tab-monotributo" class="tab-content hidden space-y-4">
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        
-        <!-- Left: Fiscal Status -->
-        <div class="lg:col-span-6 card-panel p-5 space-y-4">
-          <div class="flex items-center justify-between border-b border-obsidian-700 pb-3 font-mono">
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider">Situación Monotributo</h3>
-            <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">Activo</span>
-          </div>
-
-          <div class="space-y-3 font-mono text-xs">
-            <div class="p-3 bg-obsidian-850 rounded border border-obsidian-700 space-y-2">
-              <div class="flex justify-between text-slate-400">
-                <span>Categoría Actual:</span>
-                <strong id="monoCategoriaBadge" class="text-amber-400 text-sm">Categoría C (Servicios)</strong>
-              </div>
-              <div class="space-y-1">
-                <div class="flex justify-between text-[11px] text-slate-500">
-                  <span>Facturación Anual Acumulada:</span>
-                  <span class="text-slate-200 font-bold">$3.450.000 / $20.500.000</span>
-                </div>
-                <div class="w-full bg-obsidian-950 rounded-full h-2 overflow-hidden border border-obsidian-700">
-                  <div class="bg-amber-500 h-2 rounded-full" style="width: 17%"></div>
-                </div>
-              </div>
-            </div>
-
-            <div class="flex justify-between items-center p-3 bg-obsidian-850 rounded border border-obsidian-700">
-              <span class="text-slate-400">Estado de Deuda CCMA:</span>
-              <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-[11px]">Al día ($0,00)</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: DFE Communications -->
-        <div class="lg:col-span-6 card-panel p-5 space-y-4">
-          <div class="flex items-center justify-between border-b border-obsidian-700 pb-3 font-mono">
-            <div class="flex items-center space-x-2">
-              <i class="fa-solid fa-envelope text-amber-400"></i>
-              <h3 class="text-sm font-bold text-white uppercase tracking-wider">Comunicaciones DFE</h3>
-            </div>
-            <button onclick="loadDfeNotifications()" class="text-slate-400 hover:text-slate-200 text-xs transition">
-              <i class="fa-solid fa-rotate"></i>
-            </button>
-          </div>
-
-          <div id="dfeInboxList" class="space-y-2 text-xs font-mono">
-            <div class="p-3 text-center text-slate-500">Sin notificaciones pendientes en ARCA.</div>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ========================================== -->
-    <!-- TAB 9: PREFERENCIAS & ESTADO CLOUD         -->
+    <!-- TAB 8: PREFERENCIAS & ESTADO CLOUD         -->
     <!-- ========================================== -->
     <section id="tab-settings" class="tab-content hidden space-y-4">
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">

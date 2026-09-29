@@ -245,7 +245,7 @@
               <strong class="text-sm font-bold text-slate-900">Facturar por Lote con Inteligencia Artificial</strong>
               <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-indigo-600 text-white">Recomendado</span>
             </div>
-            <p class="text-xs text-slate-600 mt-0.5">Pegá mensajes de WhatsApp o filas de Excel y la IA hace el trabajo por vos.</p>
+            <p class="text-xs text-slate-600 mt-0.5">Pegá un texto con datos o una planilla de Excel y la IA genera las facturas automáticamente.</p>
           </div>
         </button>
 
@@ -273,18 +273,18 @@
             <div class="flex items-center space-x-3">
               <span class="step-number-badge">1</span>
               <div>
-                <h3 class="text-base font-bold text-slate-900">Pegá lo que querés facturar</h3>
-                <p class="text-xs text-slate-500">Copiá mensajes de WhatsApp de tus clientes o filas de Excel. El sistema interpreta CUIT, nombre, montos y conceptos.</p>
+                <h3 class="text-base font-bold text-slate-900">Pegá los datos a facturar (Texto Libre o Planilla)</h3>
+                <p class="text-xs text-slate-500">Pegá cualquier texto donde figuren cliente, CUIT, monto y concepto (o celdas de Excel). La IA extrae los datos y arma los comprobantes.</p>
               </div>
             </div>
 
             <!-- Quick Action Chips -->
             <div class="flex flex-wrap items-center gap-2">
-              <button type="button" onclick="loadSampleWhatsAppMsg()" class="btn-secondary !py-1.5 !px-3 text-xs">
-                <i class="fa-brands fa-whatsapp text-emerald-600 mr-1"></i> Probar con WhatsApp
+              <button type="button" onclick="loadSampleTextMsg()" class="btn-secondary !py-1.5 !px-3 text-xs">
+                <i class="fa-solid fa-align-left text-indigo-600 mr-1"></i> Cargar Texto de Ejemplo
               </button>
               <button type="button" onclick="loadSampleExcelData()" class="btn-secondary !py-1.5 !px-3 text-xs">
-                <i class="fa-solid fa-table text-indigo-600 mr-1"></i> Probar con Excel
+                <i class="fa-solid fa-table text-emerald-600 mr-1"></i> Cargar Tabla Excel
               </button>
               <button type="button" id="btnParseWithAi" onclick="handleParseWithGroq()" class="btn-gold !py-1.5 !px-3 text-xs">
                 <i class="fa-solid fa-brain text-amber-600 mr-1"></i> ✨ Interpretar con IA
@@ -297,7 +297,7 @@
 
           <!-- Textarea Area -->
           <div class="space-y-2.5">
-            <textarea id="excelPasteArea" oninput="handleExcelPasteChange(this.value)" rows="4" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-800 outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 transition placeholder:text-slate-400 font-sans" placeholder="💬 Ejemplo WhatsApp:&#10;'Hola, facturale a Tech Solutions SRL CUIT 30-71234567-8 la suma de $185.000 por honorarios de desarrollo de software.'&#10;&#10;📊 O pegá directamente celdas copiadas de tu archivo Excel..."></textarea>
+            <textarea id="excelPasteArea" oninput="handleExcelPasteChange(this.value)" rows="4" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-800 outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 transition placeholder:text-slate-400 font-sans" placeholder="📝 Pegá aquí cualquier texto, nota o pedido a facturar, por ejemplo:&#10;'Facturarle a Tech Solutions SRL CUIT 30-71234567-8 la suma de $185.000 por servicios profesionales de desarrollo web.'&#10;&#10;📊 O pegá directamente celdas copiadas de tu archivo Excel..."></textarea>
             
             <div class="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
               <span id="parserBadge" class="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
@@ -343,7 +343,7 @@
                   <tr>
                     <td colspan="7" class="py-10 text-center text-slate-400 text-sm">
                       <i class="fa-solid fa-clipboard-list text-3xl text-slate-300 block mb-2"></i>
-                      Pegá mensajes de WhatsApp o filas de Excel arriba para ver la vista previa.
+                      Pegá texto libre o filas de Excel arriba para generar la vista previa.
                     </td>
                   </tr>
                 </tbody>

@@ -454,7 +454,7 @@ async function handleExcelPasteChange(text) {
 async function handleParseWithGroq() {
   const text = document.getElementById('excelPasteArea')?.value?.trim();
   if (!text) {
-    showToast('Pega texto, tabla o un mensaje de WhatsApp antes de interpretar.', 'warn');
+    showToast('Pegá un texto o una tabla antes de interpretar.', 'warn');
     return;
   }
 
@@ -475,7 +475,7 @@ async function handleParseWithGroq() {
       renderExcelPreview(parsedExcelItems);
       updateParserBadge(data.parserUsed, parsedExcelItems.length);
       if (data.items.length > 0) {
-        const provName = data.parserUsed === 'groq_ai' ? 'Groq IA (Llama-3.3-70B)' : 'Motor Heurístico';
+        const provName = data.parserUsed === 'groq_ai' ? 'Groq IA (Llama-3.3-70B)' : 'Motor Inteligente';
         showToast(`¡${data.items.length} facturas extraídas con ${provName}!`, 'success');
       } else {
         showToast('No se encontraron datos fiscales válidos en el texto.', 'warn');
@@ -501,8 +501,8 @@ function updateParserBadge(parserUsed, count) {
     badge.innerHTML = '<i class="fa-solid fa-brain text-indigo-600 mr-1.5"></i> <strong class="text-indigo-900">Inteligencia Artificial Groq (Llama-3.3-70B)</strong>';
     badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold';
   } else if (parserUsed === 'heuristic_nlp') {
-    badge.innerHTML = '<i class="fa-brands fa-whatsapp text-emerald-600 mr-1.5"></i> <strong class="text-emerald-900">Parser Inteligente WhatsApp</strong>';
-    badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold';
+    badge.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles text-indigo-600 mr-1.5"></i> <strong class="text-indigo-900">Lectura Inteligente de Texto Libre</strong>';
+    badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold';
   } else {
     badge.innerHTML = '<i class="fa-solid fa-table text-slate-600 mr-1.5"></i> Formato Tabular Excel / CSV';
     badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold';
@@ -527,7 +527,7 @@ function renderExcelPreview(items) {
 
   if (!tbody) return;
   if (items.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="py-10 text-center text-slate-400 text-sm"><i class="fa-solid fa-clipboard-list text-3xl text-slate-300 block mb-2"></i>Pegá mensajes de WhatsApp o filas de Excel arriba para ver la vista previa.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="py-10 text-center text-slate-400 text-sm"><i class="fa-solid fa-clipboard-list text-3xl text-slate-300 block mb-2"></i>Pegá texto libre o filas de Excel arriba para generar la vista previa.</td></tr>';
     return;
   }
 
@@ -603,16 +603,17 @@ function loadSampleExcelData() {
   }
 }
 
-function loadSampleWhatsAppMsg() {
-  const sample = `[28/9, 11:20] Juan Perez: Hola! Me podés emitir una factura C a Tech Solutions SRL? El CUIT es 30-71234567-8 por $185.000 de honorarios por desarrollo web y APIs.
-[28/9, 14:45] Maria Gómez: Hola Lautaro, facturale a Gómez Distribuidora CUIT 27-33889900-4 la suma de 75.000 pesos por consultoría mensual de marketing. Gracias!
-[28/9, 16:10] Carlos Lopez: Haceme una factura para Lopez Construcciones CUIT 20-28776655-1 por $320000 concepto de materiales e instalación.`;
+function loadSampleTextMsg() {
+  const sample = `Facturarle a Tech Solutions SRL CUIT 30-71234567-8 la suma de $185.000 por honorarios profesionales de desarrollo web y APIs.
+Factura C a Gómez Distribuidora CUIT 27-33889900-4 por $75.000 por consultoría mensual de marketing.
+Emitir a Lopez Construcciones CUIT 20-28776655-1 el monto de $320.000 por materiales e instalación.`;
   const area = document.getElementById('excelPasteArea');
   if (area) {
     area.value = sample;
     handleExcelPasteChange(sample);
   }
 }
+const loadSampleWhatsAppMsg = loadSampleTextMsg;
 
 function clearExcelPasteArea() {
   const area = document.getElementById('excelPasteArea');
@@ -662,7 +663,7 @@ async function submitExcelBatchToQueue() {
 
 async function submitAndStartBatch() {
   if (parsedExcelItems.length === 0) {
-    showToast('Pega texto, tabla o un mensaje de WhatsApp antes de emitir.', 'warn');
+    showToast('Pegá un texto o una tabla antes de emitir.', 'warn');
     return;
   }
   const ok = await submitExcelBatchToQueue();

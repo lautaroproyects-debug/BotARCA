@@ -14,8 +14,14 @@ let sseSource = null;
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', async () => {
   if (authToken) {
-    hideLoginOverlay();
-    await initApp();
+    const valid = await loadCurrentUser();
+    if (valid) {
+      hideLoginOverlay();
+      await initApp();
+    } else {
+      handleUserLogout(false);
+      showLoginOverlay();
+    }
   } else {
     showLoginOverlay();
   }
@@ -171,76 +177,88 @@ function fillAdminCredentials() {
   showToast('Credenciales de administrador cargadas.', 'info');
 }
 
-function handleUserLogout() {
+function handleUserLogout(notify = true) {
   localStorage.removeItem('botarca_token');
   authToken = '';
   currentUser = null;
-  if (sseSource) sseSource.close();
+  if (sseSource) {
+    sseSource.close();
+    sseSource = null;
+  }
   showLoginOverlay();
-  showToast('Sesión cerrada.', 'info');
+  if (notify) {
+    showToast('Sesión cerrada.', 'info');
+  }
 }
 
 async function loadCurrentUser() {
+  if (!authToken) return false;
   try {
     const res = await fetchWithAuth('/api/auth/me');
-    if (res.ok) {
+    if (res && res.ok) {
       const data = await res.json();
-      currentUser = data.user;
-      
-      const displayName = currentUser.name || currentUser.username;
-      const initials = (displayName.length > 2 ? displayName.substring(0, 2) : displayName).toUpperCase();
+      if (data.success && data.user) {
+        currentUser = data.user;
+        
+        const displayName = currentUser.name || currentUser.username;
+        const initials = (displayName.length > 2 ? displayName.substring(0, 2) : displayName).toUpperCase();
 
-      // Top Navbar elements
-      const elName = document.getElementById('headerUserName');
-      if (elName) elName.innerText = displayName;
+        // Top Navbar elements
+        const elName = document.getElementById('headerUserName');
+        if (elName) elName.innerText = displayName;
 
-      const elSubtext = document.getElementById('headerUserSubtext');
-      if (elSubtext) elSubtext.innerText = `@${currentUser.username}`;
+        const elSubtext = document.getElementById('headerUserSubtext');
+        if (elSubtext) elSubtext.innerText = `@${currentUser.username}`;
 
-      const elRole = document.getElementById('headerUserRoleBadge');
-      if (elRole) {
-        elRole.innerText = currentUser.role === 'admin' ? 'ADMIN' : 'OPERADOR';
-        elRole.className = currentUser.role === 'admin'
-          ? 'px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase'
-          : 'px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 uppercase';
-      }
+        const elRole = document.getElementById('headerUserRoleBadge');
+        if (elRole) {
+          elRole.innerText = currentUser.role === 'admin' ? 'ADMIN' : 'OPERADOR';
+          elRole.className = currentUser.role === 'admin'
+            ? 'px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase'
+            : 'px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 uppercase';
+        }
 
-      const elAvatar = document.getElementById('headerUserAvatar');
-      if (elAvatar) elAvatar.innerText = initials;
+        const elAvatar = document.getElementById('headerUserAvatar');
+        if (elAvatar) elAvatar.innerText = initials;
 
-      // Settings tab Profile card elements
-      const pAvatar = document.getElementById('profileCardAvatar');
-      if (pAvatar) pAvatar.innerText = initials;
+        // Settings tab Profile card elements
+        const pAvatar = document.getElementById('profileCardAvatar');
+        if (pAvatar) pAvatar.innerText = initials;
 
-      const pName = document.getElementById('profileCardName');
-      if (pName) pName.innerText = displayName;
+        const pName = document.getElementById('profileCardName');
+        if (pName) pName.innerText = displayName;
 
-      const pUser = document.getElementById('profileCardUsername');
-      if (pUser) pUser.innerText = `@${currentUser.username}`;
+        const pUser = document.getElementById('profileCardUsername');
+        if (pUser) pUser.innerText = `@${currentUser.username}`;
 
-      const pEmail = document.getElementById('profileCardEmail');
-      if (pEmail) pEmail.innerText = currentUser.email || 'Sin email registrado';
+        const pEmail = document.getElementById('profileCardEmail');
+        if (pEmail) pEmail.innerText = currentUser.email || 'Sin email registrado';
 
-      const pRole = document.getElementById('profileCardRole');
-      if (pRole) {
-        pRole.innerText = currentUser.role === 'admin' ? 'Super Administrador' : 'Operador';
-        pRole.className = currentUser.role === 'admin'
-          ? 'px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200'
-          : 'px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200';
-      }
+        const pRole = document.getElementById('profileCardRole');
+        if (pRole) {
+          pRole.innerText = currentUser.role === 'admin' ? 'Super Administrador' : 'Operador';
+          pRole.className = currentUser.role === 'admin'
+            ? 'px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200'
+            : 'px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200';
+        }
 
-      const pSince = document.getElementById('profileCardSince');
-      if (pSince && currentUser.createdAt) {
-        pSince.innerText = new Date(currentUser.createdAt).toLocaleDateString('es-AR');
-      }
+        const pSince = document.getElementById('profileCardSince');
+        if (pSince && currentUser.createdAt) {
+          pSince.innerText = new Date(currentUser.createdAt).toLocaleDateString('es-AR');
+        }
 
-      const secUsers = document.getElementById('sectionUsersAdmin');
-      if (secUsers) {
-        if (currentUser.role === 'admin') secUsers.classList.remove('hidden');
-        else secUsers.classList.add('hidden');
+        const secUsers = document.getElementById('sectionUsersAdmin');
+        if (secUsers) {
+          if (currentUser.role === 'admin') secUsers.classList.remove('hidden');
+          else secUsers.classList.add('hidden');
+        }
+        return true;
       }
     }
-  } catch (e) {}
+    return false;
+  } catch (e) {
+    return false;
+  }
 }
 
 async function fetchWithAuth(url, options = {}) {
@@ -251,9 +269,9 @@ async function fetchWithAuth(url, options = {}) {
   };
 
   const response = await fetch(url, { ...options, headers });
-  if (response.status === 401) {
-    handleUserLogout();
-    throw new Error('Sesión no autorizada');
+  if (response.status === 401 || response.status === 403) {
+    handleUserLogout(false);
+    throw new Error('Sesión expirada o token inválido');
   }
   return response;
 }

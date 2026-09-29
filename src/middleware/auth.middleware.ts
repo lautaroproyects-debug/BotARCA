@@ -27,7 +27,7 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
 
   const payload = userService.verifyToken(token);
   if (!payload) {
-    return res.status(403).json({
+    return res.status(401).json({
       success: false,
       message: 'Token de sesión inválido o expirado.',
     });

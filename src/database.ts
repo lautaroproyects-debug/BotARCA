@@ -229,8 +229,88 @@ class DatabaseManager {
       }
     }
 
+    // Soporte para múltiples cuentas en variable de entorno ARCA_ACCOUNTS (JSON)
+    if (process.env.ARCA_ACCOUNTS) {
+      try {
+        const parsedAccounts = JSON.parse(process.env.ARCA_ACCOUNTS);
+        if (Array.isArray(parsedAccounts)) {
+          if (!loadedData.accounts) loadedData.accounts = [];
+          for (const acc of parsedAccounts) {
+            const cleanCuit = (acc.cuit || '').replace(/\D/g, '');
+            if (!cleanCuit) continue;
+            const encrypted = acc.claveFiscal ? encrypt(acc.claveFiscal) : (acc.encryptedClaveFiscal || '');
+            const existingIdx = loadedData.accounts.findIndex(a => a.cuit === cleanCuit);
+            const accountObj: ArcaAccountRecord = {
+              id: acc.id || ('acc_env_' + cleanCuit),
+              cuit: cleanCuit,
+              razonSocial: acc.razonSocial || `Empresa ${cleanCuit}`,
+              cuitRepresentante: acc.cuitRepresentante ? acc.cuitRepresentante.replace(/\D/g, '') : undefined,
+              nombreRepresentante: acc.nombreRepresentante,
+              emailNotificaciones: acc.emailNotificaciones,
+              encryptedClaveFiscal: encrypted,
+              puntoVentaDefault: Number(acc.puntoVentaDefault) || 1,
+              activa: acc.activa !== false,
+              createdAt: acc.createdAt || new Date().toISOString(),
+            };
+            if (existingIdx !== -1) {
+              loadedData.accounts[existingIdx] = { ...loadedData.accounts[existingIdx], ...accountObj };
+            } else {
+              loadedData.accounts.push(accountObj);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error al parsear ARCA_ACCOUNTS:', e);
+      }
+    }
+
     this.save(loadedData);
     return loadedData;
+  }
+
+  public async syncFromSupabase() {
+    try {
+      const { supabase } = await import('./services/supabase.js');
+      const client = supabase.getClient();
+      if (!client) return;
+      const { data, error } = await client.from('cuentas_arca').select('*');
+      if (error || !data || data.length === 0) return;
+
+      if (!this.data.accounts) this.data.accounts = [];
+      for (const row of data) {
+        const cleanCuit = (row.cuit || '').replace(/\D/g, '');
+        if (!cleanCuit) continue;
+        const existingIdx = this.data.accounts.findIndex(a => a.cuit === cleanCuit);
+        const accountObj: ArcaAccountRecord = {
+          id: row.id || ('acc_supa_' + cleanCuit),
+          cuit: cleanCuit,
+          razonSocial: row.razon_social || `Empresa ${cleanCuit}`,
+          cuitRepresentante: row.cuit_representante || undefined,
+          nombreRepresentante: row.nombre_representante || undefined,
+          emailNotificaciones: row.email_notificaciones || undefined,
+          encryptedClaveFiscal: row.encrypted_clave_fiscal || '',
+          puntoVentaDefault: Number(row.punto_venta_default) || 1,
+          activa: row.activa !== false,
+          createdAt: row.created_at || new Date().toISOString(),
+        };
+        if (existingIdx !== -1) {
+          this.data.accounts[existingIdx] = { ...this.data.accounts[existingIdx], ...accountObj };
+        } else {
+          this.data.accounts.push(accountObj);
+        }
+      }
+
+      if (!this.data.credentials.cuit && this.data.accounts.length > 0) {
+        const first = this.data.accounts[0];
+        this.data.credentials.cuit = first.cuit;
+        this.data.credentials.encryptedClaveFiscal = first.encryptedClaveFiscal;
+        this.data.credentials.puntoVentaDefault = first.puntoVentaDefault;
+        this.data.credentials.razonSocial = first.razonSocial;
+      }
+      this.save();
+    } catch (err) {
+      console.warn('Supabase syncAccounts notice:', err);
+    }
   }
 
   public save(dataToSave: AppDatabase = this.data) {

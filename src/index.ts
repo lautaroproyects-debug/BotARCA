@@ -97,6 +97,9 @@ const server = app.listen(config.port, () => {
   // Inicializar servicios
   keepAliveService.init();
   schedulerService.init();
+  import('./database.js').then(({ db }) => {
+    db.syncFromSupabase().catch(() => {});
+  }).catch(() => {});
 });
 
 // Manejo de apagado graceful

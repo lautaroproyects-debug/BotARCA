@@ -78,6 +78,17 @@
           <span>Ingresar a la Plataforma</span>
           <i class="fa-solid fa-arrow-right text-xs"></i>
         </button>
+
+        <!-- Default Credentials Quick Access -->
+        <div class="p-3 bg-indigo-50/80 border border-indigo-100 rounded-xl text-xs space-y-1.5 text-indigo-950">
+          <div class="flex items-center justify-between">
+            <span class="font-bold flex items-center gap-1.5 text-indigo-900"><i class="fa-solid fa-lightbulb text-amber-500"></i> Usuario de acceso:</span>
+            <button type="button" onclick="fillAdminCredentials()" class="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 underline">Cargar credenciales</button>
+          </div>
+          <div class="text-[11px] text-slate-600 font-mono">
+            Usuario: <strong class="text-slate-900">admin</strong> | Clave: <strong class="text-slate-900">admin123</strong>
+          </div>
+        </div>
       </form>
 
       <!-- Registration Form -->
@@ -146,19 +157,19 @@
         </div>
 
         <!-- Controls: Multi-Account Selector, Dollar Ticker, Actions -->
-        <div class="flex items-center space-x-3 sm:space-x-4">
+        <div class="flex items-center space-x-2 sm:space-x-3">
           
           <!-- Multi-Account / Emisor Picker -->
           <div class="flex items-center space-x-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl text-xs transition">
             <i class="fa-solid fa-building text-indigo-600"></i>
             <span class="text-slate-500 font-medium hidden md:inline">Emisor:</span>
-            <select id="headerAccountSelect" onchange="switchActiveCuitAccount(this.value)" class="bg-transparent font-bold text-slate-800 outline-none cursor-pointer max-w-[180px] sm:max-w-[240px]">
+            <select id="headerAccountSelect" onchange="switchActiveCuitAccount(this.value)" class="bg-transparent font-bold text-slate-800 outline-none cursor-pointer max-w-[150px] sm:max-w-[220px]">
               <option value="">Cargando empresas...</option>
             </select>
           </div>
 
           <!-- Dollar Ticker Badge -->
-          <div class="hidden lg:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-900">
+          <div class="hidden xl:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-900">
             <i class="fa-solid fa-dollar-sign text-amber-600"></i>
             <span class="text-amber-700">Dólar Blue:</span>
             <strong id="tickBlue" class="font-bold text-amber-900">$1.220</strong>
@@ -171,13 +182,20 @@
           </button>
 
           <!-- User Menu & Logout -->
-          <div class="flex items-center space-x-3 pl-3 border-l border-slate-200">
-            <div class="hidden sm:block text-right">
-              <span id="headerUserName" class="text-xs font-bold text-slate-800 block">admin</span>
-              <span class="text-[10px] text-slate-500 block">Operador Activo</span>
+          <div class="flex items-center space-x-2.5 pl-2.5 sm:pl-3 border-l border-slate-200">
+            <div id="headerUserAvatar" class="w-8 h-8 rounded-full bg-indigo-100 border border-indigo-200 flex items-center justify-center text-indigo-700 font-extrabold text-xs flex-shrink-0">
+              AD
             </div>
-            <button onclick="handleUserLogout()" title="Cerrar Sesión" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 flex items-center justify-center transition">
+            <div class="text-left hidden xs:block sm:block">
+              <div class="flex items-center space-x-1.5">
+                <span id="headerUserName" class="text-xs font-extrabold text-slate-900 block leading-tight truncate max-w-[130px]">Super Administrador</span>
+                <span id="headerUserRoleBadge" class="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">ADMIN</span>
+              </div>
+              <span id="headerUserSubtext" class="text-[10px] text-slate-500 block leading-tight truncate max-w-[140px]">@admin</span>
+            </div>
+            <button onclick="handleUserLogout()" title="Cerrar Sesión" class="p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 text-xs font-semibold flex items-center space-x-1 transition">
               <i class="fa-solid fa-power-off text-xs"></i>
+              <span class="hidden md:inline">Salir</span>
             </button>
           </div>
 
@@ -666,6 +684,45 @@
     <!-- ============================================================= -->
     <section id="tab-settings" class="tab-content hidden space-y-6">
       
+      <!-- Box 0: Active User Profile Card -->
+      <div class="card-panel p-6 bg-gradient-to-r from-indigo-50/60 via-white to-slate-50 border border-indigo-100/80">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div class="flex items-center space-x-4">
+            <div id="profileCardAvatar" class="w-14 h-14 rounded-2xl bg-indigo-600 text-white font-extrabold text-xl flex items-center justify-center shadow-lg shadow-indigo-100 flex-shrink-0">
+              AD
+            </div>
+            <div class="space-y-1">
+              <div class="flex items-center space-x-2">
+                <h3 id="profileCardName" class="text-lg font-extrabold text-slate-900">Super Administrador</h3>
+                <span id="profileCardRole" class="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                  Super Administrador
+                </span>
+              </div>
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                <span class="flex items-center space-x-1.5">
+                  <i class="fa-solid fa-at text-indigo-500"></i>
+                  <strong id="profileCardUsername" class="text-slate-800 font-mono">@admin</strong>
+                </span>
+                <span class="flex items-center space-x-1.5">
+                  <i class="fa-solid fa-envelope text-slate-400"></i>
+                  <span id="profileCardEmail" class="font-mono">admin@botarca.local</span>
+                </span>
+                <span class="flex items-center space-x-1.5 text-slate-400">
+                  <i class="fa-solid fa-calendar-check"></i>
+                  <span>Alta: <span id="profileCardSince" class="font-semibold text-slate-600">2026</span></span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-2 w-full sm:w-auto justify-end pt-2 sm:pt-0">
+            <button onclick="handleUserLogout()" class="btn-secondary !py-2 !px-4 text-xs font-bold text-rose-600 hover:bg-rose-50 hover:border-rose-200">
+              <i class="fa-solid fa-power-off mr-1.5"></i> Cerrar Sesión
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Box 1: Cuentas Fiscales Multi-CUIT -->
       <div class="card-panel p-6 space-y-4">
         <div class="flex items-center justify-between pb-4 border-b border-slate-100">

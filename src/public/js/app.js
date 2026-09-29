@@ -163,6 +163,14 @@ async function handleUserRegister(e) {
   }
 }
 
+function fillAdminCredentials() {
+  const u = document.getElementById('loginUsername');
+  const p = document.getElementById('loginPassword');
+  if (u) u.value = 'admin';
+  if (p) p.value = 'admin123';
+  showToast('Credenciales de administrador cargadas.', 'info');
+}
+
 function handleUserLogout() {
   localStorage.removeItem('botarca_token');
   authToken = '';
@@ -178,8 +186,53 @@ async function loadCurrentUser() {
     if (res.ok) {
       const data = await res.json();
       currentUser = data.user;
-      const el = document.getElementById('headerUserName');
-      if (el) el.innerText = currentUser.username;
+      
+      const displayName = currentUser.name || currentUser.username;
+      const initials = (displayName.length > 2 ? displayName.substring(0, 2) : displayName).toUpperCase();
+
+      // Top Navbar elements
+      const elName = document.getElementById('headerUserName');
+      if (elName) elName.innerText = displayName;
+
+      const elSubtext = document.getElementById('headerUserSubtext');
+      if (elSubtext) elSubtext.innerText = `@${currentUser.username}`;
+
+      const elRole = document.getElementById('headerUserRoleBadge');
+      if (elRole) {
+        elRole.innerText = currentUser.role === 'admin' ? 'ADMIN' : 'OPERADOR';
+        elRole.className = currentUser.role === 'admin'
+          ? 'px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase'
+          : 'px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 uppercase';
+      }
+
+      const elAvatar = document.getElementById('headerUserAvatar');
+      if (elAvatar) elAvatar.innerText = initials;
+
+      // Settings tab Profile card elements
+      const pAvatar = document.getElementById('profileCardAvatar');
+      if (pAvatar) pAvatar.innerText = initials;
+
+      const pName = document.getElementById('profileCardName');
+      if (pName) pName.innerText = displayName;
+
+      const pUser = document.getElementById('profileCardUsername');
+      if (pUser) pUser.innerText = `@${currentUser.username}`;
+
+      const pEmail = document.getElementById('profileCardEmail');
+      if (pEmail) pEmail.innerText = currentUser.email || 'Sin email registrado';
+
+      const pRole = document.getElementById('profileCardRole');
+      if (pRole) {
+        pRole.innerText = currentUser.role === 'admin' ? 'Super Administrador' : 'Operador';
+        pRole.className = currentUser.role === 'admin'
+          ? 'px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200'
+          : 'px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200';
+      }
+
+      const pSince = document.getElementById('profileCardSince');
+      if (pSince && currentUser.createdAt) {
+        pSince.innerText = new Date(currentUser.createdAt).toLocaleDateString('es-AR');
+      }
 
       const secUsers = document.getElementById('sectionUsersAdmin');
       if (secUsers) {

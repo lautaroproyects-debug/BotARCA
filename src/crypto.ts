@@ -3,7 +3,7 @@ import { config } from './config.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
-const KEY = crypto.createHash('sha256').update(config.appSecret).digest();
+const KEY = crypto.createHash('sha256').update(config.encryptionKey).digest();
 
 /**
  * Encripta un texto sensible (ej: Clave Fiscal) utilizando AES-256-GCM

@@ -18,6 +18,7 @@ import usersRoutes from './routes/users.routes.js';
 import queueRoutes from './routes/queue.routes.js';
 import accountsRoutes from './routes/accounts.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
+import storageRoutes from './routes/storage.routes.js';
 
 import {
   securityHeaders,
@@ -39,9 +40,9 @@ app.use(securityHeaders);
 // 2. CORS Estricto y validación de orígenes autorizados
 app.use(secureCors);
 
-// 3. Parsers con límites de carga seguros
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+// 3. Parsers con límites de carga seguros (50MB para adjuntos y planillas)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // 4. Sanitización global de entradas contra XSS y Prototype Pollution
 app.use(inputSanitizer);
@@ -58,10 +59,11 @@ app.use('/api/auth', authRateLimiter);
 app.use('/api/users/login', authRateLimiter);
 app.use('/api/users/register', authRateLimiter);
 
-// 8. Rate Limiting para operaciones pesadas (ARCA / IA / Batch)
+// 8. Rate Limiting para operaciones pesadas (ARCA / IA / Batch / Storage)
 app.use('/api/tasks', heavyOperationRateLimiter);
 app.use('/api/queue/process', heavyOperationRateLimiter);
 app.use('/api/queue/parse-smart', heavyOperationRateLimiter);
+app.use('/api/storage/upload', heavyOperationRateLimiter);
 
 // Rutas de la API
 app.use('/api/users', usersRoutes);
@@ -74,6 +76,7 @@ app.use('/api/erp', erpRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/accounts', accountsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/storage', storageRoutes);
 
 // Endpoint rápido /healthz y /ping para Render y UptimeRobot
 app.get('/healthz', (req, res) => res.status(200).send('OK'));

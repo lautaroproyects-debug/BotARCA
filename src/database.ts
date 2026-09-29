@@ -147,12 +147,21 @@ class DatabaseManager {
   private load(): AppDatabase {
     const defaultData: AppDatabase = {
       credentials: {
-        cuit: '',
-        encryptedClaveFiscal: '',
-        puntoVentaDefault: 1,
+        cuit: config.arca.cuit || '',
+        encryptedClaveFiscal: config.arca.claveFiscal ? encrypt(config.arca.claveFiscal) : '',
+        puntoVentaDefault: config.arca.puntoVenta || 1,
+        razonSocial: config.arca.razonSocial || (config.arca.cuit ? `Cuenta ${config.arca.cuit}` : undefined),
         sessionValid: false,
       },
-      accounts: [],
+      accounts: config.arca.cuit && config.arca.claveFiscal ? [{
+        id: 'acc_env_' + config.arca.cuit,
+        cuit: config.arca.cuit,
+        razonSocial: config.arca.razonSocial || `Cuenta ${config.arca.cuit}`,
+        encryptedClaveFiscal: encrypt(config.arca.claveFiscal),
+        puntoVentaDefault: config.arca.puntoVenta || 1,
+        activa: true,
+        createdAt: new Date().toISOString(),
+      }] : [],
       users: [],
       queue: [],
       clientes: [],
@@ -176,19 +185,48 @@ class DatabaseManager {
       sessionCookies: [],
     };
 
+    let loadedData: AppDatabase = defaultData;
+
     if (fs.existsSync(DB_FILE)) {
       try {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
-        return { ...defaultData, ...parsed };
+        loadedData = { ...defaultData, ...parsed };
       } catch (e) {
         console.error('Error al leer base de datos local, inicializando nueva:', e);
-        return defaultData;
+        loadedData = defaultData;
       }
-    } else {
-      this.save(defaultData);
-      return defaultData;
     }
+
+    // Bootstrap desde variables de entorno de Render (sin necesidad de archivos en disco)
+    if (config.arca.cuit && config.arca.claveFiscal) {
+      const encryptedClave = encrypt(config.arca.claveFiscal);
+      loadedData.credentials.cuit = config.arca.cuit;
+      loadedData.credentials.encryptedClaveFiscal = encryptedClave;
+      loadedData.credentials.puntoVentaDefault = config.arca.puntoVenta || loadedData.credentials.puntoVentaDefault || 1;
+      if (config.arca.razonSocial) loadedData.credentials.razonSocial = config.arca.razonSocial;
+
+      if (!loadedData.accounts) loadedData.accounts = [];
+      const idx = loadedData.accounts.findIndex(a => a.cuit === config.arca.cuit);
+      if (idx !== -1) {
+        loadedData.accounts[idx].encryptedClaveFiscal = encryptedClave;
+        loadedData.accounts[idx].puntoVentaDefault = config.arca.puntoVenta || loadedData.accounts[idx].puntoVentaDefault || 1;
+        if (config.arca.razonSocial) loadedData.accounts[idx].razonSocial = config.arca.razonSocial;
+      } else {
+        loadedData.accounts.push({
+          id: 'acc_env_' + config.arca.cuit,
+          cuit: config.arca.cuit,
+          razonSocial: config.arca.razonSocial || `Cuenta ${config.arca.cuit}`,
+          encryptedClaveFiscal: encryptedClave,
+          puntoVentaDefault: config.arca.puntoVenta || 1,
+          activa: true,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    this.save(loadedData);
+    return loadedData;
   }
 
   public save(dataToSave: AppDatabase = this.data) {
@@ -243,6 +281,25 @@ class DatabaseManager {
     }
 
     this.save();
+
+    // Sincronizar en Supabase cuentas_arca (PostgreSQL Cloud) si está disponible
+    try {
+      import('./services/supabase.js').then(async ({ supabase }) => {
+        const client = supabase.getClient();
+        if (client && this.data.credentials.cuit) {
+          try {
+            await client.from('cuentas_arca').upsert({
+              cuit: this.data.credentials.cuit,
+              razon_social: this.data.credentials.razonSocial,
+              encrypted_clave_fiscal: this.data.credentials.encryptedClaveFiscal,
+              punto_venta_default: this.data.credentials.puntoVentaDefault,
+              activa: true,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'cuit' });
+          } catch (err) {}
+        }
+      }).catch(() => {});
+    } catch (e) {}
   }
 
   public getAccounts(): Array<Omit<ArcaAccountRecord, 'encryptedClaveFiscal'>> {

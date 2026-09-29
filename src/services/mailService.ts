@@ -2,11 +2,19 @@ import axios from 'axios';
 import { db } from '../database.js';
 import { logger } from './logger.js';
 
+export interface MailAttachment {
+  filename: string;
+  content?: string; // base64 string
+  path?: string; // URL (such as Supabase Storage public URL) or local path
+  contentType?: string;
+}
+
 export interface SendMailOptions {
   to: string;
   name?: string;
   subject: string;
   html: string;
+  attachments?: MailAttachment[];
 }
 
 class MailService {
@@ -67,20 +75,30 @@ class MailService {
           ? cfg.senderEmail 
           : `${cfg.senderName} <${cfg.senderEmail}>`;
 
+        const resendPayload: any = {
+          from: fromHeader,
+          to: [options.to],
+          subject: options.subject,
+          html: options.html,
+        };
+
+        if (options.attachments && options.attachments.length > 0) {
+          resendPayload.attachments = options.attachments.map(a => ({
+            filename: a.filename,
+            content: a.content,
+            path: a.path,
+          }));
+        }
+
         const response = await axios.post(
           'https://api.resend.com/emails',
-          {
-            from: fromHeader,
-            to: [options.to],
-            subject: options.subject,
-            html: options.html,
-          },
+          resendPayload,
           {
             headers: {
               'Authorization': `Bearer ${cfg.resendApiKey.trim()}`,
               'Content-Type': 'application/json',
             },
-            timeout: 10000,
+            timeout: 15000,
           }
         );
 
@@ -101,29 +119,39 @@ class MailService {
       }
 
       try {
+        const brevoPayload: any = {
+          sender: {
+            name: cfg.senderName,
+            email: cfg.senderEmail,
+          },
+          to: [
+            {
+              email: options.to,
+              name: options.name || options.to.split('@')[0],
+            }
+          ],
+          subject: options.subject,
+          htmlContent: options.html,
+        };
+
+        if (options.attachments && options.attachments.length > 0) {
+          brevoPayload.attachment = options.attachments.map(a => ({
+            name: a.filename,
+            content: a.content,
+            url: a.path,
+          }));
+        }
+
         const response = await axios.post(
           'https://api.brevo.com/v3/smtp/email',
-          {
-            sender: {
-              name: cfg.senderName,
-              email: cfg.senderEmail,
-            },
-            to: [
-              {
-                email: options.to,
-                name: options.name || options.to.split('@')[0],
-              }
-            ],
-            subject: options.subject,
-            htmlContent: options.html,
-          },
+          brevoPayload,
           {
             headers: {
               'api-key': cfg.brevoApiKey.trim(),
               'Content-Type': 'application/json',
               'Accept': 'application/json',
             },
-            timeout: 10000,
+            timeout: 15000,
           }
         );
 

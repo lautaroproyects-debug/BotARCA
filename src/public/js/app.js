@@ -306,6 +306,24 @@ async function fetchWithAuth(url, options = {}) {
     handleUserLogout(false);
     throw new Error('Sesión expirada o token inválido');
   }
+
+  // Interceptar respuestas HTML de error (evita el "Unexpected token '<', <!DOCTYPE...")
+  const contentType = response.headers.get('content-type') || '';
+  const originalJson = response.json.bind(response);
+  response.json = async () => {
+    if (!contentType.includes('application/json')) {
+      const text = await response.text();
+      return {
+        success: false,
+        message: response.status >= 400 
+          ? `Error ${response.status}: El servidor no devolvió una respuesta válida.` 
+          : 'Respuesta no estructurada recibida del servidor.',
+        raw: text.substring(0, 300)
+      };
+    }
+    return await originalJson();
+  };
+
   return response;
 }
 

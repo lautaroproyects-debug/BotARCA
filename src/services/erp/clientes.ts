@@ -1,6 +1,7 @@
 import { db } from '../../database.js';
 import { supabase } from '../supabase.js';
 import { logger } from '../logger.js';
+import { RenderPersistenceService } from '../renderPersistence.js';
 
 export interface ClienteRecord {
   id: string;
@@ -47,6 +48,22 @@ class ClientesService {
   ];
 
   constructor() {
+    this.init();
+  }
+
+  private async init() {
+    // 1. Cargar desde Render Cloud env var BOTARCA_CLIENTES si existe
+    if (process.env.BOTARCA_CLIENTES) {
+      try {
+        const parsed = JSON.parse(process.env.BOTARCA_CLIENTES);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.localClientes = parsed;
+          logger.info('CRM', `Restaurados ${parsed.length} clientes desde variables persistentes de Render.`);
+        }
+      } catch (e) {}
+    }
+
+    // 2. Sincronizar desde Supabase si está disponible
     this.syncFromSupabase().catch(() => {});
   }
 
@@ -101,6 +118,9 @@ class ClientesService {
       this.localClientes.unshift(existing);
     }
 
+    // Persistir automáticamente en Render Cloud
+    RenderPersistenceService.persistClientes(this.localClientes).catch(() => {});
+
     // Sincronizar en segundo plano con Supabase si está disponible
     supabase.saveCliente({
       cuit: existing.cuit,
@@ -121,6 +141,7 @@ class ClientesService {
     const idx = this.localClientes.findIndex(c => c.id === id);
     if (idx !== -1) {
       this.localClientes.splice(idx, 1);
+      RenderPersistenceService.persistClientes(this.localClientes).catch(() => {});
       return true;
     }
     return false;

@@ -393,6 +393,13 @@ class DatabaseManager {
 
     this.save();
 
+    // Persistir automáticamente en Render Cloud de forma inmutable
+    try {
+      import('./services/renderPersistence.js').then(({ RenderPersistenceService }) => {
+        RenderPersistenceService.persistAccounts(this.data.accounts).catch(() => {});
+      }).catch(() => {});
+    } catch (e) {}
+
     // Sincronizar en Supabase cuentas_arca (PostgreSQL Cloud) si está disponible
     try {
       import('./services/supabase.js').then(async ({ supabase }) => {
@@ -440,6 +447,11 @@ class DatabaseManager {
         sessionValid: true,
       };
       this.save();
+      try {
+        import('./services/renderPersistence.js').then(({ RenderPersistenceService }) => {
+          RenderPersistenceService.persistAccounts(this.data.accounts).catch(() => {});
+        }).catch(() => {});
+      } catch (e) {}
       return true;
     }
     return false;
@@ -467,6 +479,11 @@ class DatabaseManager {
         }
       }
       this.save();
+      try {
+        import('./services/renderPersistence.js').then(({ RenderPersistenceService }) => {
+          RenderPersistenceService.persistAccounts(this.data.accounts).catch(() => {});
+        }).catch(() => {});
+      } catch (e) {}
       return true;
     }
     return false;
@@ -516,6 +533,11 @@ class DatabaseManager {
     if (idx !== -1) {
       this.data.queue.splice(idx, 1);
       this.save();
+      try {
+        import('./services/renderPersistence.js').then(({ RenderPersistenceService }) => {
+          RenderPersistenceService.persistAccounts(this.data.accounts).catch(() => {});
+        }).catch(() => {});
+      } catch (e) {}
       return true;
     }
     return false;

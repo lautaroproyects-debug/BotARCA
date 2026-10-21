@@ -258,6 +258,16 @@ class DatabaseManager {
               loadedData.accounts.push(accountObj);
             }
           }
+
+          // Si no hay cuenta activa en credenciales, autoactivar la primera de ARCA_ACCOUNTS
+          if (!loadedData.credentials.cuit && loadedData.accounts.length > 0) {
+            const first = loadedData.accounts[0];
+            loadedData.credentials.cuit = first.cuit;
+            loadedData.credentials.encryptedClaveFiscal = first.encryptedClaveFiscal;
+            loadedData.credentials.puntoVentaDefault = first.puntoVentaDefault;
+            loadedData.credentials.razonSocial = first.razonSocial;
+            loadedData.credentials.sessionValid = true;
+          }
         }
       } catch (e) {
         console.error('Error al parsear ARCA_ACCOUNTS:', e);

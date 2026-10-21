@@ -109,19 +109,52 @@ class ArcaSessionManager {
       await humanType(page, cuitSelector, cleanCuit);
 
       // Botón Siguiente
-      const btnSiguienteSelector = 'input#F1\\:btnSiguiente, button#btnSiguiente, input[value="Siguiente"], button:has-text("Siguiente")';
-      await humanClick(page, btnSiguienteSelector);
+      const btnSiguienteSelector = 'input#F1\\:btnSiguiente, input[name="F1:btnSiguiente"], input[value="Siguiente"], button:has-text("Siguiente")';
+      logger.info('MOTOR-ARCA', 'Haciendo clic en botón Siguiente...');
+      
+      // En ARCA el botón Siguiente puede enviar el formulario mediante submit directo o JSF action
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null),
+        (async () => {
+          try {
+            await humanClick(page, btnSiguienteSelector);
+          } catch (e) {
+            await page.click(btnSiguienteSelector, { force: true });
+          }
+        })()
+      ]);
+
+      // Esperar que el DOM responda (sea por recarga de página completa o por AJAX JSF)
+      await page.waitForTimeout(1000);
+
+      // Si ARCA mostró error inmediato al validar CUIT (ej: CUIT no registrado o bloqueado)
+      const errorCuit = await page.locator('.alert-danger, .rf-msgs-sum, #msgError, .mensaje-error').textContent().catch(() => null);
+      if (errorCuit && errorCuit.trim()) {
+        const cleaned = errorCuit.trim();
+        logger.error('MOTOR-ARCA', `Error tras ingresar CUIT: ${cleaned}`);
+        await context.close().catch(() => {});
+        return { success: false, message: `Error ARCA: ${cleaned}` };
+      }
 
       // Paso 2: Ingreso de Clave Fiscal
       logger.info('MOTOR-ARCA', 'Esperando campo de Clave Fiscal...');
       const passSelector = 'input#F1\\:password, input[name="F1:password"], input#password, input[type="password"]';
-      await page.waitForSelector(passSelector, { state: 'visible', timeout: 15000 });
+      await page.waitForSelector(passSelector, { state: 'visible', timeout: 25000 });
       await humanType(page, passSelector, claveFiscal);
 
       // Botón Ingresar
       logger.info('MOTOR-ARCA', 'Enviando credenciales...');
-      const btnIngresarSelector = 'input#F1\\:btnIngresar, button#btnIngresar, input[value="Ingresar"], button:has-text("Ingresar")';
-      await humanClick(page, btnIngresarSelector);
+      const btnIngresarSelector = 'input#F1\\:btnIngresar, input[name="F1:btnIngresar"], button#btnIngresar, input[value="Ingresar"], button:has-text("Ingresar")';
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => null),
+        (async () => {
+          try {
+            await humanClick(page, btnIngresarSelector);
+          } catch (e) {
+            await page.click(btnIngresarSelector, { force: true });
+          }
+        })()
+      ]);
 
       // Esperar redirección al portal de contribuyente o mensaje de error
       await page.waitForLoadState('networkidle', { timeout: 25000 }).catch(() => {});

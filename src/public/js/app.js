@@ -1303,7 +1303,14 @@ async function loadAuthStatus() {
 }
 
 async function testArcaConnection() {
-  showToast('Iniciando sesión en ARCA en modo Headless...', 'info');
+  const btn = document.getElementById('btnTestArca');
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-indigo-600 mr-1.5"></i> Conectando...';
+  }
+
+  showToast('Iniciando sesión en ARCA en modo Headless... Esto puede demorar unos 30-45 segundos.', 'info');
   try {
     const res = await fetchWithAuth('/api/auth/test-login', { method: 'POST', body: JSON.stringify({}) });
     const data = await res.json();
@@ -1315,8 +1322,14 @@ async function testArcaConnection() {
     }
   } catch (e) {
     showToast(`Error: ${e.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
   }
 }
+window.testArcaConnection = testArcaConnection;
 
 // --- PREFERENCIAS DE FACTURACIÓN Y ESTADO CLOUD AUTOGESTIONADO ---
 function loadGeneralPreferences() {

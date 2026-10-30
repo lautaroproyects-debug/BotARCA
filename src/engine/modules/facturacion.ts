@@ -146,46 +146,65 @@ class FacturacionInternalApiModule {
       }
 
       // 1. Asegurar posición en el subsistema RCEL (fe.afip.gob.ar/rcel)
-      const currentUrl = page.url();
-      if (!currentUrl.includes('fe.afip.gob.ar/rcel') && !currentUrl.includes('rcel.afip.gob.ar')) {
-        logger.info('FACTURACION-API', 'Navegando al dominio de RCEL para sincronizar cookies de sesión...');
-        await page.goto('https://portalcf.cloud.afip.gob.ar/portal/app/', { waitUntil: 'domcontentloaded' });
+      let currentUrl = page.url();
+      logger.info('FACTURACION-API', `URL inicial del contexto: ${currentUrl}`);
 
-        const serviceLink = page.locator(`a:has-text("Comprobantes en línea"), [title*="Comprobantes en línea"], button:has-text("Comprobantes en línea")`).first();
-        const [servicePage] = await Promise.all([
+      if (!currentUrl.includes('fe.afip.gob.ar/rcel') && !currentUrl.includes('rcel.afip.gob.ar')) {
+        logger.info('FACTURACION-API', 'Navegando al portal de ARCA para abrir Comprobantes en línea (RCEL)...');
+        await page.goto('https://portalcf.cloud.afip.gob.ar/portal/app/', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(1500);
+
+        // Buscar el acceso a Comprobantes en línea
+        const serviceLink = page.locator(`a:has-text("Comprobantes en línea"), [title*="Comprobantes en línea"], button:has-text("Comprobantes en línea"), div:has-text("Comprobantes en línea")`).first();
+        
+        const [popupPage] = await Promise.all([
           page.context().waitForEvent('page', { timeout: 15000 }).catch(() => null),
           serviceLink.click().catch(() => {}),
         ]);
 
-        if (servicePage) {
-          page = servicePage;
+        if (popupPage) {
+          page = popupPage;
           await page.waitForLoadState('domcontentloaded');
+          logger.info('FACTURACION-API', `Nueva pestaña detectada para RCEL: ${page.url()}`);
+        } else {
+          // Si no abrió popup, esperar navegación en la misma pestaña
+          await page.waitForLoadState('domcontentloaded');
+          logger.info('FACTURACION-API', `Página actual tras clic en servicio: ${page.url()}`);
         }
       }
 
-      // 2. Selección de empresa representada si estamos en pantalla de selección
+      currentUrl = page.url();
+      logger.info('FACTURACION-API', `Página activa para RCEL: ${currentUrl}`);
+
+      // 2. Selección de empresa representada en la pantalla inicial de RCEL
       const targetCuit = (datos.cuitEmisor || session.cuit || '').replace(/\D/g, '');
-      if (targetCuit) {
-        // En RCEL puede ser un botón input type=button o type=submit cuyo valor contiene el CUIT o razón social
-        const empresaBtn = page.locator(`input[value*="${targetCuit}"], input[type="button"][value*="${targetCuit}"], button:has-text("${targetCuit}")`).first();
-        if (await empresaBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
-          logger.info('FACTURACION-API', `Seleccionando empresa representada CUIT: ${targetCuit}`);
-          await Promise.all([
-            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-            empresaBtn.click(),
-          ]);
-        }
+      logger.info('FACTURACION-API', `Verificando selector de empresa para CUIT: ${targetCuit}...`);
+
+      // En RCEL la selección de contribuyente puede ser un botón input type=button/submit o un enlace/fila
+      const empresaBtn = page.locator(`input[value*="${targetCuit}"], button:has-text("${targetCuit}"), a:has-text("${targetCuit}"), tr:has-text("${targetCuit}") input, input.btn_empresa`).first();
+      if (await empresaBtn.isVisible({ timeout: 6000 }).catch(() => false)) {
+        logger.info('FACTURACION-API', `Haciendo clic en empresa representada CUIT: ${targetCuit}`);
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
+          empresaBtn.click(),
+        ]);
+        await page.waitForTimeout(1000);
+      } else {
+        logger.info('FACTURACION-API', `No se requirió selección de empresa o ya se encuentra en menú principal: ${page.url()}`);
       }
 
       // Asegurar clic en "Generar Comprobantes" en el menú principal de RCEL si está presente
-      const btnGenerarMenu = page.locator('a:has-text("Generar Comprobantes"), input[value*="Generar Comprobantes"], #btn_gen_cmp').first();
-      if (await btnGenerarMenu.isVisible({ timeout: 3000 }).catch(() => false)) {
-        logger.info('FACTURACION-API', 'Ingresando al menú "Generar Comprobantes" de RCEL...');
+      const btnGenerarMenu = page.locator('a:has-text("Generar Comprobantes"), input[value*="Generar Comprobantes"], button:has-text("Generar Comprobantes"), #btn_gen_cmp').first();
+      if (await btnGenerarMenu.isVisible({ timeout: 4000 }).catch(() => false)) {
+        logger.info('FACTURACION-API', 'Ingresando a "Generar Comprobantes"...');
         await Promise.all([
           page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
           btnGenerarMenu.click(),
         ]);
+        await page.waitForTimeout(1000);
       }
+
+      logger.info('FACTURACION-API', `Posición alcanzada en RCEL: ${page.url()}`);
 
       // 3. Consulta previa de padrón receptor
       if (datos.receptor.nroDoc && datos.receptor.tipoDoc !== 'Consumidor Final') {
@@ -199,11 +218,17 @@ class FacturacionInternalApiModule {
         }
       }
 
-      // 4. Invocación de la API Interna de Generación de Comprobantes (In-Page Fetch)
+      // 4. Invocación de la API Interna de Generación de Comprobantes (In-Page Fetch con diagnóstico completo)
       logger.info('FACTURACION-API', 'Disparando pipeline de autorización interna en RCEL...');
       const resultadoEmision: any = await page.evaluate(async (payload) => {
         try {
-          const basePath = '/rcel';
+          const w = globalThis as any;
+          const origin = w.location?.origin || '';
+          const currentPath = w.location?.pathname || '';
+          const debugTrace: string[] = [`Location: ${w.location?.href || 'unknown'}`];
+
+          // Determinar basePath de RCEL dinámicamente
+          const basePath = currentPath.includes('/rcel') ? '/rcel' : '';
 
           const postForm = async (endpoint: string, formParams: Record<string, any>) => {
             const body = new URLSearchParams();
@@ -213,18 +238,19 @@ class FacturacionInternalApiModule {
               }
             }
 
-            const response = await fetch(`${basePath}/${endpoint}`, {
+            const targetUrl = `${basePath}/${endpoint}`.replace(/\/+/g, '/');
+            const response = await fetch(targetUrl, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'X-Requested-With': 'XMLHttpRequest',
               },
               body: body.toString(),
               credentials: 'include',
             });
 
             const text = await response.text();
+            debugTrace.push(`POST ${endpoint} -> Status ${response.status} (url: ${response.url})`);
             return { ok: response.ok, status: response.status, text, url: response.url };
           };
 
@@ -314,15 +340,24 @@ class FacturacionInternalApiModule {
           } catch (e) {}
 
           if (!cae) {
-            // Si no se extrajo CAE, analizar si ARCA devolvió error explícito
+            // Si no se extrajo CAE, analizar si ARCA devolvió error explícito o mensaje de sesión
             const errMatch = responseText.match(/class="mensajeError"[^>]*>([\s\S]*?)<\/div>/i) ||
                              responseText.match(/<li[^>]*class="error"[^>]*>([\s\S]*?)<\/li>/i) ||
-                             responseText.match(/<div[^>]*class="alert[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+                             responseText.match(/<div[^>]*class="alert[^"]*"[^>]*>([\s\S]*?)<\/div>/i) ||
+                             responseText.match(/<p[^>]*class="error"[^>]*>([\s\S]*?)<\/p>/i);
             const errClean = errMatch ? errMatch[1].replace(/<[^>]+>/g, '').trim() : null;
+
+            // Extraer título de página devuelta para saber si fue redireccionado o sesión expiró
+            const titleMatch = responseText.match(/<title>([^<]+)<\/title>/i);
+            const pageTitle = titleMatch ? titleMatch[1].trim() : '';
+
+            const traceStr = debugTrace.join(' | ');
+
             return {
               success: false,
-              error: errClean || 'ARCA no devolvió un CAE válido. El comprobante no fue autorizado por el servidor fiscal.',
-              rawResponse: responseText.substring(0, 500)
+              error: errClean || (pageTitle ? `ARCA respondió en página "${pageTitle}" sin CAE.` : 'ARCA no devolvió un CAE válido.'),
+              trace: traceStr,
+              rawResponse: responseText.substring(0, 400).replace(/\s+/g, ' ')
             };
           }
 
@@ -354,6 +389,12 @@ class FacturacionInternalApiModule {
       });
 
       if (!resultadoEmision.success) {
+        if (resultadoEmision.trace) {
+          logger.warn('FACTURACION-API', `Diagnóstico pipeline: ${resultadoEmision.trace}`);
+        }
+        if (resultadoEmision.rawResponse) {
+          logger.warn('FACTURACION-API', `Respuesta cruda de ARCA: ${resultadoEmision.rawResponse}`);
+        }
         throw new Error(resultadoEmision.error || 'La API interna de RCEL no devolvió autorización.');
       }
 

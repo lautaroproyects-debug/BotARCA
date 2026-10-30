@@ -152,14 +152,41 @@ class FacturacionInternalApiModule {
       if (!currentUrl.includes('fe.afip.gob.ar/rcel') && !currentUrl.includes('rcel.afip.gob.ar')) {
         logger.info('FACTURACION-API', 'Navegando al portal de ARCA para abrir Comprobantes en línea (RCEL)...');
         await page.goto('https://portalcf.cloud.afip.gob.ar/portal/app/', { waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(1500);
+        await page.waitForTimeout(2000);
 
-        // Buscar el acceso a Comprobantes en línea
-        const serviceLink = page.locator(`a:has-text("Comprobantes en línea"), [title*="Comprobantes en línea"], button:has-text("Comprobantes en línea"), div:has-text("Comprobantes en línea")`).first();
-        
+        // En el nuevo portal de ARCA/AFIP, los servicios se buscan en el input buscador superior/central
+        const searchInputSelector = '#buscadorServicios, input[placeholder*="Buscar"], input[aria-label*="Buscar"], input[type="search"], .input-buscar';
+        const searchInput = page.locator(searchInputSelector).first();
+
+        if (await searchInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+          logger.info('FACTURACION-API', 'Escribiendo "Comprobantes en línea" en el buscador de servicios de ARCA...');
+          await searchInput.click();
+          await searchInput.fill('');
+          await searchInput.type('Comprobantes en línea', { delay: 60 });
+          await page.waitForTimeout(1000);
+        }
+
+        // Localizar el resultado / tarjeta de "Comprobantes en línea"
+        const serviceLink = page.locator(`
+          a:has-text("Comprobantes en línea"), 
+          div.servicio-item:has-text("Comprobantes en línea"),
+          [data-servicio*="Comprobantes en línea"],
+          [title*="Comprobantes en línea"],
+          h3:has-text("Comprobantes en línea"),
+          p:has-text("Comprobantes en línea")
+        `).first();
+
         const [popupPage] = await Promise.all([
-          page.context().waitForEvent('page', { timeout: 15000 }).catch(() => null),
-          serviceLink.click().catch(() => {}),
+          page.context().waitForEvent('page', { timeout: 20000 }).catch(() => null),
+          (async () => {
+            try {
+              await serviceLink.waitFor({ state: 'visible', timeout: 8000 });
+              await serviceLink.click();
+            } catch (err: any) {
+              logger.warn('FACTURACION-API', `Intento de clic en buscador: ${err.message}. Probando clic forzado en enlace de texto...`);
+              await page.click('text="Comprobantes en línea"', { force: true }).catch(() => {});
+            }
+          })(),
         ]);
 
         if (popupPage) {
@@ -167,14 +194,24 @@ class FacturacionInternalApiModule {
           await page.waitForLoadState('domcontentloaded');
           logger.info('FACTURACION-API', `Nueva pestaña detectada para RCEL: ${page.url()}`);
         } else {
-          // Si no abrió popup, esperar navegación en la misma pestaña
+          // Si no abrió ventana popup, verificar si el context creó otra página o si navegó
           await page.waitForLoadState('domcontentloaded');
-          logger.info('FACTURACION-API', `Página actual tras clic en servicio: ${page.url()}`);
+          const allPages = page.context().pages();
+          const rcelP = allPages.find(p => p.url().includes('fe.afip.gob.ar') || p.url().includes('rcel'));
+          if (rcelP) {
+            page = rcelP;
+            await page.waitForLoadState('domcontentloaded');
+          }
+          logger.info('FACTURACION-API', `Página activa tras clic en servicio: ${page.url()}`);
         }
       }
 
       currentUrl = page.url();
       logger.info('FACTURACION-API', `Página activa para RCEL: ${currentUrl}`);
+
+      if (!currentUrl.includes('fe.afip.gob.ar') && !currentUrl.includes('rcel')) {
+        throw new Error('No se pudo acceder al servicio "Comprobantes en línea" en el portal de ARCA. Verifique que el servicio esté habilitado.');
+      }
 
       // 2. Selección de empresa representada en la pantalla inicial de RCEL
       const targetCuit = (datos.cuitEmisor || session.cuit || '').replace(/\D/g, '');

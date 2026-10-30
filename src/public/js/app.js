@@ -1108,27 +1108,71 @@ async function handleEmitirFactura(e) {
   btn.disabled = true;
   btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Conectando con ARCA...';
 
+  // Activar Cockpit con barra de progreso 0-100%
+  const cockpit = document.getElementById('invoiceProgressCockpit');
+  const bar = document.getElementById('invoiceProgressBar');
+  const percentEl = document.getElementById('invoiceProgressPercent');
+  const msgEl = document.getElementById('invoiceProgressStatusMsg');
+  const stepEl = document.getElementById('invoiceProgressStepCounter');
+
+  const updateProgress = (pct, msg, step) => {
+    if (bar) bar.style.width = `${pct}%`;
+    if (percentEl) percentEl.innerText = `${pct}%`;
+    if (msgEl) msgEl.innerText = msg;
+    if (stepEl) stepEl.innerText = step;
+  };
+
+  if (cockpit) {
+    cockpit.classList.remove('hidden');
+    cockpit.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  updateProgress(10, 'Iniciando navegador headless y autenticando en portal ARCA...', 'Paso 1 de 5');
+
+  // Simulación temporal en vivo de las fases mientras el backend ejecuta el pipeline
+  const t1 = setTimeout(() => updateProgress(28, 'Autenticación con Clave Fiscal exitosa. Abriendo subsistema "Comprobantes en línea"...', 'Paso 2 de 5'), 3500);
+  const t2 = setTimeout(() => updateProgress(52, 'Seleccionando CUIT emisor representado en RCEL...', 'Paso 3 de 5'), 8500);
+  const t3 = setTimeout(() => updateProgress(75, 'Cargando datos de receptor y detalle de items a facturar...', 'Paso 4 de 5'), 14000);
+  const t4 = setTimeout(() => updateProgress(90, 'Solicitando autorización formal de CAE a servidores AFIP...', 'Paso 5 de 5'), 22000);
+
   try {
     const res = await fetchWithAuth('/api/erp/facturacion/emitir', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
+    clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4);
+
     const data = await res.json();
     if (data.success) {
+      updateProgress(100, '¡Comprobante autorizado con éxito por ARCA! Generando PDF...', 'Completado');
       showToast('¡Comprobante autorizado con éxito en ARCA!', 'success');
       document.getElementById('lastCaeNumber').innerText = data.cae || '-';
       document.getElementById('lastCaeVto').innerText = data.caeVencimiento || '-';
       document.getElementById('lastComprobanteNro').innerText = data.comprobanteNro || '-';
-      document.getElementById('caeStatusDot').className = 'w-2 h-2 rounded-full bg-emerald-500';
+      document.getElementById('caeStatusDot').className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse';
+      
+      // Resaltar la tarjeta del CAE visible en pantalla
+      const card = document.getElementById('lastCaeCard');
+      if (card) {
+        card.classList.add('ring-4', 'ring-emerald-400');
+        setTimeout(() => card.classList.remove('ring-4', 'ring-emerald-400'), 5000);
+      }
+
       loadComprobantesList();
     } else {
+      updateProgress(100, `Error de autorización: ${data.message}`, 'Detenido');
       showToast(`Error de emisión: ${data.message}`, 'error');
     }
   } catch (err) {
+    clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4);
+    updateProgress(0, `Error de comunicación: ${err.message}`, 'Fallo');
     showToast(`Error de comunicación: ${err.message}`, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs"></i> <span>EMITIR EN ARCA</span>';
+    btn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs mr-1"></i> <span>EMITIR EN ARCA AHORA</span>';
+    setTimeout(() => {
+      // Dejar la barra visible si fue exitoso o esconder si se resetea
+    }, 4000);
   }
 }
 

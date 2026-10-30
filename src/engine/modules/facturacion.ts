@@ -316,10 +316,10 @@ class FacturacionInternalApiModule {
         puntoVenta: datos.puntoVenta,
         tipoComprobanteId: this.mapTipoComprobanteId(datos.tipoComprobante),
         concepto: datos.concepto,
-        fechaEmision: datos.fechaEmision || new Date().toISOString().split('T')[0],
-        periodoDesde: datos.periodoDesde,
-        periodoHasta: datos.periodoHasta,
-        vencimientoPago: datos.vencimientoPago,
+        fechaEmision: this.formatDateForRcel(datos.fechaEmision),
+        periodoDesde: datos.periodoDesde ? this.formatDateForRcel(datos.periodoDesde) : '',
+        periodoHasta: datos.periodoHasta ? this.formatDateForRcel(datos.periodoHasta) : '',
+        vencimientoPago: datos.vencimientoPago ? this.formatDateForRcel(datos.vencimientoPago) : '',
         condicionIvaId: this.mapCondicionIvaId(datos.receptor.condicionIva),
         tipoDocId: this.mapTipoDocId(datos.receptor.tipoDoc),
         receptorNroDoc: (datos.receptor.nroDoc || '').replace(/\D/g, ''),
@@ -425,6 +425,22 @@ class FacturacionInternalApiModule {
         message: `Error en API interna de ARCA: ${err.message}`,
       };
     }
+  }
+
+  private formatDateForRcel(d?: string): string {
+    if (!d) {
+      const now = new Date();
+      const dd = String(now.getDate()).padStart(2, '0');
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const yyyy = now.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    }
+    // Si viene como YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [yyyy, mm, dd] = d.split('-');
+      return `${dd}/${mm}/${yyyy}`;
+    }
+    return d;
   }
 
   private mapTipoComprobanteId(tipo: string): string {

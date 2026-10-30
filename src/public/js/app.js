@@ -1150,6 +1150,19 @@ async function handleEmitirFactura(e) {
       document.getElementById('lastCaeVto').innerText = data.caeVencimiento || '-';
       document.getElementById('lastComprobanteNro').innerText = data.comprobanteNro || '-';
       document.getElementById('caeStatusDot').className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse';
+
+      // Mostrar botón de descarga de PDF si está disponible
+      const pdfContainer = document.getElementById('lastCaePdfContainer');
+      const pdfBtn = document.getElementById('lastCaePdfBtn');
+      if (pdfContainer && pdfBtn) {
+        if (data.pdfUrl) {
+          pdfBtn.href = data.pdfUrl;
+          pdfContainer.classList.remove('hidden');
+        } else if (data.pdfBufferBase64) {
+          pdfBtn.href = `data:application/pdf;base64,${data.pdfBufferBase64}`;
+          pdfContainer.classList.remove('hidden');
+        }
+      }
       
       // Resaltar la tarjeta del CAE visible en pantalla
       const card = document.getElementById('lastCaeCard');

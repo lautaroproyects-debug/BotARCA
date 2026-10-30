@@ -166,14 +166,25 @@ class FacturacionInternalApiModule {
       // 2. Selección de empresa representada si estamos en pantalla de selección
       const targetCuit = (datos.cuitEmisor || session.cuit || '').replace(/\D/g, '');
       if (targetCuit) {
-        const empresaBtn = page.locator(`input[value*="${targetCuit}"]`).first();
-        if (await empresaBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        // En RCEL puede ser un botón input type=button o type=submit cuyo valor contiene el CUIT o razón social
+        const empresaBtn = page.locator(`input[value*="${targetCuit}"], input[type="button"][value*="${targetCuit}"], button:has-text("${targetCuit}")`).first();
+        if (await empresaBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
           logger.info('FACTURACION-API', `Seleccionando empresa representada CUIT: ${targetCuit}`);
           await Promise.all([
-            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {}),
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
             empresaBtn.click(),
           ]);
         }
+      }
+
+      // Asegurar clic en "Generar Comprobantes" en el menú principal de RCEL si está presente
+      const btnGenerarMenu = page.locator('a:has-text("Generar Comprobantes"), input[value*="Generar Comprobantes"], #btn_gen_cmp').first();
+      if (await btnGenerarMenu.isVisible({ timeout: 3000 }).catch(() => false)) {
+        logger.info('FACTURACION-API', 'Ingresando al menú "Generar Comprobantes" de RCEL...');
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
+          btnGenerarMenu.click(),
+        ]);
       }
 
       // 3. Consulta previa de padrón receptor
@@ -302,9 +313,22 @@ class FacturacionInternalApiModule {
             }
           } catch (e) {}
 
+          if (!cae) {
+            // Si no se extrajo CAE, analizar si ARCA devolvió error explícito
+            const errMatch = responseText.match(/class="mensajeError"[^>]*>([\s\S]*?)<\/div>/i) ||
+                             responseText.match(/<li[^>]*class="error"[^>]*>([\s\S]*?)<\/li>/i) ||
+                             responseText.match(/<div[^>]*class="alert[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+            const errClean = errMatch ? errMatch[1].replace(/<[^>]+>/g, '').trim() : null;
+            return {
+              success: false,
+              error: errClean || 'ARCA no devolvió un CAE válido. El comprobante no fue autorizado por el servidor fiscal.',
+              rawResponse: responseText.substring(0, 500)
+            };
+          }
+
           return {
             success: true,
-            cae: cae || '74198234509812',
+            cae,
             caeVencimiento: caeVto || new Date(Date.now() + 10 * 86400000).toISOString().split('T')[0],
             comprobanteNumero: nroComp,
             pdfBase64,

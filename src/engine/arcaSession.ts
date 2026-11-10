@@ -100,7 +100,13 @@ class ArcaSessionManager {
       page.setDefaultTimeout(config.engine.timeoutMs);
 
       logger.info('MOTOR-ARCA', 'Navegando a la pasarela de autenticación de ARCA...');
-      await page.goto(this.ARCA_LOGIN_URL, { waitUntil: 'domcontentloaded' });
+      try {
+        await page.goto(this.ARCA_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 35000 });
+      } catch (navErr: any) {
+        logger.warn('MOTOR-ARCA', `Primer intento de navegación a login falló: ${navErr.message}. Reintentando con commit directo...`);
+        await page.waitForTimeout(2000);
+        await page.goto(this.ARCA_LOGIN_URL, { waitUntil: 'commit', timeout: 35000 });
+      }
 
       // Paso 1: Ingreso de CUIT con emulación humana
       logger.info('MOTOR-ARCA', 'Ingresando CUIT con tipeo estocástico humano...');

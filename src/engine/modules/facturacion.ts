@@ -370,14 +370,30 @@ class FacturacionInternalApiModule {
 
       // Clic en Continuar (Paso 2 -> Paso 3)
       logger.info('FACTURACION-API', 'Avanzando a Datos del Receptor (Paso 3)...');
-      // Buscar botón Continuar en el formulario
-      const btnPaso2 = page.locator('input[value*="Continuar"], input#btnContinuar, input#btngenerar, button:has-text("Continuar")').last();
+      
+      const btnPaso2 = page.locator('input[value*="Continuar"], input[type="submit"][value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').first();
+      const activePage = page;
+      
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-        btnPaso2.click(),
+        activePage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
+        (async () => {
+          if (await btnPaso2.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await btnPaso2.click().catch(async () => {
+              await activePage.evaluate(`(() => {
+                const form = document.querySelector('form');
+                if (form) form.submit();
+              })()`).catch(() => {});
+            });
+          } else {
+            await activePage.evaluate(`(() => {
+              const form = document.querySelector('form');
+              if (form) form.submit();
+            })()`).catch(() => {});
+          }
+        })()
       ]);
-      await page.waitForTimeout(1500);
-      logger.info('FACTURACION-API', `URL tras Paso 2: ${page.url()}`);
+      await activePage.waitForTimeout(2000);
+      logger.info('FACTURACION-API', `URL tras Paso 2: ${activePage.url()}`);
 
       errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
       if (errorPaso && errorPaso.trim()) {

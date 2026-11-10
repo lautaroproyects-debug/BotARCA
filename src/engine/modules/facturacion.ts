@@ -302,6 +302,7 @@ class FacturacionInternalApiModule {
         btnPaso1.click(),
       ]);
       await page.waitForTimeout(1000);
+      logger.info('FACTURACION-API', `URL tras Paso 1: ${page.url()}`);
 
       // Verificar si hubo error en paso 1
       let errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
@@ -311,20 +312,20 @@ class FacturacionInternalApiModule {
 
       // PASO 2 EN DOM: Conceptos a incluir y Fechas
       logger.info('FACTURACION-API', 'Completando Datos de Emisión (Concepto y Fechas)...');
-      const cboConcepto = page.locator('select#cboConcepto, select[name="cboConcepto"]').first();
+      const cboConcepto = page.locator('select#cboConcepto, select[name="cboConcepto"], select#concepto').first();
       if (await cboConcepto.isVisible({ timeout: 5000 }).catch(() => false)) {
         await cboConcepto.selectOption(String(datos.concepto));
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(1000);
       }
 
       // Fechas si son servicios (concepto 2 o 3)
       if (datos.concepto === 2 || datos.concepto === 3) {
         const hoy = this.formatDateForRcel(datos.fechaEmision);
-        const fDesde = page.locator('input#periodoFacturadoDesde, input[name="periodoFacturadoDesde"]').first();
+        const fDesde = page.locator('input#fsdt, input#periodoFacturadoDesde, input[name="periodoFacturadoDesde"]').first();
         if (await fDesde.isVisible({ timeout: 2000 }).catch(() => false)) {
           await fDesde.fill(datos.periodoDesde ? this.formatDateForRcel(datos.periodoDesde) : hoy);
         }
-        const fHasta = page.locator('input#periodoFacturadoHasta, input[name="periodoFacturadoHasta"]').first();
+        const fHasta = page.locator('input#fsht, input#periodoFacturadoHasta, input[name="periodoFacturadoHasta"]').first();
         if (await fHasta.isVisible({ timeout: 2000 }).catch(() => false)) {
           await fHasta.fill(datos.periodoHasta ? this.formatDateForRcel(datos.periodoHasta) : hoy);
         }
@@ -336,32 +337,40 @@ class FacturacionInternalApiModule {
 
       // Clic en Continuar (Paso 2 -> Paso 3)
       logger.info('FACTURACION-API', 'Avanzando a Datos del Receptor (Paso 3)...');
-      const btnPaso2 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').first();
+      // En genComDatosEmisor.do el botón Continuar puede ser input[value*="Continuar"] o tener id específico
+      const btnPaso2 = page.locator('input[value*="Continuar"], input#btnContinuar, input#btngenerar, button:has-text("Continuar")').last();
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
         btnPaso2.click(),
       ]);
       await page.waitForTimeout(1000);
+      logger.info('FACTURACION-API', `URL tras Paso 2: ${page.url()}`);
 
       errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
       if (errorPaso && errorPaso.trim()) {
         throw new Error(`Error en Datos de Emisión: ${errorPaso.trim()}`);
       }
 
+      // Si tras Paso 2 la URL sigue siendo genComDatosEmisor.do, significa que AFIP no avanzó de página (faltó un campo)
+      if (page.url().includes('genComDatosEmisor.do')) {
+        const errorHtml = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
+        throw new Error(errorHtml?.trim() || `AFIP no avanzó del Paso 2 (Datos de Emisión). Revise las fechas de facturación o concepto.`);
+      }
+
       // PASO 3 EN DOM: Datos del Receptor
       logger.info('FACTURACION-API', 'Completando Datos del Receptor y Condición de Venta...');
-      const condIvaSelect = page.locator('select#condicionIVA, select[name="condicionIVA"]').first();
+      const condIvaSelect = page.locator('select#condicionIVA, select[name="condicionIVA"], select#idimptos').first();
       if (await condIvaSelect.isVisible({ timeout: 5000 }).catch(() => false)) {
         const condId = this.mapCondicionIvaId(datos.receptor.condicionIva);
         await condIvaSelect.selectOption(condId);
       }
 
       if (datos.receptor.nroDoc && datos.receptor.tipoDoc !== 'Consumidor Final') {
-        const tipoDocSelect = page.locator('select#tipoDocReceptor, select[name="tipoDocReceptor"]').first();
+        const tipoDocSelect = page.locator('select#tipoDocReceptor, select[name="tipoDocReceptor"], select#idtipoDoc').first();
         if (await tipoDocSelect.isVisible({ timeout: 2000 }).catch(() => false)) {
           await tipoDocSelect.selectOption(this.mapTipoDocId(datos.receptor.tipoDoc));
         }
-        const nroDocInput = page.locator('input#nroDocReceptor, input[name="nroDocReceptor"]').first();
+        const nroDocInput = page.locator('input#nroDocReceptor, input[name="nroDocReceptor"], input#nroDoc').first();
         if (await nroDocInput.isVisible({ timeout: 2000 }).catch(() => false)) {
           await nroDocInput.fill(datos.receptor.nroDoc.replace(/\D/g, ''));
           await page.keyboard.press('Tab');
@@ -370,19 +379,20 @@ class FacturacionInternalApiModule {
       }
 
       // Condición de venta (Contado por defecto)
-      const condVentaRadio = page.locator(`input[name="formaDePago"][value="${this.mapCondicionVentaId(datos.condicionVenta)}"], input#formaDePago1, input[value="Contado"]`).first();
+      const condVentaRadio = page.locator(`input[name="formaDePago"][value="${this.mapCondicionVentaId(datos.condicionVenta)}"], input#formaDePago1, input[value="Contado"], input[name="condicionVenta"]`).first();
       if (await condVentaRadio.isVisible({ timeout: 2000 }).catch(() => false)) {
         await condVentaRadio.check().catch(() => {});
       }
 
       // Clic en Continuar (Paso 3 -> Paso 4)
       logger.info('FACTURACION-API', 'Avanzando a Datos de la Operación / Ítems (Paso 4)...');
-      const btnPaso3 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').first();
+      const btnPaso3 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').last();
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
         btnPaso3.click(),
       ]);
       await page.waitForTimeout(1000);
+      logger.info('FACTURACION-API', `URL tras Paso 3: ${page.url()}`);
 
       errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
       if (errorPaso && errorPaso.trim()) {
@@ -393,7 +403,7 @@ class FacturacionInternalApiModule {
       logger.info('FACTURACION-API', 'Completando detalle de producto o servicio...');
       const item = datos.items[0] || { descripcion: 'Servicios Profesionales', cantidad: 1, precioUnitario: 100 };
       
-      const descInput = page.locator('textarea#detalleDescripcion1, input#detalleDescripcion1, input[name="detalleDescripcion"]').first();
+      const descInput = page.locator('textarea#detalleDescripcion1, input#detalleDescripcion1, input[name="detalleDescripcion"], textarea[name="detalleDescripcion"]').first();
       if (await descInput.isVisible({ timeout: 5000 }).catch(() => false)) {
         await descInput.fill(item.descripcion);
       }
@@ -410,12 +420,13 @@ class FacturacionInternalApiModule {
 
       // Clic en Continuar (Paso 4 -> Resumen y Confirmación)
       logger.info('FACTURACION-API', 'Avanzando al Resumen de Confirmación...');
-      const btnPaso4 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').first();
+      const btnPaso4 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').last();
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
         btnPaso4.click(),
       ]);
       await page.waitForTimeout(1000);
+      logger.info('FACTURACION-API', `URL tras Paso 4: ${page.url()}`);
 
       errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
       if (errorPaso && errorPaso.trim()) {

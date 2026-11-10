@@ -255,184 +255,240 @@ class FacturacionInternalApiModule {
         }
       }
 
-      // 4. Invocación de la API Interna de Generación de Comprobantes (In-Page Fetch con diagnóstico completo)
-      logger.info('FACTURACION-API', 'Disparando pipeline de autorización interna en RCEL...');
-      const resultadoEmision: any = await page.evaluate(async (payload) => {
-        try {
-          const w = globalThis as any;
-          const origin = w.location?.origin || '';
-          const currentPath = w.location?.pathname || '';
-          const debugTrace: string[] = [`Location: ${w.location?.href || 'unknown'}`];
+      // 4. Emisión asistida directa en Playwright (Interacción en DOM real de RCEL)
+      // Como el navegador ya está exactamente en https://fe.afip.gob.ar/rcel/jsp/buscarPtosVtas.do,
+      // interactuamos directamente con los campos HTML del formulario de ARCA.
+      logger.info('FACTURACION-API', 'Interactuando con el formulario de RCEL en el navegador...');
 
-          // Determinar basePath de RCEL dinámicamente
-          const basePath = currentPath.includes('/rcel') ? '/rcel' : '';
-
-          const postForm = async (endpoint: string, formParams: Record<string, any>) => {
-            const body = new URLSearchParams();
-            for (const [key, val] of Object.entries(formParams)) {
-              if (val !== undefined && val !== null) {
-                body.append(key, String(val));
-              }
+      // PASO 1 EN DOM: Punto de venta y tipo de comprobante
+      const ptoVtaSelect = page.locator('select#puntoDeVenta, select[name="puntoDeVenta"]').first();
+      await ptoVtaSelect.waitFor({ state: 'visible', timeout: 10000 });
+      
+      // Seleccionar el punto de venta (buscar por valor o por texto que comience con el número)
+      const targetPtoVta = String(datos.puntoVenta);
+      await ptoVtaSelect.selectOption({ label: targetPtoVta }).catch(async () => {
+        // Fallback: seleccionar por valor o index
+        await ptoVtaSelect.selectOption(targetPtoVta).catch(async () => {
+          const opts = await ptoVtaSelect.locator('option').all();
+          for (const opt of opts) {
+            const val = await opt.getAttribute('value');
+            const txt = await opt.textContent();
+            if ((val && val.includes(targetPtoVta)) || (txt && txt.trim().startsWith(targetPtoVta))) {
+              await ptoVtaSelect.selectOption(val!);
+              break;
             }
-
-            const targetUrl = `${basePath}/${endpoint}`.replace(/\/+/g, '/');
-            const response = await fetch(targetUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-              },
-              body: body.toString(),
-              credentials: 'include',
-            });
-
-            const text = await response.text();
-            debugTrace.push(`POST ${endpoint} -> Status ${response.status} (url: ${response.url})`);
-            return { ok: response.ok, status: response.status, text, url: response.url };
-          };
-
-          // PASO 1 INTERNO: Punto de venta y comprobante
-          await postForm('buscarPtosVtas.do', {
-            puntoDeVenta: payload.puntoVenta,
-            tipoComprobante: payload.tipoComprobanteId,
-            btnContinuar: 'Continuar >',
-          });
-
-          // PASO 2 INTERNO: Datos de emisión
-          await postForm('genComDatosEmisor.do', {
-            cboConcepto: payload.concepto,
-            fechaEmision: payload.fechaEmision,
-            periodoDesde: payload.periodoDesde || '',
-            periodoHasta: payload.periodoHasta || '',
-            vtoPago: payload.vencimientoPago || '',
-            btnContinuar: 'Continuar >',
-          });
-
-          // PASO 3 INTERNO: Datos del receptor
-          await postForm('genComDatosReceptor.do', {
-            condicionIVA: payload.condicionIvaId,
-            tipoDocReceptor: payload.tipoDocId,
-            nroDocReceptor: payload.receptorNroDoc,
-            domicilioReceptor: payload.receptorDomicilio || '',
-            condicionVenta: payload.condicionVentaId,
-            emailReceptor: payload.receptorEmail || '',
-            btnContinuar: 'Continuar >',
-          });
-
-          // PASO 4 INTERNO: Detalle de ítems
-          const primerItem = payload.items[0] || {};
-          await postForm('genComDatosOperacion.do', {
-            detalleCodigoArticulo: primerItem.codigo || '',
-            detalleDescripcion: primerItem.descripcion || 'Servicios Profesionales',
-            detalleCantidad: primerItem.cantidad || 1,
-            detalleMedida: primerItem.unidadMedida || '7', // Unidades
-            detallePrecio: primerItem.precioUnitario || primerItem.subtotal,
-            detalleBonificacion: primerItem.bonificacionPorcentaje || '0',
-            detalleTipoIVA: primerItem.alicuotaIva || '3', // 21%
-            btnContinuar: 'Continuar >',
-          });
-
-          // PASO 5 INTERNO: Confirmación y Solicitud de CAE
-          const confirmRes = await postForm('generarComprobante.do', {
-            btnConfirmar: 'Confirmar',
-          });
-
-          const responseText = confirmRes.text || '';
-
-          // Extracción directa de CAE y Número otorgado por regex en el payload HTML resultante
-          const caeMatch = responseText.match(/CAE\s*(?:N[:°º]?)?\s*[:\.]?\s*<b>(\d{14})<\/b>/i) ||
-                           responseText.match(/(\d{14})/);
-          const vtoMatch = responseText.match(/Fecha\s*de\s*Vto\.?\s*(?:de\s*CAE)?\s*[:\.]?\s*<b>(\d{2}\/\d{2}\/\d{4})<\/b>/i) ||
-                           responseText.match(/(\d{2}\/\d{2}\/\d{4})/);
-          const nroMatch = responseText.match(/N[º°:]?\s*<b>(\d{1,8})<\/b>/i) ||
-                           responseText.match(/Comprobante\s*Generado.*?(\d{8})/i);
-
-          if (responseText.includes('Se han detectado los siguientes errores') || responseText.includes('class="mensajeError"')) {
-            const errMatch = responseText.match(/class="mensajeError"[^>]*>([\s\S]*?)<\/div>/i) ||
-                             responseText.match(/<li[^>]*class="error"[^>]*>([\s\S]*?)<\/li>/i);
-            const errClean = errMatch ? errMatch[1].replace(/<[^>]+>/g, '').trim() : 'Error de validación reportado por ARCA';
-            return { success: false, error: errClean };
           }
-
-          const cae = caeMatch ? caeMatch[1] : null;
-          const caeVto = vtoMatch ? vtoMatch[1] : null;
-          const nroComp = nroMatch ? nroMatch[1] : String(Math.floor(1000 + Math.random() * 9000));
-
-          // PASO 6 INTERNO: Descarga directa de bytes de PDF (ArrayBuffer a Base64)
-          let pdfBase64 = null;
-          try {
-            const pdfRes = await fetch(`${basePath}/imprimirComprobante.do?_=${Date.now()}`, {
-              method: 'GET',
-              credentials: 'include',
-            });
-            if (pdfRes.ok) {
-              const arrayBuf = await pdfRes.arrayBuffer();
-              const uint8 = new Uint8Array(arrayBuf);
-              let binary = '';
-              for (let i = 0; i < uint8.byteLength; i++) {
-                binary += String.fromCharCode(uint8[i]);
-              }
-              pdfBase64 = btoa(binary);
-            }
-          } catch (e) {}
-
-          if (!cae) {
-            // Si no se extrajo CAE, analizar si ARCA devolvió error explícito o mensaje de sesión
-            const errMatch = responseText.match(/class="mensajeError"[^>]*>([\s\S]*?)<\/div>/i) ||
-                             responseText.match(/<li[^>]*class="error"[^>]*>([\s\S]*?)<\/li>/i) ||
-                             responseText.match(/<div[^>]*class="alert[^"]*"[^>]*>([\s\S]*?)<\/div>/i) ||
-                             responseText.match(/<p[^>]*class="error"[^>]*>([\s\S]*?)<\/p>/i);
-            const errClean = errMatch ? errMatch[1].replace(/<[^>]+>/g, '').trim() : null;
-
-            // Extraer título de página devuelta para saber si fue redireccionado o sesión expiró
-            const titleMatch = responseText.match(/<title>([^<]+)<\/title>/i);
-            const pageTitle = titleMatch ? titleMatch[1].trim() : '';
-
-            const traceStr = debugTrace.join(' | ');
-
-            return {
-              success: false,
-              error: errClean || (pageTitle ? `ARCA respondió en página "${pageTitle}" sin CAE.` : 'ARCA no devolvió un CAE válido.'),
-              trace: traceStr,
-              rawResponse: responseText.substring(0, 400).replace(/\s+/g, ' ')
-            };
-          }
-
-          return {
-            success: true,
-            cae,
-            caeVencimiento: caeVto || new Date(Date.now() + 10 * 86400000).toISOString().split('T')[0],
-            comprobanteNumero: nroComp,
-            pdfBase64,
-          };
-        } catch (e: any) {
-          return { success: false, error: e.message };
-        }
-      }, {
-        puntoVenta: datos.puntoVenta,
-        tipoComprobanteId: this.mapTipoComprobanteId(datos.tipoComprobante),
-        concepto: datos.concepto,
-        fechaEmision: this.formatDateForRcel(datos.fechaEmision),
-        periodoDesde: datos.periodoDesde ? this.formatDateForRcel(datos.periodoDesde) : '',
-        periodoHasta: datos.periodoHasta ? this.formatDateForRcel(datos.periodoHasta) : '',
-        vencimientoPago: datos.vencimientoPago ? this.formatDateForRcel(datos.vencimientoPago) : '',
-        condicionIvaId: this.mapCondicionIvaId(datos.receptor.condicionIva),
-        tipoDocId: this.mapTipoDocId(datos.receptor.tipoDoc),
-        receptorNroDoc: (datos.receptor.nroDoc || '').replace(/\D/g, ''),
-        receptorDomicilio: datos.receptor.domicilio,
-        condicionVentaId: this.mapCondicionVentaId(datos.condicionVenta),
-        receptorEmail: datos.receptor.email,
-        items: datos.items,
+        });
       });
 
-      if (!resultadoEmision.success) {
-        if (resultadoEmision.trace) {
-          logger.warn('FACTURACION-API', `Diagnóstico pipeline: ${resultadoEmision.trace}`);
+      await page.waitForTimeout(500);
+
+      // Tipo de comprobante (select#tipoComprobante)
+      const tipoCompSelect = page.locator('select#tipoComprobante, select[name="tipoComprobante"]').first();
+      if (await tipoCompSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
+        const tipoCompId = this.mapTipoComprobanteId(datos.tipoComprobante);
+        await tipoCompSelect.selectOption(tipoCompId).catch(async () => {
+          await tipoCompSelect.selectOption({ label: datos.tipoComprobante }).catch(() => {});
+        });
+      }
+
+      await page.waitForTimeout(500);
+
+      // Clic en Continuar (Paso 1 -> Paso 2)
+      logger.info('FACTURACION-API', 'Avanzando a Datos de Emisión (Paso 2)...');
+      const btnPaso1 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').first();
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
+        btnPaso1.click(),
+      ]);
+      await page.waitForTimeout(1000);
+
+      // Verificar si hubo error en paso 1
+      let errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
+      if (errorPaso && errorPaso.trim()) {
+        throw new Error(`Error en Punto de Venta / Tipo de Comprobante: ${errorPaso.trim()}`);
+      }
+
+      // PASO 2 EN DOM: Conceptos a incluir y Fechas
+      logger.info('FACTURACION-API', 'Completando Datos de Emisión (Concepto y Fechas)...');
+      const cboConcepto = page.locator('select#cboConcepto, select[name="cboConcepto"]').first();
+      if (await cboConcepto.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await cboConcepto.selectOption(String(datos.concepto));
+        await page.waitForTimeout(800);
+      }
+
+      // Fechas si son servicios (concepto 2 o 3)
+      if (datos.concepto === 2 || datos.concepto === 3) {
+        const hoy = this.formatDateForRcel(datos.fechaEmision);
+        const fDesde = page.locator('input#periodoFacturadoDesde, input[name="periodoFacturadoDesde"]').first();
+        if (await fDesde.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await fDesde.fill(datos.periodoDesde ? this.formatDateForRcel(datos.periodoDesde) : hoy);
         }
-        if (resultadoEmision.rawResponse) {
-          logger.warn('FACTURACION-API', `Respuesta cruda de ARCA: ${resultadoEmision.rawResponse}`);
+        const fHasta = page.locator('input#periodoFacturadoHasta, input[name="periodoFacturadoHasta"]').first();
+        if (await fHasta.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await fHasta.fill(datos.periodoHasta ? this.formatDateForRcel(datos.periodoHasta) : hoy);
         }
-        throw new Error(resultadoEmision.error || 'La API interna de RCEL no devolvió autorización.');
+        const fVto = page.locator('input#vencimientoPago, input[name="vencimientoPago"]').first();
+        if (await fVto.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await fVto.fill(datos.vencimientoPago ? this.formatDateForRcel(datos.vencimientoPago) : hoy);
+        }
+      }
+
+      // Clic en Continuar (Paso 2 -> Paso 3)
+      logger.info('FACTURACION-API', 'Avanzando a Datos del Receptor (Paso 3)...');
+      const btnPaso2 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').first();
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
+        btnPaso2.click(),
+      ]);
+      await page.waitForTimeout(1000);
+
+      errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
+      if (errorPaso && errorPaso.trim()) {
+        throw new Error(`Error en Datos de Emisión: ${errorPaso.trim()}`);
+      }
+
+      // PASO 3 EN DOM: Datos del Receptor
+      logger.info('FACTURACION-API', 'Completando Datos del Receptor y Condición de Venta...');
+      const condIvaSelect = page.locator('select#condicionIVA, select[name="condicionIVA"]').first();
+      if (await condIvaSelect.isVisible({ timeout: 5000 }).catch(() => false)) {
+        const condId = this.mapCondicionIvaId(datos.receptor.condicionIva);
+        await condIvaSelect.selectOption(condId);
+      }
+
+      if (datos.receptor.nroDoc && datos.receptor.tipoDoc !== 'Consumidor Final') {
+        const tipoDocSelect = page.locator('select#tipoDocReceptor, select[name="tipoDocReceptor"]').first();
+        if (await tipoDocSelect.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await tipoDocSelect.selectOption(this.mapTipoDocId(datos.receptor.tipoDoc));
+        }
+        const nroDocInput = page.locator('input#nroDocReceptor, input[name="nroDocReceptor"]').first();
+        if (await nroDocInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await nroDocInput.fill(datos.receptor.nroDoc.replace(/\D/g, ''));
+          await page.keyboard.press('Tab');
+          await page.waitForTimeout(1200);
+        }
+      }
+
+      // Condición de venta (Contado por defecto)
+      const condVentaRadio = page.locator(`input[name="formaDePago"][value="${this.mapCondicionVentaId(datos.condicionVenta)}"], input#formaDePago1, input[value="Contado"]`).first();
+      if (await condVentaRadio.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await condVentaRadio.check().catch(() => {});
+      }
+
+      // Clic en Continuar (Paso 3 -> Paso 4)
+      logger.info('FACTURACION-API', 'Avanzando a Datos de la Operación / Ítems (Paso 4)...');
+      const btnPaso3 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').first();
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
+        btnPaso3.click(),
+      ]);
+      await page.waitForTimeout(1000);
+
+      errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
+      if (errorPaso && errorPaso.trim()) {
+        throw new Error(`Error en Datos del Receptor: ${errorPaso.trim()}`);
+      }
+
+      // PASO 4 EN DOM: Ítems
+      logger.info('FACTURACION-API', 'Completando detalle de producto o servicio...');
+      const item = datos.items[0] || { descripcion: 'Servicios Profesionales', cantidad: 1, precioUnitario: 100 };
+      
+      const descInput = page.locator('textarea#detalleDescripcion1, input#detalleDescripcion1, input[name="detalleDescripcion"]').first();
+      if (await descInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await descInput.fill(item.descripcion);
+      }
+
+      const cantInput = page.locator('input#detalleCantidad1, input[name="detalleCantidad"]').first();
+      if (await cantInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await cantInput.fill(String(item.cantidad || 1));
+      }
+
+      const precioInput = page.locator('input#detallePrecio1, input[name="detallePrecio"]').first();
+      if (await precioInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await precioInput.fill(String(item.precioUnitario || item.subtotal));
+      }
+
+      // Clic en Continuar (Paso 4 -> Resumen y Confirmación)
+      logger.info('FACTURACION-API', 'Avanzando al Resumen de Confirmación...');
+      const btnPaso4 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').first();
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
+        btnPaso4.click(),
+      ]);
+      await page.waitForTimeout(1000);
+
+      errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
+      if (errorPaso && errorPaso.trim()) {
+        throw new Error(`Error en Ítems: ${errorPaso.trim()}`);
+      }
+
+      // PASO 5 EN DOM: Confirmar Comprobante
+      logger.info('FACTURACION-API', 'Confirmando emisión y solicitando CAE a ARCA...');
+      const btnConfirmar = page.locator('input[value*="Confirmar"], input#btnConfirmar, button:has-text("Confirmar")').first();
+      if (!await btnConfirmar.isVisible({ timeout: 5000 }).catch(() => false)) {
+        throw new Error('No se visualizó el botón de Confirmación en el resumen de comprobante.');
+      }
+
+      // Manejar el alert/confirm de Javascript que ARCA suele mostrar: "¿Confirma la operación?"
+      page.once('dialog', async dialog => {
+        logger.info('FACTURACION-API', `Dialog detectado de ARCA: "${dialog.message()}". Aceptando...`);
+        await dialog.accept().catch(() => {});
+      });
+
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
+        btnConfirmar.click(),
+      ]);
+      await page.waitForTimeout(2000);
+
+      // PASO 6: Extraer CAE legítimo otorgado por ARCA
+      const bodyHtml = await page.content();
+      const caeMatch = bodyHtml.match(/CAE\s*(?:N[:°º]?)?\s*[:\.]?\s*<b>(\d{14})<\/b>/i) ||
+                       bodyHtml.match(/<b>(\d{14})<\/b>/) ||
+                       bodyHtml.match(/(\d{14})/);
+      const vtoMatch = bodyHtml.match(/Fecha\s*de\s*Vto\.?\s*(?:de\s*CAE)?\s*[:\.]?\s*<b>(\d{2}\/\d{2}\/\d{4})<\/b>/i) ||
+                       bodyHtml.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const nroMatch = bodyHtml.match(/N[º°:]?\s*<b>(\d{1,8})<\/b>/i) ||
+                       bodyHtml.match(/Comprobante\s*Generado.*?(\d{8})/i);
+
+      if (!caeMatch) {
+        const errorFinal = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
+        throw new Error(errorFinal?.trim() || 'ARCA no devolvió un CAE válido tras confirmar la emisión.');
+      }
+
+      const cae = caeMatch[1];
+      const caeVencimiento = vtoMatch ? vtoMatch[1] : '';
+      const comprobanteNro = nroMatch ? nroMatch[1] : '00000001';
+
+      logger.success('FACTURACION-API', `¡CAE Autorizado por ARCA!: ${cae} - Vto: ${caeVencimiento} - Comp N°: ${comprobanteNro}`);
+
+      const resultadoEmision = {
+        success: true,
+        cae,
+        caeVencimiento,
+        comprobanteNumero: comprobanteNro,
+        pdfBase64: null as string | null,
+      };
+
+      // PASO 7: Descarga de PDF si el botón "Imprimir" está disponible
+      try {
+        const btnImprimir = page.locator('input[value*="Imprimir"], a:has-text("Imprimir"), button:has-text("Imprimir")').first();
+        if (await btnImprimir.isVisible({ timeout: 3000 }).catch(() => false)) {
+          const [download] = await Promise.all([
+            page.waitForEvent('download', { timeout: 10000 }).catch(() => null),
+            btnImprimir.click().catch(() => {}),
+          ]);
+          if (download) {
+            const stream = await download.createReadStream();
+            if (stream) {
+              const chunks: Buffer[] = [];
+              for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+              resultadoEmision.pdfBase64 = Buffer.concat(chunks).toString('base64');
+            }
+          }
+        }
+      } catch (errPdf: any) {
+        logger.warn('FACTURACION-API', `No se pudo descargar PDF directamente: ${errPdf.message}`);
       }
 
       // 5. Gestión del PDF generado en memoria

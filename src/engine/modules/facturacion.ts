@@ -312,38 +312,71 @@ class FacturacionInternalApiModule {
 
       // PASO 2 EN DOM: Conceptos a incluir y Fechas
       logger.info('FACTURACION-API', 'Completando Datos de Emisión (Concepto y Fechas)...');
-      const cboConcepto = page.locator('select#cboConcepto, select[name="cboConcepto"], select#concepto').first();
+      
+      // Registrar campos disponibles en el formulario de Paso 2 para asegurar que llenamos exactamente los inputs correctos
+      const formFields = await page.evaluate(`(() => {
+        const inputs = Array.from(document.querySelectorAll('input, select, textarea')).map(el => ({
+          tag: el.tagName.toLowerCase(),
+          id: el.id,
+          name: el.getAttribute('name') || '',
+          type: el.getAttribute('type') || '',
+          value: el.getAttribute('value') || ''
+        }));
+        return inputs;
+      })()`).catch(() => []);
+      logger.info('FACTURACION-API', `Inputs detectados en Paso 2: ${JSON.stringify((formFields as any[]).filter(f => f.type !== 'hidden'))}`);
+
+      const cboConcepto = page.locator('select#cboConcepto, select[name="cboConcepto"], select#concepto, select[name="concepto"]').first();
       if (await cboConcepto.isVisible({ timeout: 5000 }).catch(() => false)) {
         await cboConcepto.selectOption(String(datos.concepto));
+        // Disparar evento change por si ARCA actualiza la interfaz dinámicamente
+        await cboConcepto.dispatchEvent('change').catch(() => {});
         await page.waitForTimeout(1000);
       }
 
       // Fechas si son servicios (concepto 2 o 3)
       if (datos.concepto === 2 || datos.concepto === 3) {
         const hoy = this.formatDateForRcel(datos.fechaEmision);
-        const fDesde = page.locator('input#fsdt, input#periodoFacturadoDesde, input[name="periodoFacturadoDesde"]').first();
+        logger.info('FACTURACION-API', `Completando fechas de servicio: Desde/Hasta/Vto con fecha ${hoy}`);
+        
+        const fDesde = page.locator('input#fsdt, input#periodoFacturadoDesde, input[name="periodoFacturadoDesde"], input[name="fsdt"]').first();
         if (await fDesde.isVisible({ timeout: 2000 }).catch(() => false)) {
-          await fDesde.fill(datos.periodoDesde ? this.formatDateForRcel(datos.periodoDesde) : hoy);
+          const val = datos.periodoDesde ? this.formatDateForRcel(datos.periodoDesde) : hoy;
+          await fDesde.fill(val);
+          await fDesde.dispatchEvent('change').catch(() => {});
         }
-        const fHasta = page.locator('input#fsht, input#periodoFacturadoHasta, input[name="periodoFacturadoHasta"]').first();
+        const fHasta = page.locator('input#fsht, input#periodoFacturadoHasta, input[name="periodoFacturadoHasta"], input[name="fsht"]').first();
         if (await fHasta.isVisible({ timeout: 2000 }).catch(() => false)) {
-          await fHasta.fill(datos.periodoHasta ? this.formatDateForRcel(datos.periodoHasta) : hoy);
+          const val = datos.periodoHasta ? this.formatDateForRcel(datos.periodoHasta) : hoy;
+          await fHasta.fill(val);
+          await fHasta.dispatchEvent('change').catch(() => {});
         }
-        const fVto = page.locator('input#vencimientoPago, input[name="vencimientoPago"]').first();
+        const fVto = page.locator('input#vencimientoPago, input[name="vencimientoPago"], input#fvencimiento, input[name="fvencimiento"]').first();
         if (await fVto.isVisible({ timeout: 2000 }).catch(() => false)) {
-          await fVto.fill(datos.vencimientoPago ? this.formatDateForRcel(datos.vencimientoPago) : hoy);
+          const val = datos.vencimientoPago ? this.formatDateForRcel(datos.vencimientoPago) : hoy;
+          await fVto.fill(val);
+          await fVto.dispatchEvent('change').catch(() => {});
         }
       }
 
+      // Si hay fecha de comprobante editable
+      const fComprobante = page.locator('input#fc, input#fechaComprobante, input[name="fechaComprobante"]').first();
+      if (await fComprobante.isVisible({ timeout: 1000 }).catch(() => false)) {
+        const valHoy = this.formatDateForRcel(datos.fechaEmision);
+        await fComprobante.fill(valHoy).catch(() => {});
+      }
+
+      await page.waitForTimeout(500);
+
       // Clic en Continuar (Paso 2 -> Paso 3)
       logger.info('FACTURACION-API', 'Avanzando a Datos del Receptor (Paso 3)...');
-      // En genComDatosEmisor.do el botón Continuar puede ser input[value*="Continuar"] o tener id específico
+      // Buscar botón Continuar en el formulario
       const btnPaso2 = page.locator('input[value*="Continuar"], input#btnContinuar, input#btngenerar, button:has-text("Continuar")').last();
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
         btnPaso2.click(),
       ]);
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(1500);
       logger.info('FACTURACION-API', `URL tras Paso 2: ${page.url()}`);
 
       errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
@@ -351,10 +384,16 @@ class FacturacionInternalApiModule {
         throw new Error(`Error en Datos de Emisión: ${errorPaso.trim()}`);
       }
 
-      // Si tras Paso 2 la URL sigue siendo genComDatosEmisor.do, significa que AFIP no avanzó de página (faltó un campo)
+      // Si tras Paso 2 la URL sigue siendo genComDatosEmisor.do, registrar detalles y mensajes visibles
       if (page.url().includes('genComDatosEmisor.do')) {
-        const errorHtml = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
-        throw new Error(errorHtml?.trim() || `AFIP no avanzó del Paso 2 (Datos de Emisión). Revise las fechas de facturación o concepto.`);
+        const bodySnippet = await page.evaluate(`(() => {
+          const alerts = Array.from(document.querySelectorAll('.alert, .mensajeError, .error, #errores, span.error, font[color="red"], .rf-msgs-sum')).map(e => e.textContent ? e.textContent.trim() : '').filter(Boolean);
+          const visibleTexts = document.body.innerText.split('\\n').map(s => s.trim()).filter(s => s.length > 5 && !s.includes('AFIP'));
+          return { alerts, sampleText: visibleTexts.slice(0, 20) };
+        })()`).catch(() => ({ alerts: [], sampleText: [] })) as any;
+        logger.error('FACTURACION-API', `Paso 2 no avanzó. Alertas: [${(bodySnippet.alerts || []).join(' | ')}]. Muestra: [${(bodySnippet.sampleText || []).join(' | ')}]`);
+        const alertMsg = (bodySnippet.alerts || []).join(' - ');
+        throw new Error(alertMsg || `AFIP no avanzó del Paso 2 (Datos de Emisión). Revise las fechas de facturación o concepto.`);
       }
 
       // PASO 3 EN DOM: Datos del Receptor

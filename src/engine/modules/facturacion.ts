@@ -423,10 +423,35 @@ class FacturacionInternalApiModule {
       }
 
       // PASO 5 EN DOM: Confirmar Comprobante
-      logger.info('FACTURACION-API', 'Confirmando emisión y solicitando CAE a ARCA...');
-      const btnConfirmar = page.locator('input[value*="Confirmar"], input#btnConfirmar, button:has-text("Confirmar")').first();
-      if (!await btnConfirmar.isVisible({ timeout: 5000 }).catch(() => false)) {
-        throw new Error('No se visualizó el botón de Confirmación en el resumen de comprobante.');
+      logger.info('FACTURACION-API', 'Revisando pantalla de Resumen antes de Confirmar...');
+      logger.info('FACTURACION-API', `URL en Resumen: ${page.url()}`);
+
+      // Registrar botones visibles para diagnóstico preciso
+      const allButtons = await page.locator('input[type="button"], input[type="submit"], button').all();
+      const buttonLabels: string[] = [];
+      for (const b of allButtons) {
+        const val = (await b.getAttribute('value')) || (await b.textContent()) || '';
+        if (val.trim()) buttonLabels.push(val.trim());
+      }
+      logger.info('FACTURACION-API', `Botones presentes en la pantalla de Resumen: [${buttonLabels.join(' | ')}]`);
+
+      // Selector exhaustivo para el botón de confirmación de RCEL / AFIP
+      const btnConfirmar = page.locator(`
+        input#btngenerar,
+        input#btnConfirmar,
+        input[value*="Confirmar Datos"],
+        input[value*="Confirmar"],
+        input[value*="Emitir"],
+        input[value*="Generar Comprobante"],
+        button:has-text("Confirmar"),
+        button:has-text("Emitir")
+      `).first();
+
+      if (!await btnConfirmar.isVisible({ timeout: 8000 }).catch(() => false)) {
+        // Inspeccionar si AFIP arrojó un mensaje de validación o bloqueo en el resumen
+        const pageText = await page.locator('#contenido, #main, body').textContent().catch(() => '');
+        const errorText = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
+        throw new Error(errorText?.trim() || `No se visualizó el botón de Confirmación. Botones encontrados: [${buttonLabels.join(', ')}]. Título: ${await page.title()}`);
       }
 
       // Manejar el alert/confirm de Javascript que ARCA suele mostrar: "¿Confirma la operación?"
@@ -435,8 +460,9 @@ class FacturacionInternalApiModule {
         await dialog.accept().catch(() => {});
       });
 
+      logger.info('FACTURACION-API', 'Presionando botón para autorizar el comprobante...');
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
         btnConfirmar.click(),
       ]);
       await page.waitForTimeout(2000);

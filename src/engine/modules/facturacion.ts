@@ -326,21 +326,30 @@ class FacturacionInternalApiModule {
       })()`).catch(() => []);
       logger.info('FACTURACION-API', `Inputs detectados en Paso 2: ${JSON.stringify((formFields as any[]).filter(f => f.type !== 'hidden'))}`);
 
-      // En el HTML real de RCEL detectado:
+      // En el HTML real de RCEL:
       // select id="idconcepto", name="idConcepto"
       // options: 1 = Productos, 2 = Servicios, 3 = Productos y Servicios
-      const cboConcepto = page.locator('select#idconcepto, select#cboConcepto, select[name="idConcepto"], select[name="cboConcepto"]').first();
-      if (await cboConcepto.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await cboConcepto.selectOption(String(datos.concepto));
-        // Disparar evento onchange nativo
-        await page.evaluate(`(() => {
-          const el = document.querySelector('select#idconcepto') || document.querySelector('select[name="idConcepto"]');
-          if (el) {
-            el.dispatchEvent(new Event('change', { bubbles: true }));
+      // Seleccionar opción e invocar el handler onchange de ARCA
+      await page.evaluate(`((cId) => {
+        const sel = document.querySelector('select#idconcepto') || document.querySelector('select[name="idConcepto"]');
+        if (sel) {
+          sel.value = String(cId);
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          if (typeof (sel as any).onchange === 'function') {
+            (sel as any).onchange();
           }
-        })()`).catch(() => {});
-        await page.waitForTimeout(1500);
-      }
+        }
+      })(${datos.concepto})`).catch(() => {});
+      await page.waitForTimeout(2000);
+
+      // Si existe el combo de actividad asociada (id="actiAsociadaId"), seleccionar la primera actividad válida disponible
+      await page.evaluate(`(() => {
+        const actiSel = document.querySelector('select#actiAsociadaId') || document.querySelector('select[name="actiAsociadaId"]');
+        if (actiSel && (actiSel as HTMLSelectElement).options.length > 1) {
+          (actiSel as HTMLSelectElement).selectedIndex = 1;
+          actiSel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      })()`).catch(() => {});
 
       // Fechas si son servicios (concepto 2 o 3)
       // En el HTML real de RCEL:
@@ -351,66 +360,46 @@ class FacturacionInternalApiModule {
         const hoy = this.formatDateForRcel(datos.fechaEmision);
         logger.info('FACTURACION-API', `Completando fechas de servicio: Desde/Hasta/Vto con fecha ${hoy}`);
         
-        const fDesde = page.locator('input#fsd, input#fsdt, input[name="periodoFacturadoDesde"]').first();
-        if (await fDesde.isVisible({ timeout: 2000 }).catch(() => false)) {
-          const val = datos.periodoDesde ? this.formatDateForRcel(datos.periodoDesde) : hoy;
-          await fDesde.fill(val);
-          await fDesde.dispatchEvent('change').catch(() => {});
-        }
-        const fHasta = page.locator('input#fsh, input#fsht, input[name="periodoFacturadoHasta"]').first();
-        if (await fHasta.isVisible({ timeout: 2000 }).catch(() => false)) {
-          const val = datos.periodoHasta ? this.formatDateForRcel(datos.periodoHasta) : hoy;
-          await fHasta.fill(val);
-          await fHasta.dispatchEvent('change').catch(() => {});
-        }
-        const fVto = page.locator('input#vencimientopago, input[name="vencimientoPago"]').first();
-        if (await fVto.isVisible({ timeout: 2000 }).catch(() => false)) {
-          const val = datos.vencimientoPago ? this.formatDateForRcel(datos.vencimientoPago) : hoy;
-          await fVto.fill(val);
-          await fVto.dispatchEvent('change').catch(() => {});
-        }
+        const fDesdeVal = datos.periodoDesde ? this.formatDateForRcel(datos.periodoDesde) : hoy;
+        const fHastaVal = datos.periodoHasta ? this.formatDateForRcel(datos.periodoHasta) : hoy;
+        const fVtoVal = datos.vencimientoPago ? this.formatDateForRcel(datos.vencimientoPago) : hoy;
+
+        await page.evaluate(`(({ d, h, v }) => {
+          const elD = document.querySelector('input#fsd') || document.querySelector('input[name="periodoFacturadoDesde"]');
+          if (elD) { (elD as HTMLInputElement).value = d; elD.dispatchEvent(new Event('change', { bubbles: true })); }
+          const elH = document.querySelector('input#fsh') || document.querySelector('input[name="periodoFacturadoHasta"]');
+          if (elH) { (elH as HTMLInputElement).value = h; elH.dispatchEvent(new Event('change', { bubbles: true })); }
+          const elV = document.querySelector('input#vencimientopago') || document.querySelector('input[name="vencimientoPago"]');
+          if (elV) { (elV as HTMLInputElement).value = v; elV.dispatchEvent(new Event('change', { bubbles: true })); }
+        })`, { d: fDesdeVal, h: fHastaVal, v: fVtoVal }).catch(() => {});
       }
 
       // Si hay fecha de comprobante editable (id="fc", name="fechaEmisionComprobante")
-      const fComprobante = page.locator('input#fc, input[name="fechaEmisionComprobante"]').first();
-      if (await fComprobante.isVisible({ timeout: 1000 }).catch(() => false)) {
-        const valHoy = this.formatDateForRcel(datos.fechaEmision);
-        await fComprobante.fill(valHoy).catch(() => {});
-      }
+      const valHoy = this.formatDateForRcel(datos.fechaEmision);
+      await page.evaluate(`((vh) => {
+        const elFc = document.querySelector('input#fc') || document.querySelector('input[name="fechaEmisionComprobante"]');
+        if (elFc && !(elFc as HTMLInputElement).value) {
+          (elFc as HTMLInputElement).value = vh;
+          elFc.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      })(${JSON.stringify(valHoy)})`).catch(() => {});
 
       await page.waitForTimeout(1000);
 
       // Clic en Continuar (Paso 2 -> Paso 3)
       logger.info('FACTURACION-API', 'Avanzando a Datos del Receptor (Paso 3)...');
       
-      const btnPaso2 = page.locator('input[value*="Continuar"]').last();
       const activePage = page;
-      
       await Promise.all([
         activePage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
-        (async () => {
-          if (await btnPaso2.isVisible({ timeout: 2000 }).catch(() => false)) {
-            await btnPaso2.click().catch(async () => {
-              await activePage.evaluate(`(() => {
-                const btn = Array.from(document.querySelectorAll('input[type="button"], input[type="submit"]')).find(b => b.value.includes('Continuar'));
-                if (btn) btn.click();
-                else {
-                  const form = document.querySelector('form');
-                  if (form) form.submit();
-                }
-              })()`).catch(() => {});
-            });
-          } else {
-            await activePage.evaluate(`(() => {
-              const btn = Array.from(document.querySelectorAll('input[type="button"], input[type="submit"]')).find(b => b.value.includes('Continuar'));
-              if (btn) btn.click();
-              else {
-                const form = document.querySelector('form');
-                if (form) form.submit();
-              }
-            })()`).catch(() => {});
+        activePage.evaluate(`(() => {
+          const btn = Array.from(document.querySelectorAll('input[type="button"], input[type="submit"]')).find(b => (b as HTMLInputElement).value && (b as HTMLInputElement).value.includes('Continuar'));
+          if (btn) (btn as HTMLElement).click();
+          else {
+            const form = document.querySelector('form');
+            if (form) form.submit();
           }
-        })()
+        })()`).catch(() => {})
       ]);
       await activePage.waitForTimeout(2000);
       logger.info('FACTURACION-API', `URL tras Paso 2: ${activePage.url()}`);

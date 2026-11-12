@@ -1,6 +1,6 @@
 {
   "name": "botarca",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Bot automatizado para gestión de ARCA (ex-AFIP) mediante emulación de sesión HTTP y Playwright headless con interfaz web y keep-alive.",
   "main": "dist/index.js",

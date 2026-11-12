@@ -17,6 +17,8 @@ export interface ArcaSessionResult {
 class ArcaSessionManager {
   private browser: Browser | null = null;
   private activeContext: BrowserContext | null = null;
+  /** CUIT con el que se inició la sesión activa (solo se reutiliza para ese mismo CUIT). */
+  private activeCuit: string = '';
   private lastSessionCheck: number = 0;
   private cachedRazonSocial: string = '';
 
@@ -174,6 +176,26 @@ class ArcaSessionManager {
         return { success: false, message: `Error ARCA: ${cleanedError}` };
       }
 
+      // Igual que ARCABOT: el login solo cuenta como exitoso si de verdad se llegó al
+      // portal (o a RCEL). Antes alcanzaba con "no ver un cartel de error".
+      const llegoAlPortal = await page
+        .waitForURL(u => /portalcf\.cloud\.afip\.gob\.ar|fe\.afip\.gob\.ar/.test(u.toString()), { timeout: 30000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!llegoAlPortal) {
+        const pide2fa = (await page.locator("input[placeholder*='código' i], input[placeholder*='token' i], .g-recaptcha, iframe[src*='recaptcha'], #F1\\:token").count().catch(() => 0)) > 0;
+        const textoError = ((await page.locator('.alert-danger, .ui-messages-error, #F1\\:msg, .rf-msgs-sum').first().textContent({ timeout: 1000 }).catch(() => null)) || '').trim();
+        const motivo = pide2fa
+          ? 'ARCA pide verificación adicional (código/2FA o captcha), que no se puede completar desde el servidor.'
+          : textoError
+            ? `ARCA rechazó el ingreso: ${textoError}`
+            : `No se llegó al portal de ARCA después de ingresar (URL: ${page.url()}).`;
+        logger.error('MOTOR-ARCA', motivo);
+        await context.close().catch(() => {});
+        db.updateSessionStatus(false);
+        return { success: false, message: motivo };
+      }
+
       // Obtener cookies de la sesión
       const cookies = await context.cookies();
       db.setSessionCookies(cookies);
@@ -191,7 +213,12 @@ class ArcaSessionManager {
       }
 
       this.cachedRazonSocial = razonSocial || `CUIT ${cleanCuit}`;
+      // Cerrar la sesión anterior (si era de otro CUIT) para no dejar Chromium colgado
+      if (this.activeContext && this.activeContext !== context) {
+        await this.activeContext.close().catch(() => {});
+      }
       this.activeContext = context;
+      this.activeCuit = cleanCuit;
       this.lastSessionCheck = Date.now();
 
       db.updateSessionStatus(true, new Date().toISOString(), this.cachedRazonSocial);
@@ -234,7 +261,8 @@ class ArcaSessionManager {
 
     // Si la sesión fue verificada hace menos de 10 minutos y tenemos contexto activo
     const TEN_MINUTES = 10 * 60 * 1000;
-    if (this.activeContext && (Date.now() - this.lastSessionCheck < TEN_MINUTES)) {
+    const cuitLimpio = String(targetCuit).replace(/\D/g, '');
+    if (this.activeContext && this.activeCuit === cuitLimpio && (Date.now() - this.lastSessionCheck < TEN_MINUTES)) {
       return {
         success: true,
         message: 'Sesión activa en memoria reutilizada',

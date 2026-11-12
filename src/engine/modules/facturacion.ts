@@ -1,6 +1,6 @@
 import { ArcaSessionResult } from '../arcaSession.js';
 import { logger } from '../../services/logger.js';
-import { Page } from 'playwright';
+import { Page, Locator } from 'playwright';
 import { storageService } from '../../services/storageService.js';
 import { mailService } from '../../services/mailService.js';
 
@@ -65,6 +65,173 @@ export interface PadronResult {
   error?: string;
 }
 
+/*
+ * Flujo de "Comprobantes en línea" (RCEL) portado de ARCABOT Facturador
+ * (agente/motor_arca.py), que ya está probado contra ARCA real. Reglas que vienen de ahí:
+ *
+ * - Los campos se ubican por el TEXTO de su etiqueta ("Punto de Ventas a utilizar",
+ *   "Conceptos a incluír", ...) y no por ids internos: los JSP de ARCA no son estables.
+ * - Cada "Continuar" navega a otra página .do: se espera la navegación y después se
+ *   busca el cartel rojo "Error:" que ARCA muestra cuando rechaza el paso.
+ * - Paso 2: ARCA ya autocompleta la fecha, el período facturado y el vencimiento de
+ *   pago. No se tocan salvo que la factura traiga fechas explícitas.
+ * - La confirmación es doble: "Confirmar Datos" -> "¿Confirma la Operación?" -> "Confirmar".
+ * - La pantalla "Comprobante Generado" no muestra el número como texto: sale del
+ *   nombre del PDF que descarga "Imprimir" ({cuit}_{tipo}_{numero}.pdf).
+ *
+ * IMPORTANTE: nunca pasar strings a page.evaluate() con sintaxis TypeScript (`as any`):
+ * el navegador los ejecuta tal cual y fallan con SyntaxError. Usar funciones.
+ */
+
+const URL_RCEL_MENU = 'https://fe.afip.gob.ar/rcel/jsp/menu_ppal.jsp';
+const URL_RCEL_EMPRESAS = 'https://fe.afip.gob.ar/rcel/jsp/index_bis.jsp';
+
+const CONCEPTO_LABEL: Record<number, string> = {
+  1: 'Productos',
+  2: 'Servicios',
+  3: 'Productos y Servicios',
+};
+
+// Texto de cada opción de "Condición frente al IVA" en ARCA, según lo que manda el panel
+const CONDICION_IVA_ARCA: Record<string, string[]> = {
+  'responsable inscripto': ['IVA Responsable Inscripto', 'Responsable Inscripto'],
+  'monotributo': ['Responsable Monotributo', 'Monotributista Social', 'Monotributo'],
+  'exento': ['IVA Sujeto Exento', 'Exento'],
+  'consumidor final': ['Consumidor Final'],
+};
+
+// Texto exacto de cada opción del combo "Alícuota IVA" en ARCA (solo Factura A/B)
+const ALICUOTAS_IVA: Record<string, string> = {
+  'no gravado': 'No gravado',
+  'exento': 'Exento',
+  '0': '0%',
+  '2.5': '2,5%',
+  '5': '5%',
+  '10.5': '10,5%',
+  '21': '21%',
+  '27': '27%',
+};
+
+/** Página RCEL -> última empresa representada elegida en ella (para re-elegir si cambia el CUIT). */
+const empresaPorPagina = new WeakMap<Page, string>();
+
+function normalizarTexto(texto: string): string {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\./g, '') // "S.R.L." == "SRL", "S.A." == "SA"
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** El <select> que aparece después del texto de una etiqueta (los JSP de ARCA no asocian <label>). */
+function selectDespuesDe(page: Page, textoLabel: string): Locator {
+  return page.getByText(textoLabel, { exact: false }).first().locator('xpath=following::select[1]');
+}
+
+/** El <input> que aparece después del texto de una etiqueta. */
+function inputDespuesDe(page: Page, textoLabel: string): Locator {
+  return page.getByText(textoLabel, { exact: false }).first().locator('xpath=following::input[1]');
+}
+
+/**
+ * Elige la opción cuyo texto visible coincide (sin mayúsculas/acentos) con alguno de los
+ * candidatos. Reintenta durante `timeoutMs` porque algunos combos se repueblan por AJAX
+ * (ej. "Tipo de Comprobante" depende del punto de venta recién elegido).
+ * Con `permitirContiene`, como último recurso acepta una opción que contenga el candidato.
+ */
+async function seleccionarPorLabel(
+  select: Locator,
+  candidatos: string[],
+  opts: { timeoutMs?: number; permitirContiene?: boolean; prefijo?: boolean } = {},
+): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? 8000;
+  const buscados = candidatos.map(normalizarTexto).filter(Boolean);
+  const limite = Date.now() + timeoutMs;
+  let opciones: string[] = [];
+
+  await select.waitFor({ state: 'attached', timeout: timeoutMs });
+  while (true) {
+    opciones = await select.locator('option').allTextContents();
+    const norm = opciones.map(normalizarTexto);
+
+    for (const b of buscados) {
+      const idx = opts.prefijo ? norm.findIndex(o => o.startsWith(b)) : norm.findIndex(o => o === b);
+      if (idx !== -1) {
+        await select.selectOption({ label: opciones[idx].trim() }).catch(async () => {
+          await select.selectOption({ index: idx });
+        });
+        return opciones[idx].trim();
+      }
+    }
+    if (opts.permitirContiene) {
+      for (const b of buscados) {
+        const idx = norm.findIndex(o => o.includes(b));
+        if (idx !== -1) {
+          await select.selectOption({ index: idx });
+          return opciones[idx].trim();
+        }
+      }
+    }
+    if (Date.now() >= limite) break;
+    await select.page().waitForTimeout(250);
+  }
+  const disponibles = opciones.map(o => o.trim()).filter(Boolean).join(', ');
+  throw new Error(`No encontré la opción "${candidatos[0]}". Disponibles en ARCA: ${disponibles || '(ninguna)'}.`);
+}
+
+/** Después de un "Continuar", ARCA a veces vuelve a mostrar la pantalla con un cartel rojo "Error: ...". */
+async function verificarSinErrorArca(page: Page, paso: string) {
+  const cartel = page.getByText('Error:', { exact: false }).first();
+  const texto = await cartel.textContent({ timeout: 2000 }).catch(() => null);
+  if (texto && texto.trim()) {
+    throw new Error(`ARCA no aceptó el ${paso}: ${texto.trim()}`);
+  }
+}
+
+/** Click en "Continuar" esperando que cargue la siguiente página .do del asistente. */
+async function clickContinuar(page: Page, paso: string) {
+  const urlAntes = page.url();
+  const boton = page.getByText('Continuar', { exact: false }).first();
+  await boton.waitFor({ state: 'visible', timeout: 10000 });
+
+  const avisos: string[] = [];
+  const onDialog = async (dialog: any) => {
+    avisos.push(dialog.message());
+    logger.warn('FACTURACION-API', `ARCA mostró un aviso en ${paso}: "${dialog.message()}"`);
+    await dialog.accept().catch(() => {});
+  };
+  page.on('dialog', onDialog);
+  try {
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'load', timeout: 30000 }),
+      boton.click(),
+    ]);
+  } catch (err: any) {
+    const detalle = avisos.length ? ` Aviso de ARCA: ${avisos.join(' | ')}` : '';
+    throw new Error(`ARCA no avanzó desde el ${paso} (sigue en ${urlAntes}).${detalle}`);
+  } finally {
+    page.off('dialog', onDialog);
+  }
+  await verificarSinErrorArca(page, paso);
+  logger.info('FACTURACION-API', `${paso} OK -> ${page.url()}`);
+}
+
+/** Setea un input de fecha (puede ser readonly con calendario) y dispara los eventos de ARCA. */
+async function setFecha(page: Page, selector: string, valor: string): Promise<boolean> {
+  const input = page.locator(selector).first();
+  if (!(await input.count())) return false;
+  // (tsconfig no incluye la lib DOM, por eso el elemento va tipado como any)
+  await input.evaluate((el: any, v: string) => {
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('blur', { bubbles: true }));
+  }, valor);
+  return true;
+}
+
 class FacturacionInternalApiModule {
   /**
    * Consulta padrón receptor directo por endpoint interno de RCEL / ARCA
@@ -126,483 +293,130 @@ class FacturacionInternalApiModule {
   }
 
   /**
-   * Emite comprobante en ARCA mediante llamadas directas a la API interna de RCEL
-   * (Sin screen-scraping: ejecución in-page vía page.evaluate con cookies de sesión activas)
+   * Emite un comprobante en "Comprobantes en línea" de ARCA completando el asistente
+   * real de RCEL con Playwright (mismo recorrido que ARCABOT).
    */
   public async emitirFactura(session: ArcaSessionResult, datos: FacturaRequest): Promise<FacturaResponse> {
-    logger.info('FACTURACION-API', `[API Interna] Iniciando emisión para ${datos.tipoComprobante} - Pto Venta: ${datos.puntoVenta}...`);
+    logger.info('FACTURACION-API', `Iniciando emisión de ${datos.tipoComprobante} - Pto Venta: ${datos.puntoVenta}...`);
+
+    // Validaciones antes de tocar ARCA
+    if (!datos.items || datos.items.length === 0) {
+      return { success: false, message: 'La factura no tiene ítems.' };
+    }
+    if (datos.items.length > 1) {
+      // RCEL carga una fila por ítem; por ahora solo está probado el flujo de 1 ítem (igual que ARCABOT).
+      // Antes se emitía solo el primero en silencio, con un total distinto al cargado.
+      return {
+        success: false,
+        message: `Por ahora BotArca emite un solo ítem por comprobante y esta factura tiene ${datos.items.length}. Unificalos en una línea o emitilos por separado.`,
+      };
+    }
+    if (!CONCEPTO_LABEL[datos.concepto]) {
+      return { success: false, message: `Concepto inválido: ${datos.concepto}.` };
+    }
 
     let page: Page | null = null;
     let createdPageLocally = false;
+    let confirmacionEnviada = false; // a partir de acá el comprobante puede haber quedado emitido en ARCA
+    const targetCuit = (datos.cuitEmisor || session.cuit || '').replace(/\D/g, '');
 
     try {
       if (session.page && !session.page.isClosed()) {
         page = session.page;
       } else if (session.context) {
-        page = await session.context.newPage();
-        createdPageLocally = true;
-      } else {
-        throw new Error('No hay contexto de sesión activo para ejecutar llamadas a la API interna.');
-      }
-
-      // 1. Asegurar posición en el subsistema RCEL (fe.afip.gob.ar/rcel)
-      let currentUrl = page.url();
-      logger.info('FACTURACION-API', `URL inicial del contexto: ${currentUrl}`);
-
-      if (!currentUrl.includes('fe.afip.gob.ar/rcel') && !currentUrl.includes('rcel.afip.gob.ar')) {
-        logger.info('FACTURACION-API', 'Navegando al portal de ARCA para abrir Comprobantes en línea (RCEL)...');
-        await page.goto('https://portalcf.cloud.afip.gob.ar/portal/app/', { waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(2000);
-
-        // En el nuevo portal de ARCA/AFIP, los servicios se buscan en el input buscador superior/central
-        const searchInputSelector = '#buscadorServicios, input[placeholder*="Buscar"], input[aria-label*="Buscar"], input[type="search"], .input-buscar';
-        const searchInput = page.locator(searchInputSelector).first();
-
-        if (await searchInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-          logger.info('FACTURACION-API', 'Escribiendo "Comprobantes en línea" en el buscador de servicios de ARCA...');
-          await searchInput.click();
-          await searchInput.fill('');
-          await searchInput.type('Comprobantes en línea', { delay: 60 });
-          await page.waitForTimeout(1000);
-        }
-
-        // Localizar el resultado / tarjeta de "Comprobantes en línea"
-        const serviceLink = page.locator(`
-          a:has-text("Comprobantes en línea"), 
-          div.servicio-item:has-text("Comprobantes en línea"),
-          [data-servicio*="Comprobantes en línea"],
-          [title*="Comprobantes en línea"],
-          h3:has-text("Comprobantes en línea"),
-          p:has-text("Comprobantes en línea")
-        `).first();
-
-        const [popupPage] = await Promise.all([
-          page.context().waitForEvent('page', { timeout: 20000 }).catch(() => null),
-          (async () => {
-            try {
-              await serviceLink.waitFor({ state: 'visible', timeout: 8000 });
-              await serviceLink.click();
-            } catch (err: any) {
-              logger.warn('FACTURACION-API', `Intento de clic en buscador: ${err.message}. Probando clic forzado en enlace de texto...`);
-              await page.click('text="Comprobantes en línea"', { force: true }).catch(() => {});
-            }
-          })(),
-        ]);
-
-        if (popupPage) {
-          page = popupPage;
-          await page.waitForLoadState('domcontentloaded');
-          logger.info('FACTURACION-API', `Nueva pestaña detectada para RCEL: ${page.url()}`);
+        const existente = session.context.pages().find(p => !p.isClosed() && p.url().includes('fe.afip.gob.ar'));
+        if (existente) {
+          page = existente;
         } else {
-          // Si no abrió ventana popup, verificar si el context creó otra página o si navegó
-          await page.waitForLoadState('domcontentloaded');
-          const allPages = page.context().pages();
-          const rcelP = allPages.find(p => p.url().includes('fe.afip.gob.ar') || p.url().includes('rcel'));
-          if (rcelP) {
-            page = rcelP;
-            await page.waitForLoadState('domcontentloaded');
-          }
-          logger.info('FACTURACION-API', `Página activa tras clic en servicio: ${page.url()}`);
+          page = await session.context.newPage();
+          createdPageLocally = true;
         }
-      }
-
-      currentUrl = page.url();
-      logger.info('FACTURACION-API', `Página activa para RCEL: ${currentUrl}`);
-
-      if (!currentUrl.includes('fe.afip.gob.ar') && !currentUrl.includes('rcel')) {
-        throw new Error('No se pudo acceder al servicio "Comprobantes en línea" en el portal de ARCA. Verifique que el servicio esté habilitado.');
-      }
-
-      // 2. Selección de empresa representada en la pantalla inicial de RCEL
-      const targetCuit = (datos.cuitEmisor || session.cuit || '').replace(/\D/g, '');
-      logger.info('FACTURACION-API', `Verificando selector de empresa para CUIT: ${targetCuit}...`);
-
-      // En RCEL la selección de contribuyente puede ser un botón input type=button/submit o un enlace/fila
-      const empresaBtn = page.locator(`input[value*="${targetCuit}"], button:has-text("${targetCuit}"), a:has-text("${targetCuit}"), tr:has-text("${targetCuit}") input, input.btn_empresa`).first();
-      if (await empresaBtn.isVisible({ timeout: 6000 }).catch(() => false)) {
-        logger.info('FACTURACION-API', `Haciendo clic en empresa representada CUIT: ${targetCuit}`);
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-          empresaBtn.click(),
-        ]);
-        await page.waitForTimeout(1000);
       } else {
-        logger.info('FACTURACION-API', `No se requirió selección de empresa o ya se encuentra en menú principal: ${page.url()}`);
+        throw new Error('No hay contexto de sesión activo en ARCA.');
       }
 
-      // Asegurar clic en "Generar Comprobantes" en el menú principal de RCEL si está presente
-      const btnGenerarMenu = page.locator('a:has-text("Generar Comprobantes"), input[value*="Generar Comprobantes"], button:has-text("Generar Comprobantes"), #btn_gen_cmp').first();
-      if (await btnGenerarMenu.isVisible({ timeout: 4000 }).catch(() => false)) {
-        logger.info('FACTURACION-API', 'Ingresando a "Generar Comprobantes"...');
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-          btnGenerarMenu.click(),
-        ]);
-        await page.waitForTimeout(1000);
-      }
+      // 1. Llegar a RCEL (fe.afip.gob.ar/rcel)
+      page = await this.abrirRcel(page);
 
-      logger.info('FACTURACION-API', `Posición alcanzada en RCEL: ${page.url()}`);
+      // 2. Empresa representada + menú principal + "Generar Comprobantes"
+      await this.posicionarEnGenerarComprobantes(page, targetCuit, datos.razonSocialEmisor);
 
-      // 3. Consulta previa de padrón receptor
+      // 3. Consulta previa de padrón receptor (informativa, no bloquea)
       if (datos.receptor.nroDoc && datos.receptor.tipoDoc !== 'Consumidor Final') {
         const padron = await this.consultarPadronInPage(page, datos.receptor.tipoDoc, datos.receptor.nroDoc);
         if (padron.success && padron.razonSocial) {
-          datos.receptor.razonSocial = padron.razonSocial;
-          if (padron.domicilio && !datos.receptor.domicilio) {
-            datos.receptor.domicilio = padron.domicilio;
-          }
-          logger.info('FACTURACION-API', `Padrón receptor verificado: ${datos.receptor.razonSocial} (${datos.receptor.nroDoc})`);
+          datos.receptor.razonSocial = datos.receptor.razonSocial || padron.razonSocial;
+          if (padron.domicilio && !datos.receptor.domicilio) datos.receptor.domicilio = padron.domicilio;
+          logger.info('FACTURACION-API', `Padrón receptor: ${padron.razonSocial} (${datos.receptor.nroDoc})`);
         }
       }
 
-      // 4. Emisión asistida directa en Playwright (Interacción en DOM real de RCEL)
-      // Como el navegador ya está exactamente en https://fe.afip.gob.ar/rcel/jsp/buscarPtosVtas.do,
-      // interactuamos directamente con los campos HTML del formulario de ARCA.
-      logger.info('FACTURACION-API', 'Interactuando con el formulario de RCEL en el navegador...');
+      // 4. Asistente de RCEL
+      await this.paso1PuntoVentaYTipo(page, datos);
+      await this.paso2DatosEmision(page, datos);
+      await this.paso3DatosReceptor(page, datos);
+      await this.paso4Items(page, datos);
 
-      // PASO 1 EN DOM: Punto de venta y tipo de comprobante
-      const ptoVtaSelect = page.locator('select#puntoDeVenta, select[name="puntoDeVenta"]').first();
-      await ptoVtaSelect.waitFor({ state: 'visible', timeout: 10000 });
-      
-      // Seleccionar el punto de venta (buscar por valor o por texto que comience con el número)
-      const targetPtoVta = String(datos.puntoVenta);
-      await ptoVtaSelect.selectOption({ label: targetPtoVta }).catch(async () => {
-        // Fallback: seleccionar por valor o index
-        await ptoVtaSelect.selectOption(targetPtoVta).catch(async () => {
-          const opts = await ptoVtaSelect.locator('option').all();
-          for (const opt of opts) {
-            const val = await opt.getAttribute('value');
-            const txt = await opt.textContent();
-            if ((val && val.includes(targetPtoVta)) || (txt && txt.trim().startsWith(targetPtoVta))) {
-              await ptoVtaSelect.selectOption(val!);
-              break;
-            }
-          }
-        });
-      });
+      // 5. Confirmación doble (PUNTO DE NO RETORNO)
+      logger.info('FACTURACION-API', `Resumen de datos alcanzado: ${page.url()}. Confirmando...`);
+      await page.getByText('Confirmar Datos', { exact: false }).first().click({ timeout: 15000 });
+      await page.getByText('¿Confirma la Operación?', { exact: false }).first().waitFor({ state: 'visible', timeout: 15000 });
 
-      await page.waitForTimeout(500);
-
-      // Tipo de comprobante (select#tipoComprobante)
-      const tipoCompSelect = page.locator('select#tipoComprobante, select[name="tipoComprobante"]').first();
-      if (await tipoCompSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
-        const tipoCompId = this.mapTipoComprobanteId(datos.tipoComprobante);
-        await tipoCompSelect.selectOption(tipoCompId).catch(async () => {
-          await tipoCompSelect.selectOption({ label: datos.tipoComprobante }).catch(() => {});
-        });
-      }
-
-      await page.waitForTimeout(500);
-
-      // Clic en Continuar (Paso 1 -> Paso 2)
-      logger.info('FACTURACION-API', 'Avanzando a Datos de Emisión (Paso 2)...');
-      const btnPaso1 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').first();
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-        btnPaso1.click(),
-      ]);
-      await page.waitForTimeout(1000);
-      logger.info('FACTURACION-API', `URL tras Paso 1: ${page.url()}`);
-
-      // Verificar si hubo error en paso 1
-      let errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
-      if (errorPaso && errorPaso.trim()) {
-        throw new Error(`Error en Punto de Venta / Tipo de Comprobante: ${errorPaso.trim()}`);
-      }
-
-      // PASO 2 EN DOM: Conceptos a incluir y Fechas
-      logger.info('FACTURACION-API', 'Completando Datos de Emisión (Concepto y Fechas)...');
-      
-      // Registrar campos disponibles en el formulario de Paso 2 para asegurar que llenamos exactamente los inputs correctos
-      const formFields = await page.evaluate(`(() => {
-        const inputs = Array.from(document.querySelectorAll('input, select, textarea')).map(el => ({
-          tag: el.tagName.toLowerCase(),
-          id: el.id,
-          name: el.getAttribute('name') || '',
-          type: el.getAttribute('type') || '',
-          value: el.getAttribute('value') || ''
-        }));
-        return inputs;
-      })()`).catch(() => []);
-      logger.info('FACTURACION-API', `Inputs detectados en Paso 2: ${JSON.stringify((formFields as any[]).filter(f => f.type !== 'hidden'))}`);
-
-      // En el HTML real de RCEL:
-      // select id="idconcepto", name="idConcepto"
-      // options: 1 = Productos, 2 = Servicios, 3 = Productos y Servicios
-      // Seleccionar opción e invocar el handler onchange de ARCA
-      await page.evaluate(`((cId) => {
-        const sel = document.querySelector('select#idconcepto') || document.querySelector('select[name="idConcepto"]');
-        if (sel) {
-          sel.value = String(cId);
-          sel.dispatchEvent(new Event('change', { bubbles: true }));
-          if (typeof (sel as any).onchange === 'function') {
-            (sel as any).onchange();
-          }
-        }
-      })(${datos.concepto})`).catch(() => {});
-      await page.waitForTimeout(2000);
-
-      // Si existe el combo de actividad asociada (id="actiAsociadaId"), seleccionar la primera actividad válida disponible
-      await page.evaluate(`(() => {
-        const actiSel = document.querySelector('select#actiAsociadaId') || document.querySelector('select[name="actiAsociadaId"]');
-        if (actiSel && (actiSel as HTMLSelectElement).options.length > 1) {
-          (actiSel as HTMLSelectElement).selectedIndex = 1;
-          actiSel.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      })()`).catch(() => {});
-
-      // Fechas si son servicios (concepto 2 o 3)
-      // En el HTML real de RCEL:
-      // id="fsd", name="periodoFacturadoDesde"
-      // id="fsh", name="periodoFacturadoHasta"
-      // id="vencimientopago", name="vencimientoPago"
-      if (datos.concepto === 2 || datos.concepto === 3) {
-        const hoy = this.formatDateForRcel(datos.fechaEmision);
-        logger.info('FACTURACION-API', `Completando fechas de servicio: Desde/Hasta/Vto con fecha ${hoy}`);
-        
-        const fDesdeVal = datos.periodoDesde ? this.formatDateForRcel(datos.periodoDesde) : hoy;
-        const fHastaVal = datos.periodoHasta ? this.formatDateForRcel(datos.periodoHasta) : hoy;
-        const fVtoVal = datos.vencimientoPago ? this.formatDateForRcel(datos.vencimientoPago) : hoy;
-
-        await page.evaluate(`(({ d, h, v }) => {
-          const elD = document.querySelector('input#fsd') || document.querySelector('input[name="periodoFacturadoDesde"]');
-          if (elD) { (elD as HTMLInputElement).value = d; elD.dispatchEvent(new Event('change', { bubbles: true })); }
-          const elH = document.querySelector('input#fsh') || document.querySelector('input[name="periodoFacturadoHasta"]');
-          if (elH) { (elH as HTMLInputElement).value = h; elH.dispatchEvent(new Event('change', { bubbles: true })); }
-          const elV = document.querySelector('input#vencimientopago') || document.querySelector('input[name="vencimientoPago"]');
-          if (elV) { (elV as HTMLInputElement).value = v; elV.dispatchEvent(new Event('change', { bubbles: true })); }
-        })`, { d: fDesdeVal, h: fHastaVal, v: fVtoVal }).catch(() => {});
-      }
-
-      // Si hay fecha de comprobante editable (id="fc", name="fechaEmisionComprobante")
-      const valHoy = this.formatDateForRcel(datos.fechaEmision);
-      await page.evaluate(`((vh) => {
-        const elFc = document.querySelector('input#fc') || document.querySelector('input[name="fechaEmisionComprobante"]');
-        if (elFc && !(elFc as HTMLInputElement).value) {
-          (elFc as HTMLInputElement).value = vh;
-          elFc.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      })(${JSON.stringify(valHoy)})`).catch(() => {});
-
-      await page.waitForTimeout(1000);
-
-      // Clic en Continuar (Paso 2 -> Paso 3)
-      logger.info('FACTURACION-API', 'Avanzando a Datos del Receptor (Paso 3)...');
-      
-      const activePage = page;
-      await Promise.all([
-        activePage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
-        activePage.evaluate(`(() => {
-          const btn = Array.from(document.querySelectorAll('input[type="button"], input[type="submit"]')).find(b => (b as HTMLInputElement).value && (b as HTMLInputElement).value.includes('Continuar'));
-          if (btn) (btn as HTMLElement).click();
-          else {
-            const form = document.querySelector('form');
-            if (form) form.submit();
-          }
-        })()`).catch(() => {})
-      ]);
-      await activePage.waitForTimeout(2000);
-      logger.info('FACTURACION-API', `URL tras Paso 2: ${activePage.url()}`);
-
-      errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
-      if (errorPaso && errorPaso.trim()) {
-        throw new Error(`Error en Datos de Emisión: ${errorPaso.trim()}`);
-      }
-
-      // Si tras Paso 2 la URL sigue siendo genComDatosEmisor.do, registrar detalles y mensajes visibles
-      if (page.url().includes('genComDatosEmisor.do')) {
-        const bodySnippet = await page.evaluate(`(() => {
-          const alerts = Array.from(document.querySelectorAll('.alert, .mensajeError, .error, #errores, span.error, font[color="red"], .rf-msgs-sum')).map(e => e.textContent ? e.textContent.trim() : '').filter(Boolean);
-          const visibleTexts = document.body.innerText.split('\\n').map(s => s.trim()).filter(s => s.length > 5 && !s.includes('AFIP'));
-          return { alerts, sampleText: visibleTexts.slice(0, 20) };
-        })()`).catch(() => ({ alerts: [], sampleText: [] })) as any;
-        logger.error('FACTURACION-API', `Paso 2 no avanzó. Alertas: [${(bodySnippet.alerts || []).join(' | ')}]. Muestra: [${(bodySnippet.sampleText || []).join(' | ')}]`);
-        const alertMsg = (bodySnippet.alerts || []).join(' - ');
-        throw new Error(alertMsg || `AFIP no avanzó del Paso 2 (Datos de Emisión). Revise las fechas de facturación o concepto.`);
-      }
-
-      // PASO 3 EN DOM: Datos del Receptor
-      logger.info('FACTURACION-API', 'Completando Datos del Receptor y Condición de Venta...');
-      const condIvaSelect = page.locator('select#condicionIVA, select[name="condicionIVA"], select#idimptos').first();
-      if (await condIvaSelect.isVisible({ timeout: 5000 }).catch(() => false)) {
-        const condId = this.mapCondicionIvaId(datos.receptor.condicionIva);
-        await condIvaSelect.selectOption(condId);
-      }
-
-      if (datos.receptor.nroDoc && datos.receptor.tipoDoc !== 'Consumidor Final') {
-        const tipoDocSelect = page.locator('select#tipoDocReceptor, select[name="tipoDocReceptor"], select#idtipoDoc').first();
-        if (await tipoDocSelect.isVisible({ timeout: 2000 }).catch(() => false)) {
-          await tipoDocSelect.selectOption(this.mapTipoDocId(datos.receptor.tipoDoc));
-        }
-        const nroDocInput = page.locator('input#nroDocReceptor, input[name="nroDocReceptor"], input#nroDoc').first();
-        if (await nroDocInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-          await nroDocInput.fill(datos.receptor.nroDoc.replace(/\D/g, ''));
-          await page.keyboard.press('Tab');
-          await page.waitForTimeout(1200);
-        }
-      }
-
-      // Condición de venta (Contado por defecto)
-      const condVentaRadio = page.locator(`input[name="formaDePago"][value="${this.mapCondicionVentaId(datos.condicionVenta)}"], input#formaDePago1, input[value="Contado"], input[name="condicionVenta"]`).first();
-      if (await condVentaRadio.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await condVentaRadio.check().catch(() => {});
-      }
-
-      // Clic en Continuar (Paso 3 -> Paso 4)
-      logger.info('FACTURACION-API', 'Avanzando a Datos de la Operación / Ítems (Paso 4)...');
-      const btnPaso3 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').last();
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-        btnPaso3.click(),
-      ]);
-      await page.waitForTimeout(1000);
-      logger.info('FACTURACION-API', `URL tras Paso 3: ${page.url()}`);
-
-      errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
-      if (errorPaso && errorPaso.trim()) {
-        throw new Error(`Error en Datos del Receptor: ${errorPaso.trim()}`);
-      }
-
-      // PASO 4 EN DOM: Ítems
-      logger.info('FACTURACION-API', 'Completando detalle de producto o servicio...');
-      const item = datos.items[0] || { descripcion: 'Servicios Profesionales', cantidad: 1, precioUnitario: 100 };
-      
-      const descInput = page.locator('textarea#detalleDescripcion1, input#detalleDescripcion1, input[name="detalleDescripcion"], textarea[name="detalleDescripcion"]').first();
-      if (await descInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await descInput.fill(item.descripcion);
-      }
-
-      const cantInput = page.locator('input#detalleCantidad1, input[name="detalleCantidad"]').first();
-      if (await cantInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await cantInput.fill(String(item.cantidad || 1));
-      }
-
-      const precioInput = page.locator('input#detallePrecio1, input[name="detallePrecio"]').first();
-      if (await precioInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await precioInput.fill(String(item.precioUnitario || item.subtotal));
-      }
-
-      // Clic en Continuar (Paso 4 -> Resumen y Confirmación)
-      logger.info('FACTURACION-API', 'Avanzando al Resumen de Confirmación...');
-      const btnPaso4 = page.locator('input[value*="Continuar"], input#btnContinuar, button:has-text("Continuar")').last();
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-        btnPaso4.click(),
-      ]);
-      await page.waitForTimeout(1000);
-      logger.info('FACTURACION-API', `URL tras Paso 4: ${page.url()}`);
-
-      errorPaso = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
-      if (errorPaso && errorPaso.trim()) {
-        throw new Error(`Error en Ítems: ${errorPaso.trim()}`);
-      }
-
-      // PASO 5 EN DOM: Confirmar Comprobante
-      logger.info('FACTURACION-API', 'Revisando pantalla de Resumen antes de Confirmar...');
-      logger.info('FACTURACION-API', `URL en Resumen: ${page.url()}`);
-
-      // Registrar botones visibles para diagnóstico preciso
-      const allButtons = await page.locator('input[type="button"], input[type="submit"], button').all();
-      const buttonLabels: string[] = [];
-      for (const b of allButtons) {
-        const val = (await b.getAttribute('value')) || (await b.textContent()) || '';
-        if (val.trim()) buttonLabels.push(val.trim());
-      }
-      logger.info('FACTURACION-API', `Botones presentes en la pantalla de Resumen: [${buttonLabels.join(' | ')}]`);
-
-      // Selector exhaustivo para el botón de confirmación de RCEL / AFIP
-      const btnConfirmar = page.locator(`
-        input#btngenerar,
-        input#btnConfirmar,
-        input[value*="Confirmar Datos"],
-        input[value*="Confirmar"],
-        input[value*="Emitir"],
-        input[value*="Generar Comprobante"],
-        button:has-text("Confirmar"),
-        button:has-text("Emitir")
-      `).first();
-
-      if (!await btnConfirmar.isVisible({ timeout: 8000 }).catch(() => false)) {
-        // Inspeccionar si AFIP arrojó un mensaje de validación o bloqueo en el resumen
-        const pageText = await page.locator('#contenido, #main, body').textContent().catch(() => '');
-        const errorText = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
-        throw new Error(errorText?.trim() || `No se visualizó el botón de Confirmación. Botones encontrados: [${buttonLabels.join(', ')}]. Título: ${await page.title()}`);
-      }
-
-      // Manejar el alert/confirm de Javascript que ARCA suele mostrar: "¿Confirma la operación?"
+      // Por si además aparece un confirm() nativo
       page.once('dialog', async dialog => {
-        logger.info('FACTURACION-API', `Dialog detectado de ARCA: "${dialog.message()}". Aceptando...`);
+        logger.info('FACTURACION-API', `Dialog de ARCA: "${dialog.message()}". Aceptando...`);
         await dialog.accept().catch(() => {});
       });
+      confirmacionEnviada = true;
+      await page.getByText('Confirmar', { exact: true }).first().click({ timeout: 15000 });
+      await page.getByText('Comprobante Generado', { exact: false }).first().waitFor({ state: 'visible', timeout: 60000 });
+      logger.success('FACTURACION-API', 'ARCA confirmó: "Comprobante Generado".');
 
-      logger.info('FACTURACION-API', 'Presionando botón para autorizar el comprobante...');
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
-        btnConfirmar.click(),
-      ]);
-      await page.waitForTimeout(2000);
-
-      // PASO 6: Extraer CAE legítimo otorgado por ARCA
-      const bodyHtml = await page.content();
-      const caeMatch = bodyHtml.match(/CAE\s*(?:N[:°º]?)?\s*[:\.]?\s*<b>(\d{14})<\/b>/i) ||
-                       bodyHtml.match(/<b>(\d{14})<\/b>/) ||
-                       bodyHtml.match(/(\d{14})/);
-      const vtoMatch = bodyHtml.match(/Fecha\s*de\s*Vto\.?\s*(?:de\s*CAE)?\s*[:\.]?\s*<b>(\d{2}\/\d{2}\/\d{4})<\/b>/i) ||
-                       bodyHtml.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const nroMatch = bodyHtml.match(/N[º°:]?\s*<b>(\d{1,8})<\/b>/i) ||
-                       bodyHtml.match(/Comprobante\s*Generado.*?(\d{8})/i);
-
-      if (!caeMatch) {
-        const errorFinal = await page.locator('.mensajeError, .error, #errores, .alert-danger').textContent().catch(() => null);
-        throw new Error(errorFinal?.trim() || 'ARCA no devolvió un CAE válido tras confirmar la emisión.');
-      }
-
-      const cae = caeMatch[1];
+      // 6. Datos del comprobante generado (best effort: el comprobante YA está emitido)
+      const textoPagina = (await page.locator('body').innerText().catch(() => '')) || '';
+      const caeMatch = textoPagina.match(/C\.?A\.?E\.?[^0-9]{0,80}?(\d{14})(?!\d)/i);
+      const vtoMatch = textoPagina.match(/V(?:enc|to)[^0-9]{0,80}?(\d{2}\/\d{2}\/\d{4})/i);
+      const cae = caeMatch ? caeMatch[1] : '';
       const caeVencimiento = vtoMatch ? vtoMatch[1] : '';
-      const comprobanteNro = nroMatch ? nroMatch[1] : '00000001';
+      if (!cae) logger.warn('FACTURACION-API', 'El comprobante se generó pero no pude leer el CAE en pantalla (queda en el PDF).');
 
-      logger.success('FACTURACION-API', `¡CAE Autorizado por ARCA!: ${cae} - Vto: ${caeVencimiento} - Comp N°: ${comprobanteNro}`);
-
-      const resultadoEmision = {
-        success: true,
-        cae,
-        caeVencimiento,
-        comprobanteNumero: comprobanteNro,
-        pdfBase64: null as string | null,
-      };
-
-      // PASO 7: Descarga de PDF si el botón "Imprimir" está disponible
+      // 7. PDF: "Imprimir" descarga {cuit}_{tipo}_{numero}.pdf -> de ahí sale el número
+      let pdfBase64: string | null = null;
+      let numeroComprobante = '';
       try {
-        const btnImprimir = page.locator('input[value*="Imprimir"], a:has-text("Imprimir"), button:has-text("Imprimir")').first();
-        if (await btnImprimir.isVisible({ timeout: 3000 }).catch(() => false)) {
-          const [download] = await Promise.all([
-            page.waitForEvent('download', { timeout: 10000 }).catch(() => null),
-            btnImprimir.click().catch(() => {}),
-          ]);
-          if (download) {
-            const stream = await download.createReadStream();
-            if (stream) {
-              const chunks: Buffer[] = [];
-              for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-              resultadoEmision.pdfBase64 = Buffer.concat(chunks).toString('base64');
-            }
-          }
+        const [download] = await Promise.all([
+          page.waitForEvent('download', { timeout: 20000 }),
+          page.getByText('Imprimir', { exact: false }).first().click({ timeout: 10000 }),
+        ]);
+        const m = download.suggestedFilename().match(/_(\d+)\.pdf$/i);
+        if (m) numeroComprobante = m[1].padStart(8, '0');
+        const stream = await download.createReadStream();
+        if (stream) {
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+          pdfBase64 = Buffer.concat(chunks).toString('base64');
         }
       } catch (errPdf: any) {
-        logger.warn('FACTURACION-API', `No se pudo descargar PDF directamente: ${errPdf.message}`);
+        logger.warn('FACTURACION-API', `No se pudo descargar el PDF: ${errPdf.message}`);
       }
+      if (!numeroComprobante) logger.warn('FACTURACION-API', 'No pude obtener el número de comprobante (revisalo en ARCA).');
 
-      // 5. Gestión del PDF generado en memoria
-      let publicPdfUrl = '';
+      // Volver al menú principal para la próxima factura (ARCA no vuelve sola)
+      await page.getByText('Menú Principal', { exact: false }).first().click({ timeout: 5000 }).catch(() => {});
+
+      const numeroFormateado = `${String(datos.puntoVenta).padStart(4, '0')}-${numeroComprobante || 'S/N'}`;
+      logger.success('FACTURACION-API', `Comprobante ${numeroFormateado} emitido. CAE: ${cae || '(no leído)'} Vto: ${caeVencimiento || '-'}`);
+
       const total = datos.items.reduce((acc, curr) => acc + (curr.cantidad * curr.precioUnitario), 0);
-      const numeroFormateado = `0000${datos.puntoVenta}`.slice(-4) + `-${resultadoEmision.comprobanteNumero}`;
 
-      if (resultadoEmision.pdfBase64) {
+      // 8. Guardar PDF en Storage
+      let publicPdfUrl = '';
+      if (pdfBase64) {
         const filename = `factura_${targetCuit}_${numeroFormateado}.pdf`;
         try {
           const uploadRes = await storageService.uploadAttachment({
             filename,
-            base64: resultadoEmision.pdfBase64,
+            base64: pdfBase64,
             contentType: 'application/pdf',
             cuit: targetCuit,
             isPublic: true,
@@ -616,9 +430,9 @@ class FacturacionInternalApiModule {
         }
       }
 
-      // 6. Despacho por correo electrónico al cliente si se especificó email
+      // 9. Envío por mail al cliente si hay email
       let emailEnviado = false;
-      if (datos.receptor.email && (publicPdfUrl || resultadoEmision.pdfBase64)) {
+      if (datos.receptor.email && (publicPdfUrl || pdfBase64)) {
         try {
           const mailRes = await mailService.sendMail({
             to: datos.receptor.email,
@@ -631,7 +445,7 @@ class FacturacionInternalApiModule {
                 <ul>
                   <li><strong>Tipo:</strong> ${datos.tipoComprobante}</li>
                   <li><strong>Número:</strong> ${numeroFormateado}</li>
-                  <li><strong>CAE:</strong> ${resultadoEmision.cae} (Vto: ${resultadoEmision.caeVencimiento})</li>
+                  ${cae ? `<li><strong>CAE:</strong> ${cae}${caeVencimiento ? ` (Vto: ${caeVencimiento})` : ''}</li>` : ''}
                   <li><strong>Importe Total:</strong> $${total.toFixed(2)}</li>
                 </ul>
                 <p>Adjuntamos el documento digital correspondiente.</p>
@@ -640,18 +454,16 @@ class FacturacionInternalApiModule {
             attachments: [
               {
                 filename: `${numeroFormateado}.pdf`,
-                content: resultadoEmision.pdfBase64 || undefined,
+                content: pdfBase64 || undefined,
                 path: publicPdfUrl || undefined,
                 contentType: 'application/pdf',
               }
             ],
           });
           emailEnviado = mailRes.success;
-          if (emailEnviado) {
-            logger.success('FACTURACION-API', `Comprobante despachado a ${datos.receptor.email} con éxito.`);
-          }
+          if (emailEnviado) logger.success('FACTURACION-API', `Comprobante enviado a ${datos.receptor.email}.`);
         } catch (err: any) {
-          logger.warn('FACTURACION-API', `Aviso al despachar correo a cliente: ${err.message}`);
+          logger.warn('FACTURACION-API', `Aviso al enviar correo al cliente: ${err.message}`);
         }
       }
 
@@ -661,29 +473,325 @@ class FacturacionInternalApiModule {
 
       return {
         success: true,
-        message: 'Comprobante emitido con éxito por API interna de ARCA',
-        cae: resultadoEmision.cae,
-        caeVencimiento: resultadoEmision.caeVencimiento,
+        message: cae
+          ? 'Comprobante emitido en ARCA'
+          : 'Comprobante emitido en ARCA (no se pudo leer el CAE en pantalla: verificalo en el PDF o en "Consultas" de RCEL)',
+        cae: cae || undefined,
+        caeVencimiento: caeVencimiento || undefined,
         comprobanteNro: numeroFormateado,
         puntoVenta: datos.puntoVenta,
         tipoComprobante: datos.tipoComprobante,
         totalImporte: total,
         fechaEmision: datos.fechaEmision || new Date().toISOString().split('T')[0],
         pdfUrl: publicPdfUrl || undefined,
-        pdfBufferBase64: resultadoEmision.pdfBase64 || undefined,
+        pdfBufferBase64: pdfBase64 || undefined,
         emailEnviado,
       };
 
     } catch (err: any) {
-      logger.error('FACTURACION-API', `Fallo técnico en llamada de API interna: ${err.message}`);
+      logger.error('FACTURACION-API', `Fallo en la emisión: ${err.message}`);
+      const urlActual = page && !page.isClosed() ? page.url() : '?';
       if (createdPageLocally && page) {
         await page.close().catch(() => {});
+      } else if (page && !page.isClosed() && !confirmacionEnviada) {
+        // Dejar RCEL en el menú principal para que el próximo intento arranque limpio
+        await page.goto(URL_RCEL_MENU, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      }
+      if (confirmacionEnviada) {
+        return {
+          success: false,
+          message: `ATENCIÓN: se presionó "Confirmar" en ARCA pero no se pudo verificar el resultado (${err.message}). ` +
+            'El comprobante PUEDE haber quedado emitido: revisá "Consultas" en Comprobantes en línea antes de reintentar, para no duplicarlo.',
+        };
       }
       return {
         success: false,
-        message: `Error en API interna de ARCA: ${err.message}`,
+        message: `No se emitió el comprobante: ${err.message} (URL: ${urlActual})`,
       };
     }
+  }
+
+  /** Lleva la página a RCEL: si no está, abre "Comprobantes en línea" desde el portal de ARCA. */
+  private async abrirRcel(page: Page): Promise<Page> {
+    if (page.url().includes('fe.afip.gob.ar')) return page;
+
+    const yaAbierta = page.context().pages().find(p => !p.isClosed() && p.url().includes('fe.afip.gob.ar'));
+    if (yaAbierta) return yaAbierta;
+
+    logger.info('FACTURACION-API', 'Abriendo "Comprobantes en línea" desde el portal de ARCA...');
+    if (!page.url().includes('portalcf.cloud.afip.gob.ar')) {
+      await page.goto('https://portalcf.cloud.afip.gob.ar/portal/app/', { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2000);
+    }
+    if (page.url().includes('auth.afip.gob.ar')) {
+      throw new Error('La sesión de ARCA expiró (el portal redirigió al login).');
+    }
+
+    // Buscador de servicios del portal (selectores confirmados en ARCABOT primero)
+    const buscador = page.locator('#buscador, input.rbt-input-main, #buscadorServicios, input[placeholder*="Buscar" i], input[placeholder*="servicio" i], input[type="search"], input[aria-label*="Buscar" i]').first();
+    if (await buscador.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await buscador.click();
+      await buscador.fill('');
+      await buscador.type('COMPROBANTES EN LINEA', { delay: 40 });
+      await page.waitForTimeout(1000);
+    } else {
+      logger.warn('FACTURACION-API', 'No encontré el buscador del portal; busco el enlace directo.');
+    }
+
+    const regexServicio = /Comprobantes en l[ií]nea/i;
+    const candidatos = [
+      page.locator('.rbt-menu .dropdown-item, .dropdown-menu .dropdown-item').filter({ hasText: regexServicio }),
+      page.locator('a, button, div, span').filter({ hasText: regexServicio }),
+    ];
+
+    let rcel: Page | null = null;
+    for (const loc of candidatos) {
+      const opcion = loc.first();
+      if (!(await opcion.isVisible({ timeout: 3000 }).catch(() => false))) continue;
+      const [nueva] = await Promise.all([
+        page.context().waitForEvent('page', { timeout: 10000 }).catch(() => null),
+        opcion.click().catch(() => {}),
+      ]);
+      rcel = nueva || page.context().pages().find(p => p.url().includes('fe.afip.gob.ar')) || null;
+      if (rcel) break;
+    }
+    if (!rcel && page.url().includes('fe.afip.gob.ar')) rcel = page;
+    if (!rcel) {
+      throw new Error('No se pudo abrir "Comprobantes en línea" desde el portal de ARCA. Verificá que el servicio esté habilitado para este CUIT.');
+    }
+    await rcel.waitForLoadState('load', { timeout: 15000 }).catch(() => {});
+    logger.info('FACTURACION-API', `RCEL abierto: ${rcel.url()}`);
+    return rcel;
+  }
+
+  private async estaEnSeleccionEmpresa(page: Page): Promise<boolean> {
+    const url = page.url().toLowerCase();
+    if (url.includes('index_bis') || url.includes('index_relacion') || url.includes('/rcel/jsp/index')) return true;
+    if ((await page.locator('input.btn_empresa, input.btn_empresa_padre').count().catch(() => 0)) > 0) return true;
+    return (await page.getByText('Seleccione la Empresa a representar', { exact: false }).count().catch(() => 0)) > 0;
+  }
+
+  /**
+   * Pantalla "Seleccione la Empresa a representar". Igual que ARCABOT: si hay una sola
+   * empresa se elige; si hay varias se busca por razón social y después por CUIT.
+   * Si no hay coincidencia segura NO se adivina (antes se tomaba la primera = riesgo de
+   * facturar con otro emisor).
+   */
+  private async seleccionarEmpresaRepresentada(page: Page, cuit: string, razonSocial?: string) {
+    logger.info('FACTURACION-API', 'Pantalla de selección de empresa representada detectada.');
+    await page.waitForSelector('input.btn_empresa, input.btn_empresa_padre, input[type="button"], input[type="submit"], button', { timeout: 8000 }).catch(() => {});
+
+    const excluidas = new Set(['volver', 'salir', 'ayuda', 'cerrar', 'cancelar']);
+    const botones: Array<{ loc: Locator; texto: string; html: string }> = [];
+    for (const b of await page.locator('input.btn_empresa, input.btn_empresa_padre, input[type="button"], input[type="submit"], button').all()) {
+      const texto = ((await b.getAttribute('value').catch(() => null)) || (await b.textContent().catch(() => null)) || '').trim();
+      if (!texto || excluidas.has(texto.toLowerCase())) continue;
+      const html = await b.evaluate((el: any) => String(el.outerHTML || '')).catch(() => '');
+      botones.push({ loc: b, texto, html });
+    }
+    if (botones.length === 0) {
+      throw new Error('No encontré empresas para representar en "Comprobantes en línea".');
+    }
+
+    let elegido = botones.length === 1 ? botones[0] : undefined;
+
+    if (!elegido && razonSocial) {
+      const rs = normalizarTexto(razonSocial);
+      elegido = botones.find(b => normalizarTexto(b.texto) === rs)
+        || botones.find(b => normalizarTexto(b.texto).includes(rs) || rs.includes(normalizarTexto(b.texto)));
+    }
+    if (!elegido && cuit) {
+      elegido = botones.find(b => b.texto.replace(/\D/g, '').includes(cuit) || b.html.replace(/-/g, '').includes(cuit));
+    }
+    if (!elegido) {
+      const disponibles = botones.map(b => `"${b.texto}"`).join(', ');
+      throw new Error(`Hay varias empresas para representar (${disponibles}) y ninguna coincide con CUIT ${cuit}${razonSocial ? ` / "${razonSocial}"` : ''}. Revisá la razón social cargada en la cuenta.`);
+    }
+
+    logger.info('FACTURACION-API', `Seleccionando empresa representada: "${elegido.texto}"`);
+    await elegido.loc.click({ timeout: 8000 }).catch(async () => {
+      await elegido!.loc.dispatchEvent('click');
+    });
+    await page.getByText('Generar Comprobantes', { exact: false }).first().waitFor({ state: 'visible', timeout: 20000 });
+    empresaPorPagina.set(page, cuit);
+  }
+
+  /** Deja la página en "Punto de venta y tipo de comprobante" (buscarPtosVtas.do). */
+  private async posicionarEnGenerarComprobantes(page: Page, cuit: string, razonSocial?: string) {
+    // Si en esta página ya se eligió OTRA empresa, volver a la pantalla de selección
+    const anterior = empresaPorPagina.get(page);
+    if (anterior && cuit && anterior !== cuit) {
+      logger.info('FACTURACION-API', `Cambio de CUIT emisor (${anterior} -> ${cuit}). Volviendo a elegir empresa...`);
+      await page.goto(URL_RCEL_EMPRESAS, { waitUntil: 'domcontentloaded' });
+    }
+
+    if (await this.estaEnSeleccionEmpresa(page)) {
+      await this.seleccionarEmpresaRepresentada(page, cuit, razonSocial);
+    }
+
+    if (page.url().includes('buscarPtosVtas.do')) return;
+
+    let btnGenerar = page.getByText('Generar Comprobantes', { exact: false }).first();
+    if (!(await btnGenerar.isVisible({ timeout: 3000 }).catch(() => false))) {
+      // Quedó en una pantalla intermedia (ej. una factura anterior que falló a mitad): ir al menú
+      logger.info('FACTURACION-API', `RCEL no está en el menú principal (${page.url()}). Navegando al menú...`);
+      await page.goto(URL_RCEL_MENU, { waitUntil: 'domcontentloaded' });
+      if (await this.estaEnSeleccionEmpresa(page)) {
+        await this.seleccionarEmpresaRepresentada(page, cuit, razonSocial);
+      }
+      btnGenerar = page.getByText('Generar Comprobantes', { exact: false }).first();
+    }
+    await btnGenerar.waitFor({ state: 'visible', timeout: 15000 });
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'load', timeout: 30000 }),
+      btnGenerar.click(),
+    ]);
+    logger.info('FACTURACION-API', `En "Generar Comprobantes": ${page.url()}`);
+  }
+
+  /** Paso 1 (buscarPtosVtas.do): punto de venta y tipo de comprobante. */
+  private async paso1PuntoVentaYTipo(page: Page, datos: FacturaRequest) {
+    // El panel manda "1"; ARCA muestra la opción como "00001-Domicilio..."
+    const pv = String(datos.puntoVenta).padStart(5, '0');
+    const elegido = await seleccionarPorLabel(selectDespuesDe(page, 'Punto de Ventas a utilizar'), [pv], { prefijo: true });
+    logger.info('FACTURACION-API', `Punto de venta: ${elegido}`);
+
+    await seleccionarPorLabel(selectDespuesDe(page, 'Tipo de Comprobante'), [datos.tipoComprobante]);
+    await clickContinuar(page, 'Paso 1 (Punto de venta / Tipo de comprobante)');
+  }
+
+  /** Paso 2 (genComDatosEmisor.do): concepto. Las fechas las autocompleta ARCA. */
+  private async paso2DatosEmision(page: Page, datos: FacturaRequest) {
+    await seleccionarPorLabel(selectDespuesDe(page, 'Conceptos a incluír'), [CONCEPTO_LABEL[datos.concepto]]); // tilde real de ARCA
+    await page.waitForTimeout(800); // el onchange de ARCA muestra/oculta los campos de servicios
+
+    // Actividad asociada: solo si ARCA la muestra y está vacía (contribuyentes con varias actividades)
+    const actividad = page.locator('select#actiAsociadaId, select[name="actiAsociadaId"]').first();
+    if (await actividad.isVisible({ timeout: 1500 }).catch(() => false)) {
+      const actual = await actividad.inputValue().catch(() => '');
+      if (!actual) {
+        const opciones = await actividad.locator('option').evaluateAll((els: any[]) => els.map(e => String(e.value || '')));
+        const idx = opciones.findIndex(v => v.trim() !== '');
+        if (idx !== -1) {
+          await actividad.selectOption({ index: idx });
+          logger.info('FACTURACION-API', `Actividad asociada seleccionada: ${opciones[idx]}`);
+        }
+      }
+    }
+
+    // Solo pisar las fechas que ARCA autocompleta si la factura trae fechas explícitas
+    if (datos.fechaEmision) {
+      await setFecha(page, 'input#fc, input[name="fechaEmisionComprobante"]', this.formatDateForRcel(datos.fechaEmision));
+    }
+    if (datos.concepto === 2 || datos.concepto === 3) {
+      if (datos.periodoDesde) await setFecha(page, 'input#fsd, input[name="periodoFacturadoDesde"]', this.formatDateForRcel(datos.periodoDesde));
+      if (datos.periodoHasta) await setFecha(page, 'input#fsh, input[name="periodoFacturadoHasta"]', this.formatDateForRcel(datos.periodoHasta));
+      if (datos.vencimientoPago) await setFecha(page, 'input#vencimientopago, input[name="vencimientoPago"]', this.formatDateForRcel(datos.vencimientoPago));
+    }
+
+    await clickContinuar(page, 'Paso 2 (Datos de emisión)');
+  }
+
+  /**
+   * A veces, después de escribir el documento del receptor, ARCA abre su propio pop-up
+   * "Confirmación de datos" con la persona encontrada. Hay que aceptarlo para que se
+   * complete el nombre (comportamiento confirmado en vivo en ARCABOT).
+   */
+  private async confirmarDatosReceptorSiAparece(page: Page) {
+    const titulo = page.getByText('Confirmación de datos', { exact: false }).first();
+    if (!(await titulo.isVisible({ timeout: 2000 }).catch(() => false))) return;
+    await page.getByText('Aceptar', { exact: true }).first().click({ timeout: 2000 });
+    await titulo.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    logger.info('FACTURACION-API', 'ARCA pidió confirmar los datos del receptor: aceptado.');
+  }
+
+  /** Paso 3 (genComDatosReceptor.do): condición IVA, documento, domicilio y condición de venta. */
+  private async paso3DatosReceptor(page: Page, datos: FacturaRequest) {
+    const condKey = normalizarTexto(datos.receptor.condicionIva || 'Consumidor Final');
+    const candidatosIva = Object.entries(CONDICION_IVA_ARCA).find(([k]) => condKey.includes(k))?.[1]
+      || [datos.receptor.condicionIva];
+    await seleccionarPorLabel(selectDespuesDe(page, 'Condición frente al IVA'), candidatosIva, { permitirContiene: true });
+
+    const nroDoc = String(datos.receptor.nroDoc || '').replace(/\D/g, '');
+    const conDocumento = !!nroDoc && datos.receptor.tipoDoc !== 'Consumidor Final' && datos.receptor.tipoDoc !== 'Sin Identificar';
+    const inputNombre = inputDespuesDe(page, 'A. y Nombre o Razón Social');
+
+    if (conDocumento) {
+      const selectTipoDoc = selectDespuesDe(page, 'Tipo y Nro. de Documento');
+      await seleccionarPorLabel(selectTipoDoc, [datos.receptor.tipoDoc]);
+      const inputNroDoc = selectTipoDoc.locator('xpath=following::input[1]');
+      await inputNroDoc.fill(nroDoc);
+      await inputNroDoc.press('Tab'); // dispara el autocompletado de ARCA
+      await page.waitForTimeout(1000);
+      await this.confirmarDatosReceptorSiAparece(page);
+
+      const nombreArca = ((await inputNombre.inputValue().catch(() => '')) || '').trim();
+      logger.info('FACTURACION-API', `ARCA devolvió para ${datos.receptor.tipoDoc} ${nroDoc}: "${nombreArca || '(vacío)'}"`);
+      if (!nombreArca && datos.receptor.razonSocial && (await inputNombre.isEditable().catch(() => false))) {
+        await inputNombre.fill(datos.receptor.razonSocial);
+      }
+    } else if (datos.receptor.razonSocial && (await inputNombre.isEditable({ timeout: 1000 }).catch(() => false))) {
+      await inputNombre.fill(datos.receptor.razonSocial);
+    }
+
+    // "Domicilio Comercial": hay un <select> oculto antes del input real. Si ARCA lo
+    // autocompletó desde el padrón queda readonly y no se toca.
+    if (datos.receptor.domicilio) {
+      const inputDomicilio = inputDespuesDe(page, 'Domicilio Comercial');
+      if ((await inputDomicilio.count()) && (await inputDomicilio.getAttribute('readonly')) === null) {
+        await inputDomicilio.fill(datos.receptor.domicilio);
+      }
+    }
+
+    // Condiciones de venta: son CHECKBOXES, el que está antes del texto de la opción
+    const condicionVenta = datos.condicionVenta || 'Contado';
+    const checkVenta = page.getByText(condicionVenta, { exact: false }).first().locator("xpath=preceding::input[@type='checkbox'][1]");
+    await checkVenta.check({ timeout: 5000 });
+
+    await this.completarComprobanteAsociado(page, datos);
+    await clickContinuar(page, 'Paso 3 (Datos del receptor)');
+  }
+
+  /** Comprobante asociado (Notas de Crédito/Débito). Selectores confirmados en ARCABOT. */
+  private async completarComprobanteAsociado(page: Page, datos: FacturaRequest) {
+    const asociado = datos.comprobanteAsociado;
+    if (!asociado || !String(asociado.numero || '').trim()) return;
+    await seleccionarPorLabel(page.locator('select[name="cmpAsociadoTipo"]'), [asociado.tipo]);
+    // Pto. Vta. con 5 dígitos (maxlength=5 y validador de ARCA)
+    await page.locator('input[name="cmpAsociadoPtoVta"]').fill(String(asociado.puntoVenta).padStart(5, '0'));
+    await page.locator('input[name="cmpAsociadoNro"]').fill(String(asociado.numero).trim());
+  }
+
+  /** Paso 4 (genComDatosOperacion.do): un ítem, ubicado por el `name` real de cada campo. */
+  private async paso4Items(page: Page, datos: FacturaRequest) {
+    const item = datos.items[0];
+    // La fila de carga es la que está justo antes de "Agregar línea descripción"
+    const fila = page.getByText('Agregar línea descripción', { exact: false }).first().locator('xpath=preceding::tr[1]');
+
+    await fila.locator('[name="detalleDescripcion"]').fill(String(item.descripcion));
+    await fila.locator('[name="detalleCantidad"]').fill(String(item.cantidad || 1));
+    const medida = fila.locator('[name="detalleMedida"]');
+    if (await medida.count()) {
+      await seleccionarPorLabel(medida, [item.unidadMedida || 'unidades']);
+    }
+    await fila.locator('[name="detallePrecio"]').fill(String(item.precioUnitario));
+
+    // Alícuota IVA: solo existe como <select> en comprobantes que discriminan IVA (A/B)
+    const alicuota = fila.locator('[name="detalleTipoIVA"]');
+    if (await alicuota.count()) {
+      await seleccionarPorLabel(alicuota, [this.labelAlicuotaIva(item.alicuotaIva ?? '21')]);
+    }
+
+    await clickContinuar(page, 'Paso 4 (Ítems)');
+  }
+
+  private labelAlicuotaIva(valor: string | number): string {
+    const texto = String(valor).trim().toLowerCase().replace(/%$/, '').trim();
+    if (ALICUOTAS_IVA[texto]) return ALICUOTAS_IVA[texto];
+    const num = parseFloat(texto.replace(',', '.'));
+    if (!isNaN(num) && ALICUOTAS_IVA[String(num)]) return ALICUOTAS_IVA[String(num)];
+    throw new Error(`Alícuota de IVA "${valor}" no reconocida.`);
   }
 
   private formatDateForRcel(d?: string): string {
@@ -700,56 +808,6 @@ class FacturacionInternalApiModule {
       return `${dd}/${mm}/${yyyy}`;
     }
     return d;
-  }
-
-  private mapTipoComprobanteId(tipo: string): string {
-    const map: Record<string, string> = {
-      'Factura A': '1',
-      'Nota de Débito A': '2',
-      'Nota de Crédito A': '3',
-      'Factura B': '6',
-      'Nota de Débito B': '7',
-      'Nota de Crédito B': '8',
-      'Factura C': '11',
-      'Nota de Débito C': '12',
-      'Nota de Crédito C': '13',
-      'Recibo C': '15',
-    };
-    return map[tipo] || '11';
-  }
-
-  private mapCondicionIvaId(condicion: string): string {
-    const clean = (condicion || '').toLowerCase();
-    if (clean.includes('inscripto')) return '1';
-    if (clean.includes('exento')) return '4';
-    if (clean.includes('consumidor') || clean.includes('final')) return '5';
-    if (clean.includes('monotribut')) return '6';
-    return '5';
-  }
-
-  private mapTipoDocId(tipoDoc: string): string {
-    const map: Record<string, string> = {
-      'CUIT': '80',
-      'CUIL': '86',
-      'CDI': '87',
-      'DNI': '96',
-      'Pasaporte': '94',
-      'Consumidor Final': '99',
-    };
-    return map[tipoDoc] || '80';
-  }
-
-  private mapCondicionVentaId(condicion: string): string {
-    const map: Record<string, string> = {
-      'Contado': '1',
-      'Tarjeta de Débito': '2',
-      'Tarjeta de Crédito': '3',
-      'Cuenta Corriente': '4',
-      'Cheque': '5',
-      'Transferencia': '6',
-      'Otra': '7',
-    };
-    return map[condicion] || '1';
   }
 }
 

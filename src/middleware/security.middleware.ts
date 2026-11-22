@@ -94,7 +94,7 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
   // Directivas CSP compatibles con Tailwind CDN, FontAwesome, Google Fonts y conexiones API
   const cspDirectives = [
     "default-src 'self' https://*.onrender.com http://localhost:*",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com",
+    "script-src 'self'",
     "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com",
     "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:",
     "img-src 'self' data: https: blob:",

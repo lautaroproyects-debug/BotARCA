@@ -1,1213 +1,559 @@
 <!DOCTYPE html>
-<html lang="es" class="h-full">
+<html lang="es-AR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BotArca - Facturación Inteligente y Automática en ARCA</title>
-  
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#faf8f4">
+  <meta name="description" content="BotArca: facturación electrónica ARCA desde la compu o el celular.">
+  <title>BotArca · Facturación</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='3' fill='%2317181a'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='20' text-anchor='middle' fill='%23e8590c'%3EB%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <!-- FontAwesome 6 -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="css/style.css">
-
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'monospace'],
-          },
-          colors: {
-            brand: {
-              50: '#eef2ff',
-              100: '#e0e7ff',
-              500: '#6366f1',
-              600: '#4f46e5',
-              700: '#4338ca',
-            }
-          }
-        }
-      }
-    }
-  </script>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
 </head>
-<body class="bg-[#f8fafc] text-slate-900 min-h-full font-sans antialiased flex flex-col selection:bg-indigo-500 selection:text-white">
+<body>
+  <!-- Iconos (trazo 1.6, misma familia visual) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-factura" viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M15 3v3h3M9 10h6M9 14h6M9 18h3"/></symbol>
+    <symbol id="i-archivo" viewBox="0 0 24 24"><path d="M3 6h18v4H3zM5 10v10h14V10M10 14h4"/></symbol>
+    <symbol id="i-ajustes" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+    <symbol id="i-buscar" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-mas" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-alerta" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17.2v.3"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8v.2"/></symbol>
+    <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M12 10v6m0 0-2.5-2.5M12 16l2.5-2.5"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="1"/><path d="m3.5 6.5 8.5 6.5 8.5-6.5"/></symbol>
+    <symbol id="i-basura" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/></symbol>
+    <symbol id="i-chispa" viewBox="0 0 24 24"><path d="M12 3.5 13.8 10 20.5 12 13.8 14 12 20.5 10.2 14 3.5 12 10.2 10z"/></symbol>
+    <symbol id="i-enchufe" viewBox="0 0 24 24"><path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></symbol>
+    <symbol id="i-salir" viewBox="0 0 24 24"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/></symbol>
+    <symbol id="i-cola" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
+    <symbol id="i-lapiz" viewBox="0 0 24 24"><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17z"/></symbol>
+    <symbol id="i-ojo" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12"/><circle cx="12" cy="12" r="2.8"/></symbol>
+  </svg>
 
-  <!-- LOGIN & REGISTRATION MODAL OVERLAY -->
-  <div id="loginOverlay" class="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 transition-all">
-    <div class="bg-white max-w-md w-full p-8 rounded-2xl shadow-2xl space-y-6 border border-slate-100">
-      
-      <!-- Brand Header -->
-      <div class="text-center space-y-2">
-        <div class="w-12 h-12 mx-auto rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xl shadow-lg shadow-indigo-200">
-          <i class="fa-solid fa-bolt"></i>
-        </div>
-        <h2 class="text-2xl font-extrabold tracking-tight text-slate-900">BotArca</h2>
-        <p class="text-sm text-slate-500">Sistema de Facturación Automática e Inteligente en ARCA</p>
-      </div>
+  <!-- ===================== INGRESO ===================== -->
+  <main id="vistaIngreso" class="ingreso oculto">
+    <div class="caja">
+      <span class="marca">Bot<b>Arca</b></span>
+      <p class="lema">Facturación electrónica de ARCA, desde la compu o el celular.</p>
 
-      <!-- Auth Mode Tabs -->
-      <div class="flex bg-slate-100 p-1 rounded-xl text-sm font-semibold">
-        <button type="button" id="tabBtnLogin" onclick="switchAuthMode('login')" class="flex-1 py-2 rounded-lg font-bold text-indigo-700 bg-white shadow-sm transition">
-          <i class="fa-solid fa-right-to-bracket mr-1.5"></i> Iniciar Sesión
-        </button>
-        <button type="button" id="tabBtnRegister" onclick="switchAuthMode('register')" class="flex-1 py-2 rounded-lg font-bold text-slate-600 hover:text-slate-900 transition">
-          <i class="fa-solid fa-user-plus mr-1.5"></i> Crear Cuenta
-        </button>
-      </div>
-
-      <!-- High-Contrast Inline Alert Message for Auth Errors -->
-      <div id="authAlert" class="hidden p-3.5 rounded-xl text-xs font-bold border flex items-start space-x-2.5 transition-all"></div>
-
-      <!-- Login Form -->
-      <form id="loginForm" onsubmit="handleUserLogin(event)" class="space-y-4">
+      <form id="formIngreso" novalidate>
+        <h1 class="sr">Ingresar</h1>
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Usuario o Correo Electrónico</label>
-          <input type="text" id="loginUsername" class="input-field" placeholder="ej: admin o tu@email.com" required autofocus>
+          <label for="ingUsuario">Usuario o email</label>
+          <input id="ingUsuario" autocomplete="username" required>
         </div>
-
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Contraseña</label>
-          <input type="password" id="loginPassword" class="input-field" placeholder="••••••••" required>
+          <label for="ingClave">Contraseña</label>
+          <input id="ingClave" type="password" autocomplete="current-password" required>
         </div>
-
-        <button type="submit" id="btnLoginSubmit" class="btn-primary w-full !py-3 text-base mt-2">
-          <span>Ingresar a la Plataforma</span>
-          <i class="fa-solid fa-arrow-right text-xs"></i>
-        </button>
-
-        <!-- Default Credentials Quick Access -->
-        <div class="p-3 bg-indigo-50/80 border border-indigo-100 rounded-xl text-xs space-y-1.5 text-indigo-950">
-          <div class="flex items-center justify-between">
-            <span class="font-bold flex items-center gap-1.5 text-indigo-900"><i class="fa-solid fa-lightbulb text-amber-500"></i> Usuario de acceso:</span>
-            <button type="button" onclick="fillAdminCredentials()" class="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 underline">Cargar credenciales</button>
-          </div>
-          <div class="text-[11px] text-slate-600 font-mono">
-            Usuario: <strong class="text-slate-900">admin</strong> | Clave: <strong class="text-slate-900">admin123</strong>
-          </div>
+        <div id="ingMensaje" class="aviso error oculto" role="alert"></div>
+        <button class="boton principal" type="submit">Ingresar</button>
+        <div class="pie">
+          <a href="#" data-vista-ingreso="olvido">Olvidé mi contraseña</a>
+          <a href="#" data-vista-ingreso="registro">Crear usuario</a>
         </div>
       </form>
 
-      <!-- Registration Form -->
-      <form id="registerForm" onsubmit="handleUserRegister(event)" class="space-y-3.5 hidden">
+      <form id="formOlvido" class="oculto" novalidate>
+        <h1>Recuperar acceso</h1>
+        <p class="tenue">Te mandamos un link por mail para crear una contraseña nueva. Vence en 30 minutos.</p>
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Nombre Completo</label>
-          <input type="text" id="regName" class="input-field" placeholder="ej: Laura Martínez" required>
+          <label for="olvEmail">Email de tu usuario</label>
+          <input id="olvEmail" type="email" autocomplete="email" required>
         </div>
-
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Nombre de Usuario</label>
-          <input type="text" id="regUsername" class="input-field" placeholder="ej: lauram" required>
-        </div>
-
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Correo Electrónico</label>
-          <input type="email" id="regEmail" class="input-field" placeholder="ej: laura@empresa.com" required>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Contraseña</label>
-            <input type="password" id="regPassword" class="input-field" placeholder="••••••••" minlength="4" required>
-          </div>
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Confirmar</label>
-            <input type="password" id="regPasswordConfirm" class="input-field" placeholder="••••••••" minlength="4" required>
-          </div>
-        </div>
-
-        <button type="submit" id="btnRegisterSubmit" class="btn-primary w-full !py-3 text-base mt-2">
-          <span>Crear Usuario & Empezar</span>
-          <i class="fa-solid fa-paper-plane text-xs"></i>
-        </button>
-
-        <div class="text-center pt-2 text-xs text-slate-500">
-          ¿Ya tenés cuenta? <a href="javascript:void(0)" onclick="switchAuthMode('login')" class="text-indigo-600 font-bold hover:underline">Iniciar Sesión</a>
-        </div>
+        <div id="olvMensaje" class="aviso info oculto" role="status"></div>
+        <button class="boton principal" type="submit">Enviar link</button>
+        <div class="pie"><a href="#" data-vista-ingreso="ingreso">Volver a ingresar</a></div>
       </form>
 
+      <form id="formRestablecer" class="oculto" novalidate>
+        <h1>Contraseña nueva</h1>
+        <div>
+          <label for="resClave">Contraseña nueva</label>
+          <input id="resClave" type="password" autocomplete="new-password" minlength="8" required>
+          <p class="ayuda">Mínimo 8 caracteres, con letras y números.</p>
+        </div>
+        <div>
+          <label for="resClave2">Repetila</label>
+          <input id="resClave2" type="password" autocomplete="new-password" required>
+        </div>
+        <div id="resMensaje" class="aviso error oculto" role="alert"></div>
+        <button class="boton principal" type="submit">Guardar contraseña</button>
+      </form>
+
+      <form id="formRegistro" class="oculto" novalidate>
+        <h1>Crear usuario</h1>
+        <p class="tenue">Tu usuario arranca como solo lectura. Un administrador te habilita para facturar.</p>
+        <div><label for="regNombre">Nombre y apellido</label><input id="regNombre" autocomplete="name" required></div>
+        <div class="campos dos">
+          <div><label for="regUsuario">Usuario</label><input id="regUsuario" autocomplete="username" required></div>
+          <div><label for="regEmail">Email</label><input id="regEmail" type="email" autocomplete="email" required></div>
+        </div>
+        <div><label for="regClave">Contraseña</label><input id="regClave" type="password" autocomplete="new-password" required><p class="ayuda">Mínimo 8 caracteres, con letras y números.</p></div>
+        <div id="regMensaje" class="aviso error oculto" role="alert"></div>
+        <button class="boton principal" type="submit">Crear usuario</button>
+        <div class="pie"><a href="#" data-vista-ingreso="ingreso">Ya tengo usuario</a></div>
+      </form>
     </div>
-  </div>
-
-  <!-- MAIN APP TOP NAVBAR -->
-  <header class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      
-      <!-- Top Row: Brand, Active Account, Dollar, Profile -->
-      <div class="h-16 flex items-center justify-between gap-4">
-        
-        <!-- Brand & Health Badge -->
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-700 flex items-center justify-center text-white font-extrabold text-lg shadow-md shadow-indigo-100">
-            <i class="fa-solid fa-bolt"></i>
-          </div>
-          <div>
-            <div class="flex items-center space-x-2">
-              <span class="text-lg font-extrabold text-slate-900 tracking-tight">BotArca</span>
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 animate-pulse"></span>
-                ARCA Conectado
-              </span>
-            </div>
-            <p class="text-xs text-slate-500 hidden sm:block">Facturación Electrónica Automática</p>
-          </div>
-        </div>
-
-        <!-- Controls: Multi-Account Selector, Dollar Ticker, Actions -->
-        <div class="flex items-center space-x-2 sm:space-x-3">
-          
-          <!-- Multi-Account / Emisor Picker -->
-          <div class="flex items-center space-x-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl text-xs transition">
-            <i class="fa-solid fa-building text-indigo-600"></i>
-            <span class="text-slate-500 font-medium hidden md:inline">Emisor:</span>
-            <select id="headerAccountSelect" onchange="switchActiveCuitAccount(this.value)" class="bg-transparent font-bold text-slate-800 outline-none cursor-pointer max-w-[150px] sm:max-w-[220px]">
-              <option value="">Cargando empresas...</option>
-            </select>
-          </div>
-
-          <!-- Dollar Ticker Badge -->
-          <div class="hidden xl:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-900">
-            <i class="fa-solid fa-dollar-sign text-amber-600"></i>
-            <span class="text-amber-700">Dólar Blue:</span>
-            <strong id="tickBlue" class="font-bold text-amber-900">$1.220</strong>
-          </div>
-
-          <!-- Test Connection Button -->
-          <button id="btnTestArca" onclick="testArcaConnection()" class="btn-secondary !py-1.5 !px-3 text-xs inline-flex items-center space-x-1.5" title="Verificar acceso a portal de ARCA">
-            <i class="fa-solid fa-plug text-indigo-600"></i>
-            <span>Test ARCA</span>
-          </button>
-
-          <!-- User Menu & Logout -->
-          <div class="flex items-center space-x-2.5 pl-2.5 sm:pl-3 border-l border-slate-200">
-            <div id="headerUserAvatar" class="w-8 h-8 rounded-full bg-indigo-100 border border-indigo-200 flex items-center justify-center text-indigo-700 font-extrabold text-xs flex-shrink-0">
-              AD
-            </div>
-            <div class="text-left hidden xs:block sm:block">
-              <div class="flex items-center space-x-1.5">
-                <span id="headerUserName" class="text-xs font-extrabold text-slate-900 block leading-tight truncate max-w-[130px]">Super Administrador</span>
-                <span id="headerUserRoleBadge" class="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">ADMIN</span>
-              </div>
-              <span id="headerUserSubtext" class="text-[10px] text-slate-500 block leading-tight truncate max-w-[140px]">@admin</span>
-            </div>
-            <button onclick="handleUserLogout()" title="Cerrar Sesión" class="p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 text-xs font-semibold flex items-center space-x-1 transition">
-              <i class="fa-solid fa-power-off text-xs"></i>
-              <span class="hidden md:inline">Salir</span>
-            </button>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- Navigation Tabs (Didactic 4-Tabs Bar) -->
-      <div class="flex space-x-2 overflow-x-auto py-2 border-t border-slate-100">
-        <button onclick="switchTab('facturar')" class="nav-tab-btn active" data-tab="facturar">
-          <i class="fa-solid fa-bolt"></i>
-          <span>Nueva Factura</span>
-        </button>
-        <button onclick="switchTab('comprobantes')" class="nav-tab-btn" data-tab="comprobantes">
-          <i class="fa-solid fa-receipt"></i>
-          <span>Historial de Facturas</span>
-        </button>
-        <button onclick="switchTab('crm')" class="nav-tab-btn" data-tab="crm">
-          <i class="fa-solid fa-address-book"></i>
-          <span>Mis Clientes</span>
-        </button>
-        <button onclick="switchTab('settings')" class="nav-tab-btn" data-tab="settings">
-          <i class="fa-solid fa-sliders"></i>
-          <span>Mi Cuenta & Ajustes</span>
-        </button>
-      </div>
-
-    </div>
-  </header>
-
-  <!-- MAIN APP CONTAINER -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
-
-    <!-- ============================================================= -->
-    <!-- SECCIÓN 1: NUEVA FACTURA (DIDÁCTICO & 100% VISUAL)           -->
-    <!-- ============================================================= -->
-    <section id="tab-facturar" class="tab-content block space-y-6">
-      
-      <!-- Sub-Mode Selector Cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        
-        <button type="button" id="btnSubmodeLote" onclick="setInvoiceSubmode('lote')" class="p-4 rounded-2xl border-2 text-left transition flex items-center space-x-4 bg-indigo-50/80 border-indigo-600 shadow-sm cursor-pointer">
-          <div class="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xl shadow-md shadow-indigo-200">
-            <i class="fa-solid fa-wand-magic-sparkles"></i>
-          </div>
-          <div>
-            <div class="flex items-center space-x-2">
-              <strong class="text-sm font-bold text-slate-900">Facturar por Lote con Inteligencia Artificial</strong>
-              <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-indigo-600 text-white">Recomendado</span>
-            </div>
-            <p class="text-xs text-slate-600 mt-0.5">Pegá un texto con datos o una planilla de Excel y la IA genera las facturas automáticamente.</p>
-          </div>
-        </button>
-
-        <button type="button" id="btnSubmodeManual" onclick="setInvoiceSubmode('manual')" class="p-4 rounded-2xl border-2 text-left transition flex items-center space-x-4 bg-white border-slate-200 hover:border-slate-300 shadow-sm cursor-pointer">
-          <div class="w-12 h-12 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center text-xl">
-            <i class="fa-solid fa-file-pen"></i>
-          </div>
-          <div>
-            <strong class="text-sm font-bold text-slate-800">Factura Individual Rápida</strong>
-            <p class="text-xs text-slate-500 mt-0.5">Cargá una sola factura manualmente completando cliente e importe.</p>
-          </div>
-        </button>
-
-      </div>
-
-      <!-- ========================================= -->
-      <!-- VISTA A: FACTURACIÓN POR LOTE (IA / EXCEL)-->
-      <!-- ========================================= -->
-      <div id="subviewLote" class="space-y-6">
-        
-        <!-- Step 1 Card: Pega y Detecta -->
-        <div class="card-panel p-6 space-y-4">
-          
-          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-            <div class="flex items-center space-x-3">
-              <span class="step-number-badge">1</span>
-              <div>
-                <h3 class="text-base font-bold text-slate-900">Pegá los datos a facturar (Texto Libre o Planilla)</h3>
-                <p class="text-xs text-slate-500">Pegá cualquier texto donde figuren cliente, CUIT, monto y concepto (o celdas de Excel). La IA extrae los datos y arma los comprobantes.</p>
-              </div>
-            </div>
-
-            <!-- Quick Action Chips -->
-            <div class="flex flex-wrap items-center gap-2">
-              <button type="button" onclick="loadSampleTextMsg()" class="btn-secondary !py-1.5 !px-3 text-xs">
-                <i class="fa-solid fa-align-left text-indigo-600 mr-1"></i> Cargar Texto de Ejemplo
-              </button>
-              <button type="button" onclick="loadSampleExcelData()" class="btn-secondary !py-1.5 !px-3 text-xs">
-                <i class="fa-solid fa-table text-emerald-600 mr-1"></i> Cargar Tabla Excel
-              </button>
-              <button type="button" id="btnParseWithAi" onclick="handleParseWithGroq()" class="btn-gold !py-1.5 !px-3 text-xs">
-                <i class="fa-solid fa-brain text-amber-600 mr-1"></i> ✨ Interpretar con IA
-              </button>
-              <button type="button" onclick="clearExcelPasteArea()" class="btn-secondary !py-1.5 !px-2.5 text-xs text-slate-400 hover:text-rose-600" title="Limpiar texto">
-                <i class="fa-solid fa-trash-can"></i>
-              </button>
-            </div>
-          </div>
-
-          <!-- Textarea Area -->
-          <div class="space-y-2.5">
-            <textarea id="excelPasteArea" oninput="handleExcelPasteChange(this.value)" rows="4" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-800 outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 transition placeholder:text-slate-400 font-sans" placeholder="📝 Pegá aquí cualquier texto, nota o pedido a facturar, por ejemplo:&#10;'Facturarle a Tech Solutions SRL CUIT 30-71234567-8 la suma de $185.000 por servicios profesionales de desarrollo web.'&#10;&#10;📊 O pegá directamente celdas copiadas de tu archivo Excel..."></textarea>
-            
-            <div class="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
-              <span id="parserBadge" class="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                <i class="fa-solid fa-microchip text-indigo-600 mr-1.5"></i> Esperando texto o planilla...
-              </span>
-              <span id="excelParsedCountText" class="text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full">
-                0 facturas detectadas
-              </span>
-            </div>
-          </div>
-
-          <!-- Step 2: Live Preview Table -->
-          <div id="excelPreviewContainer" class="space-y-4 pt-4 border-t border-slate-100">
-            
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div class="flex items-center space-x-3">
-                <span class="step-number-badge">2</span>
-                <h4 class="text-sm font-bold text-slate-800 uppercase tracking-wide">Comprobantes listos para emitir</h4>
-              </div>
-
-              <!-- Total Card -->
-              <div class="bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl flex items-center space-x-3">
-                <span class="text-xs font-bold text-emerald-800 uppercase tracking-wider">Total a Facturar:</span>
-                <strong id="excelPreviewTotal" class="text-lg font-extrabold text-emerald-700">$ 0,00</strong>
-              </div>
-            </div>
-
-            <!-- Table -->
-            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-              <table class="clean-table">
-                <thead>
-                  <tr>
-                    <th class="w-10 text-center">#</th>
-                    <th class="w-40">CUIT / DNI</th>
-                    <th>Cliente / Razón Social</th>
-                    <th class="w-32">Tipo</th>
-                    <th>Detalle de Factura</th>
-                    <th class="w-36 text-right">Importe</th>
-                    <th class="w-12 text-center"></th>
-                  </tr>
-                </thead>
-                <tbody id="excelPreviewTbody">
-                  <tr>
-                    <td colspan="7" class="py-10 text-center text-slate-400 text-sm">
-                      <i class="fa-solid fa-clipboard-list text-3xl text-slate-300 block mb-2"></i>
-                      Pegá texto libre o filas de Excel arriba para generar la vista previa.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- Step 3: Big Execution Button -->
-            <div class="bg-gradient-to-r from-slate-50 to-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div class="flex items-center space-x-2 text-xs text-slate-600">
-                <i class="fa-solid fa-shield-halved text-emerald-600 text-base"></i>
-                <span>Los comprobantes se autorizan en tiempo real directamente en los servidores de ARCA.</span>
-              </div>
-
-              <button type="button" id="btnAddToQueue" onclick="submitAndStartBatch()" disabled class="btn-emerald-action w-full sm:w-auto shadow-lg">
-                <i class="fa-solid fa-bolt text-sm"></i>
-                <span id="btnAddToQueueText">⚡ FACTURAR TODO EN ARCA AHORA</span>
-              </button>
-            </div>
-
-          </div>
-
-        </div>
-
-        <!-- Live Progress Banner (Active during batch run) -->
-        <div id="cockpitBanner" class="hidden card-panel p-6 bg-indigo-900 text-white space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-              <span class="w-3 h-3 rounded-full bg-emerald-400 animate-ping"></span>
-              <strong class="text-sm font-bold uppercase tracking-wider">Emitiendo comprobantes en ARCA en vivo...</strong>
-            </div>
-            <span id="cockpitPercent" class="text-sm font-extrabold text-emerald-300">0%</span>
-          </div>
-
-          <div class="w-full bg-indigo-950 rounded-full h-3 overflow-hidden border border-indigo-800">
-            <div id="cockpitProgressBar" class="bg-emerald-400 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
-          </div>
-          <p id="cockpitStatusMsg" class="text-xs text-indigo-200">Iniciando sesión segura con ARCA...</p>
-        </div>
-
-        <!-- Live Emission Results Table -->
-        <div class="card-panel p-6 space-y-4">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-            <div class="flex items-center space-x-3">
-              <h3 class="text-base font-bold text-slate-900">Estado de Emisión del Lote</h3>
-              <div class="flex items-center space-x-2 text-xs font-bold">
-                <span id="queueCountPendientes" class="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">0 pendientes</span>
-                <span id="queueCountEmitidas" class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">0 emitidas</span>
-              </div>
-            </div>
-
-            <div class="flex items-center space-x-2">
-              <button onclick="loadQueueItems()" class="btn-secondary !py-1.5 !px-3 text-xs" title="Actualizar estado">
-                <i class="fa-solid fa-rotate mr-1"></i> Actualizar
-              </button>
-              <button onclick="clearQueueCompleted()" class="btn-secondary !py-1.5 !px-3 text-xs text-slate-500 hover:text-slate-800" title="Limpiar emitidas">
-                <i class="fa-solid fa-broom mr-1"></i> Limpiar Finalizadas
-              </button>
-              <button type="button" id="btnProcessQueue" onclick="startProcessingQueue()" class="btn-primary !py-1.5 !px-4 text-xs font-bold">
-                <i class="fa-solid fa-bolt mr-1"></i> Facturar Pendientes
-              </button>
-            </div>
-          </div>
-
-          <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table class="clean-table">
-              <thead>
-                <tr>
-                  <th class="w-32">Estado</th>
-                  <th>Receptor</th>
-                  <th>Concepto / Detalle</th>
-                  <th class="w-28">Tipo</th>
-                  <th class="w-32 text-right">Importe</th>
-                  <th>CAE Autorizado / Mensaje</th>
-                  <th class="w-12 text-center"></th>
-                </tr>
-              </thead>
-              <tbody id="queueTableBody">
-                <tr>
-                  <td colspan="7" class="py-8 text-center text-slate-400 text-sm">
-                    No hay facturas en proceso en este momento.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- ========================================= -->
-      <!-- VISTA B: FACTURA INDIVIDUAL RÁPIDA (1 A 1)-->
-      <!-- ========================================= -->
-      <div id="subviewManual" class="space-y-6 hidden">
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          
-          <!-- Form Left Column -->
-          <div class="lg:col-span-8">
-
-            <!-- Live Progress Cockpit for Individual Invoice (0-100%) -->
-            <div id="invoiceProgressCockpit" class="hidden card-panel p-5 bg-slate-900 text-white space-y-3 mb-6 border-2 border-indigo-500 shadow-xl transition-all">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-3">
-                  <span class="w-3 h-3 rounded-full bg-emerald-400 animate-ping"></span>
-                  <span class="text-xs font-bold uppercase tracking-wider text-slate-200">Pipeline de Emisión en ARCA</span>
-                </div>
-                <span id="invoiceProgressPercent" class="text-base font-mono font-extrabold text-emerald-400">0%</span>
-              </div>
-
-              <!-- Progress Bar -->
-              <div class="w-full bg-slate-800 rounded-full h-3.5 overflow-hidden border border-slate-700 p-0.5">
-                <div id="invoiceProgressBar" class="bg-gradient-to-r from-indigo-500 via-emerald-400 to-teal-300 h-full rounded-full transition-all duration-500 ease-out" style="width: 0%"></div>
-              </div>
-
-              <!-- Real-time Step Description -->
-              <div class="flex items-center justify-between text-xs pt-1">
-                <div class="flex items-center space-x-2">
-                  <i class="fa-solid fa-circle-notch fa-spin text-emerald-400 text-xs"></i>
-                  <span id="invoiceProgressStatusMsg" class="font-medium text-slate-300">Iniciando sesión segura con Clave Fiscal...</span>
-                </div>
-                <span id="invoiceProgressStepCounter" class="text-[11px] font-mono text-slate-400">Paso 1 de 5</span>
-              </div>
-            </div>
-
-            <form id="invoiceForm" onsubmit="handleEmitirFactura(event)" class="card-panel p-6 space-y-6">
-              
-              <div class="pb-4 border-b border-slate-100 flex items-center justify-between">
-                <div>
-                  <h3 class="text-base font-bold text-slate-900">Emisión de Factura Individual</h3>
-                  <p class="text-xs text-slate-500">Completá los datos del cliente y los productos o servicios a facturar.</p>
-                </div>
-              </div>
-
-              <!-- General Parameters -->
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Tipo de Comprobante</label>
-                  <select id="facTipo" class="input-field font-bold text-indigo-700">
-                    <option value="Factura C" selected>Factura C (Monotributo / Consumidor Final)</option>
-                    <option value="Factura B">Factura B (RI a Consumidor Final)</option>
-                    <option value="Factura A">Factura A (Entre Responsables Inscriptos)</option>
-                    <option value="Recibo C">Recibo C</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Punto de Venta</label>
-                  <input type="number" id="facPuntoVenta" value="1" min="1" max="9999" class="input-field font-bold" required>
-                  <p class="text-[11px] text-slate-500 mt-1 leading-snug">Por web service se usa el punto de venta configurado en "Conexión ARCA" de la cuenta. En Factura A/B el precio se carga <strong>sin IVA</strong> (se suma 21%).</p>
-                </div>
-
-                <div>
-                  <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Concepto</label>
-                  <select id="facConcepto" class="input-field">
-                    <option value="2" selected>2: Servicios</option>
-                    <option value="1">1: Productos / Mercadería</option>
-                    <option value="3">3: Productos y Servicios</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- Client Details Box -->
-              <div class="form-section-card space-y-4">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200">
-                  <span class="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center">
-                    <i class="fa-solid fa-user text-indigo-600 mr-2"></i> Datos del Cliente / Receptor
-                  </span>
-                  
-                  <select id="facQuickClientSelect" onchange="applySelectedClientToInvoice(this.value)" class="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-700 font-medium">
-                    <option value="">-- Cargar de Mis Clientes --</option>
-                  </select>
-                </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                  <div class="sm:col-span-3">
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">Tipo Doc</label>
-                    <select id="facTipoDoc" class="input-field">
-                      <option value="CUIT" selected>CUIT</option>
-                      <option value="DNI">DNI</option>
-                      <option value="Consumidor Final">Consumidor Final</option>
-                    </select>
-                  </div>
-
-                  <div class="sm:col-span-4">
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nro CUIT / DNI</label>
-                    <input type="text" id="facNroDoc" class="input-field font-mono font-bold" placeholder="20-30123456-9" onblur="formatInputCuit(this)" required>
-                  </div>
-
-                  <div class="sm:col-span-5">
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">Razón Social / Nombre</label>
-                    <input type="text" id="facRazonSocial" class="input-field" placeholder="ej: Tech Solutions SA" required>
-                  </div>
-                </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">Condición Frente al IVA</label>
-                    <select id="facCondIva" class="input-field">
-                      <option value="Consumidor Final" selected>Consumidor Final</option>
-                      <option value="Responsable Inscripto">Responsable Inscripto</option>
-                      <option value="Monotributo">Monotributo</option>
-                      <option value="Exento">Exento</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">Condición de Venta</label>
-                    <select id="facCondVenta" class="input-field">
-                      <option value="Contado" selected>Contado / Transferencia</option>
-                      <option value="Cuenta Corriente">Cuenta Corriente</option>
-                      <option value="Tarjeta de Débito">Tarjeta de Débito</option>
-                      <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Invoice Lines Items -->
-              <div class="space-y-3">
-                <span class="text-xs font-bold uppercase tracking-wider text-slate-800 block">Detalle de Renglones</span>
-
-                <div id="invoiceItemsContainer" class="space-y-2">
-                  <div class="invoice-item-row grid grid-cols-12 gap-2 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <div class="col-span-12 sm:col-span-6">
-                      <input type="text" class="item-desc input-field text-sm" placeholder="Descripción del servicio o producto..." value="Servicios profesionales" required>
-                    </div>
-                    <div class="col-span-3 sm:col-span-2">
-                      <input type="number" class="item-qty input-field text-sm text-center font-bold" placeholder="Cant." value="1" min="1" step="1" oninput="calculateInvoiceTotals()" required>
-                    </div>
-                    <div class="col-span-7 sm:col-span-3">
-                      <div class="relative">
-                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-bold">$</span>
-                        <input type="number" class="item-price input-field text-sm !pl-7 font-bold text-slate-900" placeholder="Precio" value="150000" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
-                      </div>
-                    </div>
-                    <div class="col-span-2 sm:col-span-1 text-center">
-                      <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-400 hover:text-rose-600 transition p-2" title="Eliminar renglón">
-                        <i class="fa-solid fa-trash-can"></i>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <button type="button" onclick="addInvoiceItem()" class="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition inline-flex items-center space-x-1.5 pt-1">
-                  <i class="fa-solid fa-circle-plus"></i>
-                  <span>Agregar otro renglón a la factura</span>
-                </button>
-              </div>
-
-              <!-- Summary & Emit Button -->
-              <div class="pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div class="flex items-baseline space-x-2">
-                  <span class="text-xs font-bold text-slate-500 uppercase">Monto Total:</span>
-                  <span id="facTotalDisplay" class="text-2xl font-extrabold text-slate-900 tracking-tight">$ 150.000,00</span>
-                </div>
-
-                <button type="submit" id="btnEmitirComprobante" class="btn-emerald-action w-full sm:w-auto shadow-md">
-                  <i class="fa-solid fa-paper-plane mr-1"></i>
-                  <span>EMITIR EN ARCA AHORA</span>
-                </button>
-              </div>
-
-            </form>
-          </div>
-
-          <!-- Right Column: Last CAE Box -->
-          <div class="lg:col-span-4 space-y-6">
-            <div class="card-panel p-6 space-y-4">
-              <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h4 class="text-xs font-bold text-slate-800 uppercase tracking-wider">Último CAE Autorizado</h4>
-                <span id="caeStatusDot" class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
-              </div>
-
-              <div id="lastCaeCard" class="space-y-3">
-                <div class="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2">
-                  <div class="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">Código de Autorización (CAE):</div>
-                  <div id="lastCaeNumber" class="text-lg font-mono font-extrabold text-emerald-900 select-all">-</div>
-                  
-                  <div class="flex justify-between text-xs text-emerald-800 pt-2 border-t border-emerald-200/60">
-                    <span>Vto CAE: <strong id="lastCaeVto">-</strong></span>
-                    <span id="lastComprobanteNro" class="font-bold">-</span>
-                  </div>
-
-                  <div id="lastCaePdfContainer" class="hidden pt-2">
-                    <a id="lastCaePdfBtn" href="#" target="_blank" class="inline-flex items-center justify-center w-full px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition space-x-1.5 shadow-sm">
-                      <i class="fa-solid fa-file-pdf"></i>
-                      <span>Ver / Descargar Factura PDF</span>
-                    </a>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-    </section>
-
-    <!-- ============================================================= -->
-    <!-- SECCIÓN 2: HISTORIAL DE FACTURAS                              -->
-    <!-- ============================================================= -->
-    <section id="tab-comprobantes" class="tab-content hidden space-y-6">
-      <div class="card-panel p-6 space-y-4">
-        
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Historial de Comprobantes Emitidos</h3>
-            <p class="text-xs text-slate-500">Registro de todas las facturas autorizadas con su número oficial y CAE.</p>
-          </div>
-
-          <div class="flex items-center space-x-2">
-            <div class="relative">
-              <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-              <input type="text" id="comprobantesSearchInput" oninput="filterComprobantesTable(this.value)" placeholder="Buscar por CUIT, Cliente o CAE..." class="input-field !py-2 !pl-9 text-xs w-64">
-            </div>
-            <button onclick="loadComprobantesList()" class="btn-secondary !py-2 !px-3 text-xs" title="Actualizar lista">
-              <i class="fa-solid fa-rotate"></i>
-            </button>
-          </div>
-        </div>
-
-        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table class="clean-table">
-            <thead>
-              <tr>
-                <th class="w-28">Fecha</th>
-                <th class="w-48">Tipo & Número</th>
-                <th>Cliente / Receptor</th>
-                <th class="w-36 text-right">Importe Total</th>
-                <th class="w-48">CAE Oficial</th>
-              </tr>
-            </thead>
-            <tbody id="comprobantesTableBody">
-              <tr>
-                <td colspan="5" class="py-10 text-center text-slate-400 text-sm">
-                  Cargando historial de comprobantes...
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ============================================================= -->
-    <!-- SECCIÓN 3: MIS CLIENTES (CRM)                                 -->
-    <!-- ============================================================= -->
-    <section id="tab-crm" class="tab-content hidden space-y-6">
-      <div class="card-panel p-6 space-y-4">
-        
-        <div class="flex items-center justify-between pb-4 border-b border-slate-100">
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Directorio de Clientes Frecuentes</h3>
-            <p class="text-xs text-slate-500">Guardá los datos de tus clientes para facturarles en 1 solo clic.</p>
-          </div>
-
-          <button onclick="openClientModal()" class="btn-primary !py-2 !px-4 text-xs font-bold">
-            <i class="fa-solid fa-plus mr-1"></i> Nuevo Cliente
-          </button>
-        </div>
-
-        <div id="clientsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <!-- Rendered dynamically -->
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ============================================================= -->
-    <!-- SECCIÓN 4: MI CUENTA & AJUSTES                                -->
-    <!-- ============================================================= -->
-    <section id="tab-settings" class="tab-content hidden space-y-6">
-      
-      <!-- Box 0: Active User Profile Card -->
-      <div class="card-panel p-6 bg-gradient-to-r from-indigo-50/60 via-white to-slate-50 border border-indigo-100/80">
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div class="flex items-center space-x-4">
-            <div id="profileCardAvatar" class="w-14 h-14 rounded-2xl bg-indigo-600 text-white font-extrabold text-xl flex items-center justify-center shadow-lg shadow-indigo-100 flex-shrink-0">
-              AD
-            </div>
-            <div class="space-y-1">
-              <div class="flex items-center space-x-2">
-                <h3 id="profileCardName" class="text-lg font-extrabold text-slate-900">Super Administrador</h3>
-                <span id="profileCardRole" class="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                  Super Administrador
-                </span>
-              </div>
-              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
-                <span class="flex items-center space-x-1.5">
-                  <i class="fa-solid fa-at text-indigo-500"></i>
-                  <strong id="profileCardUsername" class="text-slate-800 font-mono">@admin</strong>
-                </span>
-                <span class="flex items-center space-x-1.5">
-                  <i class="fa-solid fa-envelope text-slate-400"></i>
-                  <span id="profileCardEmail" class="font-mono">admin@botarca.local</span>
-                </span>
-                <span class="flex items-center space-x-1.5 text-slate-400">
-                  <i class="fa-solid fa-calendar-check"></i>
-                  <span>Alta: <span id="profileCardSince" class="font-semibold text-slate-600">2026</span></span>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex items-center space-x-2 w-full sm:w-auto justify-end pt-2 sm:pt-0">
-            <button onclick="handleUserLogout()" class="btn-secondary !py-2 !px-4 text-xs font-bold text-rose-600 hover:bg-rose-50 hover:border-rose-200">
-              <i class="fa-solid fa-power-off mr-1.5"></i> Cerrar Sesión
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Box 1: Cuentas Fiscales Multi-CUIT -->
-      <div class="card-panel p-6 space-y-4">
-        <div class="flex items-center justify-between pb-4 border-b border-slate-100">
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Mis Empresas y CUITs Emisores (ARCA)</h3>
-            <p class="text-xs text-slate-500">Podés administrar varios CUITs y cambiar de empresa emisora en 1 clic.</p>
-          </div>
-
-          <button onclick="openNewAccountModal()" class="btn-primary !py-2 !px-4 text-xs font-bold">
-            <i class="fa-solid fa-plus mr-1"></i> Agregar CUIT
-          </button>
-        </div>
-
-        <div id="accountsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <!-- Rendered dynamically -->
-        </div>
-      </div>
-
-      <!-- Box 2 & 3: Preferencias y Cloud Health -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        <!-- Preferences Form -->
-        <div class="lg:col-span-6 card-panel p-6 space-y-4">
-          <div class="pb-3 border-b border-slate-100">
-            <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">Preferencias de Facturación</h3>
-            <p class="text-xs text-slate-500 mt-0.5">Valores predeterminados para no tener que escribirlos cada vez.</p>
-          </div>
-
-          <form onsubmit="handleSaveGeneralPreferences(event)" class="space-y-3.5">
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">Punto de Venta por Defecto</label>
-              <input type="number" id="prefPuntoVenta" value="1" min="1" max="9999" class="input-field font-bold" required>
-            </div>
-
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">Concepto Predeterminado</label>
-              <select id="prefConcepto" class="input-field">
-                <option value="2" selected>2: Servicios (Honorarios, Consultoría, Desarrollo)</option>
-                <option value="1">1: Productos / Mercadería</option>
-                <option value="3">3: Productos y Servicios</option>
-              </select>
-            </div>
-
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">Condición de Venta Habitual</label>
-              <select id="prefCondicionVenta" class="input-field">
-                <option value="Contado" selected>Contado / Transferencia</option>
-                <option value="Cuenta Corriente">Cuenta Corriente</option>
-                <option value="Tarjeta de Débito">Tarjeta de Débito</option>
-                <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
-              </select>
-            </div>
-
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">Tipo de Comprobante Habitual</label>
-              <select id="prefTipoComprobante" class="input-field font-bold text-indigo-700">
-                <option value="Factura C" selected>Factura C (Monotributo / Consumidor Final)</option>
-                <option value="Factura A">Factura A (Responsable Inscripto)</option>
-                <option value="Factura B">Factura B (RI a Consumidor Final)</option>
-                <option value="Recibo C">Recibo C</option>
-              </select>
-            </div>
-
-            <div class="pt-3 border-t border-slate-100 flex justify-end">
-              <button type="submit" class="btn-primary !py-2 !px-5 text-xs">
-                Guardar Preferencias
-              </button>
-            </div>
-          </form>
-        </div>
-
-        <!-- Cloud Health -->
-        <div class="lg:col-span-6 card-panel p-6 space-y-4">
-          <div class="pb-3 border-b border-slate-100 flex items-center justify-between">
-            <div>
-              <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">Estado de Servicios Cloud</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Toda la infraestructura opera 100% en automático.</p>
-            </div>
-            <span class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
-              En Línea 24/7
-            </span>
-          </div>
-
-          <div class="space-y-3 text-xs">
-            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
-              <div class="flex items-center space-x-3">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <div>
-                  <strong class="text-slate-800 text-sm block">Servidor Cloud & Keep-Alive</strong>
-                  <span class="text-slate-500">Ejecución continua en Render sin apagados</span>
-                </div>
-              </div>
-              <span class="text-emerald-700 font-bold">Activo</span>
-            </div>
-
-            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
-              <div class="flex items-center space-x-3">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <div>
-                  <strong class="text-slate-800 text-sm block">Base de Datos & Supabase Storage</strong>
-                  <span class="text-slate-500">Persistencia permanente en la nube</span>
-                </div>
-              </div>
-              <span class="text-emerald-700 font-bold">Conectado</span>
-            </div>
-
-            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
-              <div class="flex items-center space-x-3">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <div>
-                  <strong class="text-slate-800 text-sm block">Inteligencia Artificial (Groq Llama)</strong>
-                  <span class="text-slate-500">Lectura instantánea de chats y Excel</span>
-                </div>
-              </div>
-              <span class="text-emerald-700 font-bold">Lista</span>
-            </div>
-          </div>
-
-          <div class="pt-2 flex justify-end">
-            <button type="button" onclick="checkCloudHealthStatus()" class="btn-secondary !py-2 !px-4 text-xs font-semibold">
-              <i class="fa-solid fa-rotate mr-1.5 text-indigo-600"></i> Verificar Conexión
-            </button>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- Box 4: System Users (Admin only) -->
-      <div id="sectionUsersAdmin" class="card-panel p-6 space-y-4">
-        <div class="flex items-center justify-between pb-4 border-b border-slate-100">
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Usuarios del Sistema & Operadores</h3>
-            <p class="text-xs text-slate-500">Administrá los operadores que tienen acceso a emitir facturas.</p>
-          </div>
-          <button onclick="openNewUserModal()" class="btn-primary !py-2 !px-4 text-xs font-bold">
-            <i class="fa-solid fa-user-plus mr-1"></i> Crear Usuario
-          </button>
-        </div>
-
-        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table class="clean-table">
-            <thead>
-              <tr>
-                <th>Usuario / Nombre</th>
-                <th>Email</th>
-                <th>Rol</th>
-                <th>Estado</th>
-                <th>Último Login</th>
-                <th class="text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="usersTableBody">
-              <!-- Rendered dynamically -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Box 5: Technical Logs Console (Collapsible) -->
-      <div class="card-panel p-5">
-        <details class="group">
-          <summary class="flex items-center justify-between cursor-pointer list-none text-slate-700 hover:text-slate-900 font-semibold text-sm">
-            <span class="flex items-center space-x-2">
-              <i class="fa-solid fa-terminal text-indigo-600"></i>
-              <span>Registro de Actividad Técnica (Logs en Vivo)</span>
-            </span>
-            <span class="text-xs bg-slate-100 px-2.5 py-1 rounded-lg text-slate-600 group-open:hidden">Mostrar Consola</span>
-            <span class="text-xs bg-slate-100 px-2.5 py-1 rounded-lg text-slate-600 hidden group-open:inline">Ocultar Consola</span>
-          </summary>
-          <div class="pt-4 space-y-3">
-            <div class="flex justify-end space-x-2">
-              <button onclick="clearLogsConsole()" class="btn-secondary !py-1 !px-2.5 text-xs">Limpiar</button>
-              <button onclick="reconnectLogsSSE()" class="btn-secondary !py-1 !px-2.5 text-xs">Reconectar</button>
-            </div>
-            <div id="terminalScreen" class="select-text">
-              <div class="text-slate-400">[SISTEMA] Conectado al registro de actividad...</div>
-            </div>
-          </div>
-        </details>
-      </div>
-
-    </section>
-
   </main>
 
-  <!-- MODAL: REGISTRAR CLIENTE CRM -->
-  <div id="clientModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-white max-w-md w-full p-6 rounded-2xl shadow-2xl space-y-4 border border-slate-100">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 class="text-base font-bold text-slate-900">Registrar Nuevo Cliente</h3>
-        <button onclick="closeClientModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
+  <!-- ===================== APP ===================== -->
+  <div id="vistaApp" class="app oculto">
+    <header class="barra">
+      <a class="marca" href="#facturar">Bot<b>Arca</b></a>
+      <span id="badgeAmbiente" class="ambiente prueba oculto"></span>
+      <div class="emisor">
+        <label for="selEmisor" class="sr">Empresa que factura</label>
+        <select id="selEmisor"></select>
       </div>
+    </header>
 
-      <form onsubmit="handleSaveClient(event)" class="space-y-3.5">
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Razón Social / Nombre</label>
-          <input type="text" id="crmRazonSocial" class="input-field" placeholder="ej: Tech Solutions SA" required>
+    <nav class="nav" aria-label="Secciones">
+      <button data-ir="facturar"><svg class="ic"><use href="#i-factura"/></svg><span>Facturar</span><span id="navCola" class="contador oculto"></span></button>
+      <button data-ir="comprobantes"><svg class="ic"><use href="#i-archivo"/></svg><span>Comprobantes</span></button>
+      <button data-ir="ajustes"><svg class="ic"><use href="#i-ajustes"/></svg><span>Ajustes</span></button>
+    </nav>
+
+    <main class="contenido">
+      <!-- ============ FACTURAR ============ -->
+      <section id="pantalla-facturar" data-pantalla>
+        <div class="encabezado">
+          <div>
+            <h1>Facturar</h1>
+            <p id="facBajada">Una factura, una lista pegada de Excel o un mensaje de WhatsApp.</p>
+          </div>
+          <div class="segmentos" role="tablist" aria-label="Modo de carga">
+            <button role="tab" data-modo="una" aria-selected="true">Una factura</button>
+            <button role="tab" data-modo="varias" aria-selected="false">Varias</button>
+            <button role="tab" data-modo="cola" aria-selected="false">Cola <span id="segCola"></span></button>
+          </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Tipo Doc</label>
-            <select id="crmTipoDoc" class="input-field">
-              <option value="CUIT" selected>CUIT</option>
-              <option value="DNI">DNI</option>
-            </select>
+        <div id="avisoSinPermiso" class="aviso atencion oculto" style="margin-bottom:16px"><svg class="ic"><use href="#i-alerta"/></svg><span>Tu usuario es de solo lectura: podés ver todo, pero para facturar un administrador tiene que habilitarte.</span></div>
+
+        <!-- Una factura -->
+        <form id="formFactura" data-modo-panel="una" novalidate>
+          <div class="hoja">
+            <div class="seccion">
+              <h2>Cliente</h2>
+              <p class="bajada">Elegí uno guardado o cargalo. Para Consumidor Final no hace falta documento.</p>
+              <div class="campos dos">
+                <div class="ancho-total">
+                  <label for="facCliente">Clientes guardados</label>
+                  <select id="facCliente"><option value="">Cargar a mano</option></select>
+                </div>
+                <div>
+                  <label for="facDocTipo">Documento</label>
+                  <select id="facDocTipo">
+                    <option value="CUIT">CUIT</option>
+                    <option value="DNI">DNI</option>
+                    <option value="CUIL">CUIL</option>
+                    <option value="Consumidor Final">Sin documento (Consumidor Final)</option>
+                  </select>
+                </div>
+                <div id="campoDocNro">
+                  <label for="facDocNro">Número</label>
+                  <input id="facDocNro" inputmode="numeric" autocomplete="off" placeholder="20123456786">
+                </div>
+                <div>
+                  <label for="facNombre">Nombre o razón social</label>
+                  <input id="facNombre" autocomplete="off" placeholder="Acme SA">
+                </div>
+                <div>
+                  <label for="facCondIva">Condición frente al IVA</label>
+                  <select id="facCondIva">
+                    <option value="">Elegir…</option>
+                    <option>Consumidor Final</option>
+                    <option>Responsable Inscripto</option>
+                    <option>Monotributo</option>
+                    <option>Exento</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="facEmail">Email (para mandarle la factura)</label>
+                  <input id="facEmail" type="email" autocomplete="off" placeholder="cliente@empresa.com">
+                </div>
+                <div>
+                  <label for="facDomicilio">Domicilio (opcional)</label>
+                  <input id="facDomicilio" autocomplete="off">
+                </div>
+              </div>
+            </div>
+
+            <div class="seccion">
+              <h2>Comprobante</h2>
+              <div class="campos tres" style="margin-top:14px">
+                <div>
+                  <label for="facTipo">Tipo</label>
+                  <select id="facTipo">
+                    <option>Factura C</option><option>Factura B</option><option>Factura A</option><option>Recibo C</option>
+                    <option>Nota de Crédito C</option><option>Nota de Crédito B</option><option>Nota de Crédito A</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="facConcepto">Concepto</label>
+                  <select id="facConcepto">
+                    <option value="2">Servicios</option><option value="1">Productos</option><option value="3">Productos y servicios</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="facCondVenta">Condición de venta</label>
+                  <select id="facCondVenta">
+                    <option>Contado</option><option>Transferencia</option><option>Cuenta Corriente</option>
+                    <option>Tarjeta de Débito</option><option>Tarjeta de Crédito</option><option>Cheque</option><option>Otra</option>
+                  </select>
+                </div>
+              </div>
+
+              <div id="bloqueAsociado" class="campos tres oculto" style="margin-top:16px">
+                <div class="ancho-total aviso info"><svg class="ic"><use href="#i-info"/></svg><span>Una nota de crédito anula total o parcialmente una factura: indicá cuál.</span></div>
+                <div><label for="asoTipo">Factura que anula</label><select id="asoTipo"><option>Factura C</option><option>Factura B</option><option>Factura A</option></select></div>
+                <div><label for="asoPv">Punto de venta</label><input id="asoPv" inputmode="numeric"></div>
+                <div><label for="asoNro">Número</label><input id="asoNro" inputmode="numeric"></div>
+              </div>
+
+              <details style="margin-top:16px">
+                <summary class="tenue" style="cursor:pointer">Fechas y período (opcional)</summary>
+                <div class="campos tres" style="margin-top:12px">
+                  <div><label for="facFecha">Fecha del comprobante</label><input id="facFecha" type="date"></div>
+                  <div><label for="facDesde">Período desde</label><input id="facDesde" type="date"></div>
+                  <div><label for="facHasta">Período hasta</label><input id="facHasta" type="date"></div>
+                  <div><label for="facVto">Vencimiento del pago</label><input id="facVto" type="date"></div>
+                </div>
+                <p class="ayuda">Si las dejás vacías: hoy, y para servicios el mes en curso.</p>
+              </details>
+            </div>
+
+            <div class="seccion">
+              <h2>Detalle</h2>
+              <p id="ayudaIva" class="bajada">El precio es el final.</p>
+              <div id="items" class="items"></div>
+              <button type="button" id="btnAgregarItem" class="boton texto" style="margin-top:8px"><svg class="ic"><use href="#i-mas"/></svg>Agregar ítem</button>
+              <div class="total" style="margin-top:16px;border-top:1px solid var(--linea);padding-top:16px">
+                <span class="tenue">Total</span>
+                <div><div id="facTotal" class="monto">$ 0,00</div><div id="facDesglose" class="desglose"></div></div>
+              </div>
+            </div>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Número</label>
-            <input type="text" id="crmCuit" class="input-field font-mono font-bold" placeholder="30-71234567-8" required>
+
+          <div class="accion-fija">
+            <div class="resumen"><small>Total a facturar</small><span id="facTotalFijo" class="monto">$ 0,00</span></div>
+            <button id="btnEmitir" type="submit" class="boton principal">Revisar y emitir</button>
           </div>
+        </form>
+
+        <!-- Resultado de la emisión -->
+        <div id="resultadoEmision" class="hoja resultado oculto" style="margin-top:20px" tabindex="-1"></div>
+
+        <!-- Varias -->
+        <div data-modo-panel="varias" class="oculto">
+          <div class="hoja">
+            <div class="seccion">
+              <h2>Pegá la lista o el mensaje</h2>
+              <p class="bajada">Filas de Excel (CUIT · nombre · descripción · importe · email · condición IVA) o texto libre como un WhatsApp. Se arman borradores: nada se emite sin que lo revises.</p>
+              <label for="txtLote" class="sr">Texto a interpretar</label>
+              <textarea id="txtLote" rows="7" placeholder="Facturale a Juan Pérez, CUIT 20-12345678-6, monotributista, $150.000 por honorarios de octubre"></textarea>
+              <div class="fila-acciones" style="margin-top:12px">
+                <button id="btnInterpretar" class="boton principal"><svg class="ic"><use href="#i-chispa"/></svg>Armar borradores</button>
+                <label style="display:flex;gap:8px;align-items:center;margin:0;font-weight:400"><input type="checkbox" id="chkIa" checked> Usar IA (Groq) si está configurada</label>
+              </div>
+              <div id="loteMensaje" class="aviso info oculto" style="margin-top:12px"></div>
+            </div>
+          </div>
+          <div id="borradores" class="hoja oculto" style="margin-top:20px"></div>
         </div>
 
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Condición Frente al IVA</label>
-          <select id="crmCondIva" class="input-field">
-            <option value="Responsable Inscripto" selected>Responsable Inscripto</option>
-            <option value="Monotributo">Monotributo</option>
-            <option value="Consumidor Final">Consumidor Final</option>
-            <option value="Exento">Exento</option>
+        <!-- Cola -->
+        <div data-modo-panel="cola" class="oculto">
+          <div class="fila-acciones" style="margin-bottom:14px">
+            <button id="btnProcesarCola" class="boton principal"><svg class="ic"><use href="#i-play"/></svg>Emitir pendientes</button>
+            <button id="btnLimpiarCola" class="boton">Quitar emitidas</button>
+            <span id="colaEstado" class="tenue"></span>
+          </div>
+          <div class="hoja"><ul id="listaCola" class="lista"></ul></div>
+        </div>
+      </section>
+
+      <!-- ============ COMPROBANTES ============ -->
+      <section id="pantalla-comprobantes" data-pantalla class="oculto">
+        <div class="encabezado">
+          <div>
+            <h1>Comprobantes</h1>
+            <p>Todo lo emitido. Tocá uno para ver el PDF o mandarlo por mail.</p>
+          </div>
+        </div>
+        <div class="fila-acciones" style="margin-bottom:14px">
+          <div class="buscador">
+            <svg class="ic"><use href="#i-buscar"/></svg>
+            <label for="buscarComp" class="sr">Buscar comprobantes</label>
+            <input id="buscarComp" type="search" placeholder="Cliente, CUIT, número o CAE">
+          </div>
+          <label for="filtroComp" class="sr">Filtrar</label>
+          <select id="filtroComp" style="width:auto;min-width:170px">
+            <option value="">Todos</option>
+            <option value="Autorizado">Autorizados</option>
+            <option value="Prueba">De prueba</option>
+            <option value="mes">Este mes</option>
           </select>
         </div>
+        <div class="hoja"><ul id="listaComp" class="lista"></ul></div>
+      </section>
 
-        <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
-          <button type="button" onclick="closeClientModal()" class="btn-secondary text-xs">Cancelar</button>
-          <button type="submit" class="btn-primary text-xs font-bold">Guardar Cliente</button>
+      <!-- ============ AJUSTES ============ -->
+      <section id="pantalla-ajustes" data-pantalla class="oculto">
+        <div class="encabezado"><div><h1>Ajustes</h1><p id="ajustesUsuario"></p></div></div>
+        <nav class="indice" aria-label="Secciones de ajustes">
+          <a href="#aj-empresas">Empresas</a><a href="#aj-clientes">Clientes</a><a href="#aj-usuarios" data-solo-admin>Usuarios</a>
+          <a href="#aj-correo" data-solo-admin>Correo e IA</a><a href="#aj-cuenta">Mi cuenta</a><a href="#aj-sistema">Sistema</a>
+        </nav>
+        <div class="pila">
+          <div id="aj-empresas" class="hoja">
+            <div class="seccion">
+              <div class="encabezado" style="margin:0">
+                <div><h2>Empresas que facturan</h2><p class="bajada" style="margin:4px 0 0">Conexión con ARCA y diseño de la factura de cada una.</p></div>
+                <button class="boton chico" id="btnNuevaEmpresa"><svg class="ic"><use href="#i-mas"/></svg>Agregar</button>
+              </div>
+            </div>
+            <div id="listaEmpresas"></div>
+          </div>
+
+          <div id="aj-clientes" class="hoja">
+            <div class="seccion">
+              <div class="encabezado" style="margin:0">
+                <div><h2>Clientes</h2><p class="bajada" style="margin:4px 0 0">Se completan solos al facturar.</p></div>
+                <button class="boton chico" id="btnNuevoCliente"><svg class="ic"><use href="#i-mas"/></svg>Agregar</button>
+              </div>
+            </div>
+            <ul id="listaClientes" class="lista"></ul>
+          </div>
+
+          <div id="aj-usuarios" class="hoja" data-solo-admin>
+            <div class="seccion">
+              <div class="encabezado" style="margin:0">
+                <div><h2>Usuarios</h2><p class="bajada" style="margin:4px 0 0">Administrador: todo. Operador: factura. Solo lectura: mira.</p></div>
+                <button class="boton chico" id="btnNuevoUsuario"><svg class="ic"><use href="#i-mas"/></svg>Agregar</button>
+              </div>
+            </div>
+            <ul id="listaUsuarios" class="lista"></ul>
+          </div>
+
+          <form id="aj-correo" class="hoja" data-solo-admin novalidate>
+            <div class="seccion">
+              <h2>Correo e IA</h2>
+              <p class="bajada">Con qué se mandan las facturas por mail, y la clave de Groq para leer mensajes. Las claves guardadas no se muestran completas.</p>
+              <div class="campos dos">
+                <div><label for="mailProveedor">Proveedor de correo</label>
+                  <select id="mailProveedor"><option value="auto">Automático</option><option value="resend">Resend</option><option value="brevo">Brevo</option><option value="simulation">Sin envío (prueba)</option></select></div>
+                <div><label for="mailRemitente">Remitente (email)</label><input id="mailRemitente" type="email" placeholder="facturas@tudominio.com"></div>
+                <div><label for="mailNombre">Nombre del remitente</label><input id="mailNombre"></div>
+                <div><label for="mailAdmin">Avisos de nuevos usuarios a</label><input id="mailAdmin" type="email"></div>
+                <div><label for="mailResend">Clave de Resend</label><input id="mailResend" autocomplete="off"></div>
+                <div><label for="mailBrevo">Clave de Brevo</label><input id="mailBrevo" autocomplete="off"></div>
+                <div class="ancho-total"><label for="groqClave">Clave de Groq</label><input id="groqClave" autocomplete="off"></div>
+              </div>
+              <div class="fila-acciones" style="margin-top:16px">
+                <button class="boton principal" type="submit">Guardar</button>
+                <input id="mailPrueba" type="email" placeholder="email para probar" style="width:auto;flex:1 1 200px">
+                <button class="boton" type="button" id="btnProbarMail"><svg class="ic"><use href="#i-mail"/></svg>Mandar prueba</button>
+              </div>
+            </div>
+          </form>
+
+          <form id="aj-cuenta" class="hoja" novalidate>
+            <div class="seccion">
+              <h2>Mi cuenta</h2>
+              <p class="bajada">Al cambiar la contraseña se cierran tus otras sesiones.</p>
+              <div class="campos tres">
+                <div><label for="clvActual">Contraseña actual</label><input id="clvActual" type="password" autocomplete="current-password"></div>
+                <div><label for="clvNueva">Nueva</label><input id="clvNueva" type="password" autocomplete="new-password"></div>
+                <div><label for="clvNueva2">Repetir nueva</label><input id="clvNueva2" type="password" autocomplete="new-password"></div>
+              </div>
+              <div class="fila-acciones" style="margin-top:16px">
+                <button class="boton principal" type="submit">Cambiar contraseña</button>
+                <button class="boton" type="button" id="btnSalir"><svg class="ic"><use href="#i-salir"/></svg>Cerrar sesión</button>
+              </div>
+            </div>
+          </form>
+
+          <div id="aj-sistema" class="hoja">
+            <div class="seccion">
+              <h2>Sistema</h2>
+              <p class="bajada" id="sisResumen">Registro en vivo de lo que hace el servidor.</p>
+              <div id="terminal" class="terminal" role="log" aria-live="off"></div>
+              <div class="fila-acciones" style="margin-top:12px"><button class="boton chico" id="btnLimpiarLog">Limpiar</button></div>
+            </div>
+          </div>
         </div>
-      </form>
-    </div>
+      </section>
+    </main>
   </div>
 
-  <!-- MODAL: AGREGAR / EDITAR CUENTA ARCA (MULTI-CUIT) -->
-  <div id="accountModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-white max-w-md w-full p-6 rounded-2xl shadow-2xl space-y-4 border border-slate-100">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 id="accountModalTitle" class="text-base font-bold text-slate-900">Agregar Empresa / CUIT Emisor</h3>
-        <button onclick="closeAccountModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
-      </div>
+  <!-- ===================== DIÁLOGOS ===================== -->
+  <dialog id="dlgConfirmar" aria-labelledby="dlgConfirmarTitulo">
+    <div class="d-cab"><h2 id="dlgConfirmarTitulo">Revisá antes de emitir</h2><button class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="d-cuerpo" id="confirmarCuerpo"></div>
+    <div class="d-pie"><button class="boton" data-cerrar>Volver</button><button class="boton principal" id="btnConfirmarEmision">Emitir</button></div>
+  </dialog>
 
-      <form onsubmit="handleSaveAccount(event)" class="space-y-3.5">
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">CUIT Empresa / Representada (11 dígitos sin guiones)</label>
-          <input type="text" id="accCuit" class="input-field font-mono font-bold" placeholder="ej: 30712345678" required>
+  <dialog id="dlgComprobante" aria-labelledby="dlgCompTitulo">
+    <div class="d-cab"><div><h2 id="dlgCompTitulo"></h2><p class="tenue" id="dlgCompSub"></p></div><button class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="d-cuerpo" id="dlgCompCuerpo"></div>
+    <div class="d-pie" id="dlgCompPie"></div>
+  </dialog>
+
+  <dialog id="dlgEmpresa" aria-labelledby="dlgEmpresaTitulo">
+    <form method="dialog" id="formEmpresa" novalidate>
+      <div class="d-cab"><h2 id="dlgEmpresaTitulo">Empresa</h2><button type="button" class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
+      <div class="d-cuerpo">
+        <div class="campos dos">
+          <div><label for="empCuit">CUIT</label><input id="empCuit" inputmode="numeric" required></div>
+          <div><label for="empRazon">Razón social</label><input id="empRazon" required></div>
+          <div><label for="empEmail">Email de la empresa</label><input id="empEmail" type="email"><p class="ayuda">Los clientes que respondan el mail le escriben acá.</p></div>
+          <div><label for="empPv">Punto de venta (Comprobantes en línea)</label><input id="empPv" inputmode="numeric" value="1"></div>
         </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Razón Social / Nombre de la Empresa</label>
-          <input type="text" id="accRazonSocial" class="input-field" placeholder="ej: Tech Solutions SRL" required>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">CUIT Persona Representante</label>
-            <input type="text" id="accCuitRepresentante" class="input-field font-mono text-xs" placeholder="ej: 20123456789 (Tú / Contador)">
+        <details>
+          <summary class="tenue" style="cursor:pointer">Clave Fiscal (solo para el modo navegador)</summary>
+          <div class="campos dos" style="margin-top:12px">
+            <div><label for="empCuitRep">CUIT de quien ingresa</label><input id="empCuitRep" inputmode="numeric"></div>
+            <div><label for="empClave">Clave Fiscal</label><input id="empClave" type="password" autocomplete="off"><p class="ayuda">Se guarda cifrada. Con web service no hace falta.</p></div>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Email de la Empresa</label>
-            <input type="email" id="accEmailNotificaciones" class="input-field text-xs" placeholder="ej: facturas@empresa.com">
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
-            <span>Clave Fiscal ARCA (Persona Humana / Operador)</span>
-            <span class="text-[10px] text-slate-400 font-normal">(Opcional)</span>
-          </label>
-          <input type="password" id="accClaveFiscal" class="input-field" placeholder="Dejar en blanco para usar la Clave de Render">
-          <p class="text-[11px] text-slate-500 mt-1">Si la empresa está representada bajo tu Clave Fiscal actual de Render, dejala en blanco.</p>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Punto de Venta Predeterminado</label>
-          <input type="number" id="accPuntoVenta" class="input-field font-bold" value="1" min="1" max="9999" required>
-        </div>
-
-        <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
-          <button type="button" onclick="closeAccountModal()" class="btn-secondary text-xs">Cancelar</button>
-          <button type="submit" id="btnSubmitAccount" class="btn-primary text-xs font-bold">Guardar Empresa</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- MODAL: CONEXIÓN CON ARCA POR WEB SERVICE (por cuenta emisora) -->
-  <div id="wsModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto">
-    <div class="bg-white max-w-2xl w-full min-w-0 p-4 sm:p-6 rounded-2xl shadow-2xl space-y-4 border border-slate-100 my-4">
-      <div class="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
-        <div class="min-w-0">
-          <h3 class="text-base font-bold text-slate-900">Conexión con ARCA</h3>
-          <p id="wsModalCuenta" class="text-xs text-slate-500 truncate"></p>
-        </div>
-        <div class="flex items-center gap-2 flex-shrink-0">
-          <span id="wsAmbienteBadge" class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"></span>
-          <button onclick="closeWsModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center" aria-label="Cerrar"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-      </div>
-
-      <form onsubmit="handleSaveWs(event)" class="space-y-3.5">
-        <div>
-          <label for="wsModo" class="block text-xs font-semibold text-slate-700 mb-1">Cómo se conecta esta cuenta</label>
-          <select id="wsModo" class="input-field w-full max-w-full" onchange="renderWsModoAyuda()">
-            <option value="auto">Automático (recomendado)</option>
-            <option value="propio">Certificado propio</option>
-            <option value="delegado">Delegado a la plataforma</option>
-            <option value="navegador">Navegador con Clave Fiscal (no recomendado)</option>
-          </select>
-          <p id="wsModoAyuda" class="text-[11px] text-slate-500 mt-1 leading-snug"></p>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label for="wsPuntoVenta" class="block text-xs font-semibold text-slate-700 mb-1">Punto de venta de web service</label>
-            <input type="number" id="wsPuntoVenta" class="input-field font-bold" min="1" max="99998" placeholder="ej: 2" inputmode="numeric">
-            <p class="text-[11px] text-slate-500 mt-1">Distinto al de Comprobantes en línea. Se usa en todas las facturas por web service.</p>
-          </div>
-          <div>
-            <label for="wsCondIvaEmisor" class="block text-xs font-semibold text-slate-700 mb-1">Condición frente al IVA (emisor)</label>
-            <select id="wsCondIvaEmisor" class="input-field">
-              <option value="">Según el tipo de comprobante</option>
-              <option value="Responsable Monotributo">Responsable Monotributo</option>
-              <option value="IVA Responsable Inscripto">IVA Responsable Inscripto</option>
-              <option value="IVA Sujeto Exento">IVA Sujeto Exento</option>
-            </select>
-          </div>
-          <div class="sm:col-span-2">
-            <label for="wsDomicilio" class="block text-xs font-semibold text-slate-700 mb-1">Domicilio comercial (para el PDF)</label>
-            <input type="text" id="wsDomicilio" class="input-field" placeholder="ej: Av. Siempre Viva 742 - Santa Fe">
-          </div>
-          <div>
-            <label for="wsIibb" class="block text-xs font-semibold text-slate-700 mb-1">Ingresos Brutos</label>
-            <input type="text" id="wsIibb" class="input-field" placeholder="ej: 921-123456-7 o Exento">
-          </div>
-          <div>
-            <label for="wsInicioAct" class="block text-xs font-semibold text-slate-700 mb-1">Inicio de actividades</label>
-            <input type="text" id="wsInicioAct" class="input-field" placeholder="dd/mm/aaaa">
-          </div>
-        </div>
-
-        <div class="flex justify-end">
-          <button type="submit" id="btnSaveWs" class="btn-primary text-xs font-bold">Guardar configuración</button>
-        </div>
-      </form>
-
-      <!-- Certificado propio -->
-      <div class="p-3.5 rounded-xl border border-slate-200 space-y-2.5">
-        <div class="flex items-center justify-between gap-2">
-          <strong class="text-sm text-slate-900">Certificado propio</strong>
-          <span id="wsCertEstado" class="text-[11px] font-semibold"></span>
-        </div>
-        <ol class="text-[11px] text-slate-600 list-decimal pl-4 space-y-0.5 leading-snug">
-          <li>Generá el pedido acá. La clave privada queda guardada cifrada en el servidor.</li>
-          <li>Subilo a ARCA con la Clave Fiscal de la empresa: <em>WSASS</em> en homologación, o <em>Administración de Certificados Digitales</em> en producción.</li>
-          <li>Asociá el certificado a "Facturación Electrónica" y pegá abajo el .crt que te devuelve ARCA.</li>
-        </ol>
-        <div class="flex flex-wrap gap-2">
-          <button type="button" onclick="generarCsrWs()" id="btnGenerarCsr" class="btn-secondary text-xs"><i class="fa-solid fa-file-signature mr-1"></i> Generar pedido (CSR)</button>
-          <button type="button" onclick="quitarCertificadoWs()" id="btnQuitarCert" class="btn-secondary text-xs hidden"><i class="fa-solid fa-trash-can mr-1"></i> Quitar certificado</button>
-        </div>
-        <div id="wsCsrBox" class="hidden space-y-1.5">
-          <label for="wsCsrTexto" class="block text-xs font-semibold text-slate-700">Pedido de certificado (copiá esto en ARCA)</label>
-          <textarea id="wsCsrTexto" class="input-field font-mono text-[10px] h-28" readonly></textarea>
-          <div class="flex gap-2">
-            <button type="button" onclick="copiarCsrWs()" class="btn-secondary text-xs"><i class="fa-regular fa-copy mr-1"></i> Copiar</button>
-            <button type="button" onclick="descargarCsrWs()" class="btn-secondary text-xs"><i class="fa-solid fa-download mr-1"></i> Descargar .csr</button>
-          </div>
-        </div>
-        <div>
-          <label for="wsCertTexto" class="block text-xs font-semibold text-slate-700 mb-1">Certificado que te dio ARCA (.crt)</label>
-          <textarea id="wsCertTexto" class="input-field font-mono text-[10px] h-24" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
-        </div>
-        <details class="text-xs">
-          <summary class="cursor-pointer text-slate-500">¿Generaste la clave por tu cuenta? Pegala acá</summary>
-          <textarea id="wsKeyTexto" class="input-field font-mono text-[10px] h-24 mt-1.5" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
         </details>
-        <button type="button" onclick="cargarCertificadoWs()" id="btnCargarCert" class="btn-primary text-xs font-bold">Cargar certificado</button>
       </div>
+      <div class="d-pie"><button type="button" class="boton" data-cerrar>Cancelar</button><button class="boton principal" type="submit">Guardar</button></div>
+    </form>
+  </dialog>
 
-      <!-- Delegación -->
-      <div class="p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-        <strong class="text-sm text-slate-900">Delegación a la plataforma</strong>
-        <p id="wsPlataformaInfo" class="text-[11px] text-slate-600 leading-snug"></p>
+  <dialog id="dlgConexion" aria-labelledby="dlgConexionTitulo">
+    <div class="d-cab"><div><h2 id="dlgConexionTitulo">Conexión con ARCA</h2><p class="tenue" id="conEmpresa"></p></div><button class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="d-cuerpo">
+      <div>
+        <label for="conModo">Cómo se conecta</label>
+        <select id="conModo">
+          <option value="auto">Automático (recomendado)</option>
+          <option value="propio">Certificado propio</option>
+          <option value="delegado">Delegado a la plataforma</option>
+          <option value="navegador">Navegador con Clave Fiscal (no recomendado)</option>
+        </select>
+        <p class="ayuda" id="conModoAyuda"></p>
       </div>
+      <div class="campos dos">
+        <div><label for="conPv">Punto de venta de web service</label><input id="conPv" inputmode="numeric" placeholder="2"><p class="ayuda">Distinto al de Comprobantes en línea.</p></div>
+        <div><label for="conCondIva">Condición frente al IVA</label>
+          <select id="conCondIva"><option value="">Según el tipo de factura</option><option>Responsable Monotributo</option><option>IVA Responsable Inscripto</option><option>IVA Sujeto Exento</option></select></div>
+        <div class="ancho-total"><label for="conDomicilio">Domicilio comercial</label><input id="conDomicilio"></div>
+        <div><label for="conIibb">Ingresos Brutos</label><input id="conIibb" placeholder="921-123456-7 o Exento"></div>
+        <div><label for="conInicio">Inicio de actividades</label><input id="conInicio" placeholder="dd/mm/aaaa"></div>
+      </div>
+      <button class="boton" id="btnGuardarConexion">Guardar</button>
 
-      <!-- Prueba -->
-      <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-        <div class="flex items-center justify-between gap-2">
-          <div>
-            <strong class="text-sm text-slate-900">Probar conexión</strong>
-            <p class="text-[11px] text-slate-500">Revisa certificado, delegación y punto de venta. No emite ningún comprobante.</p>
-          </div>
-          <button type="button" onclick="probarConexionWs()" id="btnProbarWs" class="btn-primary text-xs font-bold flex-shrink-0"><i class="fa-solid fa-plug-circle-check mr-1"></i> Probar</button>
+      <div style="border-top:1px solid var(--linea);padding-top:16px;display:grid;gap:10px">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h3>Certificado propio</h3><span id="conCertEstado" class="etiqueta-estado e-espera">No cargado</span></div>
+        <ol class="ayuda" style="margin:0;padding-left:18px">
+          <li>Generá el pedido (CSR). La clave privada queda cifrada en el servidor.</li>
+          <li>Subilo a ARCA con la Clave Fiscal de la empresa: WSASS para pruebas, "Administración de Certificados Digitales" para producción.</li>
+          <li>Asocialo a "Facturación Electrónica" y pegá acá el certificado que te devuelve.</li>
+        </ol>
+        <div class="fila-acciones"><button class="boton chico" id="btnCsr">Generar pedido (CSR)</button><button class="boton chico texto peligro oculto" id="btnQuitarCert">Quitar certificado</button></div>
+        <div id="conCsrCaja" class="oculto">
+          <label for="conCsr">Pedido de certificado</label>
+          <textarea id="conCsr" class="dato" rows="5" readonly></textarea>
+          <div class="fila-acciones" style="margin-top:8px"><button class="boton chico" id="btnCopiarCsr">Copiar</button><button class="boton chico" id="btnBajarCsr">Descargar .csr</button></div>
         </div>
-        <ul id="wsPruebaResultado" class="space-y-1.5 text-xs" aria-live="polite"></ul>
+        <div><label for="conCert">Certificado de ARCA (.crt)</label><textarea id="conCert" class="dato" rows="4" placeholder="-----BEGIN CERTIFICATE-----"></textarea></div>
+        <details><summary class="tenue" style="cursor:pointer">Tengo la clave privada aparte</summary><textarea id="conKey" class="dato" rows="4" style="margin-top:8px" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></details>
+        <button class="boton chico" id="btnCargarCert">Cargar certificado</button>
+      </div>
+
+      <div style="border-top:1px solid var(--linea);padding-top:16px;display:grid;gap:8px">
+        <h3>Delegación</h3>
+        <p class="ayuda" id="conDelegacion" style="margin:0"></p>
+      </div>
+
+      <div style="border-top:1px solid var(--linea);padding-top:16px;display:grid;gap:8px">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+          <div><h3>Probar conexión</h3><p class="ayuda" style="margin:2px 0 0">No emite nada.</p></div>
+          <button class="boton chico" id="btnProbarConexion"><svg class="ic"><use href="#i-enchufe"/></svg>Probar</button>
+        </div>
+        <div id="conPrueba" aria-live="polite"></div>
       </div>
     </div>
-  </div>
+  </dialog>
 
-  <!-- MODAL: NUEVO USUARIO (ADMIN) -->
-  <div id="userModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-white max-w-md w-full p-6 rounded-2xl shadow-2xl space-y-4 border border-slate-100">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 class="text-base font-bold text-slate-900">Crear Usuario del Sistema</h3>
-        <button onclick="closeUserModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
+  <dialog id="dlgDiseno" aria-labelledby="dlgDisenoTitulo" style="width:min(680px,calc(100vw - 24px))">
+    <div class="d-cab"><div><h2 id="dlgDisenoTitulo">Diseño de la factura</h2><p class="tenue" id="disEmpresa"></p></div><button class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="d-cuerpo">
+      <div class="segmentos" role="tablist" aria-label="Tipo de diseño">
+        <button role="tab" data-dis-modo="generico" aria-selected="true">Genérico</button>
+        <button role="tab" data-dis-modo="personalizado" aria-selected="false">Personalizado</button>
       </div>
-
-      <form onsubmit="handleSaveUser(event)" class="space-y-3.5">
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Nombre Completo</label>
-          <input type="text" id="usrName" class="input-field" placeholder="Laura Martínez" required>
+      <p class="ayuda" id="disAyuda" style="margin:0"></p>
+      <div id="disCampos" class="campos dos">
+        <div class="ancho-total">
+          <label for="disLogo">Logo (PNG o JPG, hasta 400 KB)</label>
+          <input id="disLogo" type="file" accept="image/png,image/jpeg">
+          <div class="fila-acciones" style="margin-top:8px"><span id="disLogoPrevia"></span><button type="button" class="boton chico texto peligro oculto" id="btnQuitarLogo">Quitar logo</button></div>
         </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Usuario</label>
-            <input type="text" id="usrUsername" class="input-field" placeholder="lauram" required>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Rol</label>
-            <select id="usrRole" class="input-field">
-              <option value="operator" selected>Operador</option>
-              <option value="admin">Administrador</option>
-              <option value="viewer">Solo Lectura</option>
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Correo Electrónico</label>
-          <input type="email" id="usrEmail" class="input-field" placeholder="laura@empresa.com" required>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Contraseña</label>
-          <input type="password" id="usrPassword" class="input-field" placeholder="••••••••" required>
-        </div>
-
-        <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
-          <button type="button" onclick="closeUserModal()" class="btn-secondary text-xs">Cancelar</button>
-          <button type="submit" class="btn-primary text-xs font-bold">Crear Usuario</button>
-        </div>
-      </form>
+        <div><label for="disLogoPos">Ubicación del logo</label><select id="disLogoPos"><option value="izquierda">Izquierda</option><option value="centro">Centro, arriba</option><option value="derecha">Derecha</option></select></div>
+        <div><label for="disEsquema">Esquema</label><select id="disEsquema"><option value="clasico">Clásico (con recuadros)</option><option value="banda">Banda de color arriba</option><option value="minimal">Minimalista (solo líneas)</option></select></div>
+        <div><label for="disColor1">Color principal</label><input id="disColor1" type="color" value="#17181a"></div>
+        <div><label for="disColor2">Color de acento (total y detalles)</label><input id="disColor2" type="color" value="#e8590c"></div>
+        <div><label for="disFuente">Tipografía</label><select id="disFuente"><option value="helvetica">Sans (Helvetica)</option><option value="times">Serif (Times)</option><option value="courier">Máquina (Courier)</option></select></div>
+        <div><label for="disFantasia">Nombre de fantasía</label><input id="disFantasia" placeholder="Opcional: se muestra grande"></div>
+        <div><label for="disTel">Teléfono</label><input id="disTel"></div>
+        <div><label for="disWeb">Web</label><input id="disWeb"></div>
+        <div class="ancho-total"><label for="disEmailContacto">Email de contacto</label><input id="disEmailContacto" type="email"></div>
+        <div class="ancho-total"><label for="disNotas">Notas (arriba de los totales)</label><textarea id="disNotas" rows="2" placeholder="Pago dentro de los 10 días."></textarea></div>
+        <div class="ancho-total"><label for="disPie">Leyenda al pie</label><textarea id="disPie" rows="2" placeholder="Gracias por su compra · CBU · Alias"></textarea></div>
+      </div>
+      <div style="border-top:1px solid var(--linea);padding-top:16px;display:grid;gap:12px">
+        <h3>Mail que acompaña la factura</h3>
+        <p class="ayuda" style="margin:0">Podés usar {cliente}, {tipo}, {numero}, {total}, {cae}, {vencimientoCae}, {fecha} y {emisor}.</p>
+        <div><label for="disAsunto">Asunto</label><input id="disAsunto"></div>
+        <div><label for="disCuerpo">Texto</label><textarea id="disCuerpo" rows="6"></textarea></div>
+        <div><label for="disResponder">Las respuestas van a</label><input id="disResponder" type="email" placeholder="Por defecto, el email de la empresa"></div>
+      </div>
+      <div class="aviso info"><svg class="ic"><use href="#i-info"/></svg><span>Siempre se incluye lo que exige ARCA: letra y código, datos del emisor y del cliente, número y fecha, totales, CAE con vencimiento y el código QR. Esos datos no se pueden ocultar.</span></div>
     </div>
-  </div>
+    <div class="d-pie"><button class="boton" id="btnVistaPrevia"><svg class="ic"><use href="#i-ojo"/></svg>Vista previa</button><button class="boton principal" id="btnGuardarDiseno">Guardar diseño</button></div>
+  </dialog>
 
-  <!-- TOAST NOTIFICATION CONTAINER (Top Right, Highest Z-Index) -->
-  <div id="toastContainer" class="fixed top-5 right-5 z-[999999] space-y-2.5 max-w-md pointer-events-none"></div>
+  <dialog id="dlgCliente" aria-labelledby="dlgClienteTitulo">
+    <form method="dialog" id="formCliente" novalidate>
+      <div class="d-cab"><h2 id="dlgClienteTitulo">Cliente</h2><button type="button" class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
+      <div class="d-cuerpo campos dos">
+        <div><label for="cliTipoDoc">Documento</label><select id="cliTipoDoc"><option>CUIT</option><option>DNI</option><option>Consumidor Final</option></select></div>
+        <div><label for="cliDoc">Número</label><input id="cliDoc" inputmode="numeric"></div>
+        <div class="ancho-total"><label for="cliNombre">Nombre o razón social</label><input id="cliNombre" required></div>
+        <div><label for="cliCondIva">Condición frente al IVA</label><select id="cliCondIva"><option>Consumidor Final</option><option>Responsable Inscripto</option><option>Monotributo</option><option>Exento</option></select></div>
+        <div><label for="cliEmail">Email</label><input id="cliEmail" type="email"></div>
+        <div class="ancho-total"><label for="cliDomicilio">Domicilio</label><input id="cliDomicilio"></div>
+      </div>
+      <div class="d-pie"><button type="button" class="boton" data-cerrar>Cancelar</button><button class="boton principal" type="submit">Guardar</button></div>
+    </form>
+  </dialog>
 
-  <!-- JAVASCRIPT CONTROLLER -->
+  <dialog id="dlgUsuario" aria-labelledby="dlgUsuarioTitulo">
+    <form method="dialog" id="formUsuario" novalidate>
+      <div class="d-cab"><h2 id="dlgUsuarioTitulo">Usuario</h2><button type="button" class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
+      <div class="d-cuerpo campos dos">
+        <div class="ancho-total"><label for="usrNombre">Nombre y apellido</label><input id="usrNombre" required></div>
+        <div><label for="usrUsuario">Usuario</label><input id="usrUsuario" required></div>
+        <div><label for="usrEmail">Email</label><input id="usrEmail" type="email" required></div>
+        <div><label for="usrRol">Rol</label><select id="usrRol"><option value="operator">Operador (factura)</option><option value="viewer">Solo lectura</option><option value="admin">Administrador</option></select></div>
+        <div id="usrActivoCampo"><label for="usrActivo">Estado</label><select id="usrActivo"><option value="1">Activo</option><option value="0">Desactivado</option></select></div>
+        <div class="ancho-total" id="usrClaveCampo"><label for="usrClave">Contraseña inicial</label><input id="usrClave" type="password" autocomplete="new-password"><p class="ayuda">Mínimo 8 caracteres, con letras y números. También puede crearla con "Olvidé mi contraseña".</p></div>
+      </div>
+      <div class="d-pie"><button type="button" class="boton texto peligro oculto" id="btnBorrarUsuario">Eliminar</button><button type="button" class="boton oculto" id="btnResetClave">Asignar contraseña</button><button type="button" class="boton" data-cerrar>Cancelar</button><button class="boton principal" type="submit">Guardar</button></div>
+    </form>
+  </dialog>
+
+  <div id="avisos" aria-live="polite"></div>
   <script src="js/app.js"></script>
 </body>
 </html>

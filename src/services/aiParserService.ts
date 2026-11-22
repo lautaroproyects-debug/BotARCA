@@ -275,7 +275,9 @@ No inventes CUIT, nombres ni importes. Si un pedido no tiene importe, no lo incl
       const desc = ((bloque.match(/(?:concepto|descripci[oó]n|detalle|en concepto de)\s*:?\s+([^,\n$]+)/i) || [])[1] || '').trim();
       const condIva = /responsable inscripto|\bri\b/i.test(bloque) ? 'Responsable Inscripto'
         : /monotribut/i.test(bloque) ? 'Monotributo' : /exento/i.test(bloque) ? 'Exento' : /consumidor final/i.test(bloque) ? 'Consumidor Final' : '';
-      const tipo = /factura a\b/i.test(bloque) ? 'Factura A' : /factura b\b/i.test(bloque) ? 'Factura B' : /recibo/i.test(bloque) ? 'Recibo C' : 'Factura C';
+      // "Factura A" solo con la letra en mayúscula: en "factura a Acme" la "a" es una preposición
+      const letra = (l: string) => new RegExp(`\\b[Ff]actura\\s+${l}\\b`).test(bloque) || new RegExp(`\\b[Ff]actura\\s+tipo\\s+${l}\\b`, 'i').test(bloque);
+      const tipo = letra('A') ? 'Factura A' : letra('B') ? 'Factura B' : /recibo/i.test(bloque) ? 'Recibo C' : 'Factura C';
 
       borradores.push(this.normalizarBorrador({
         tipoComprobante: tipo,

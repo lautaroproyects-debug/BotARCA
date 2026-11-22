@@ -1,1781 +1,1141 @@
-/**
- * BotArca Core Frontend Controller
- * Complete high-performance dashboard for ARCA batch invoicing, multi-cuit accounts, and user management
- */
+/* BotArca — panel web (vanilla JS, sin build).
+   Tres pantallas: Facturar (una / varias / cola), Comprobantes y Ajustes. */
+'use strict';
 
-let authToken = localStorage.getItem('botarca_token') || '';
-let currentUser = null;
-let allAccounts = [];
-let allClients = [];
-let allComprobantes = [];
-let parsedExcelItems = [];
-let sseSource = null;
+const $ = (sel, raiz = document) => raiz.querySelector(sel);
+const $$ = (sel, raiz = document) => [...raiz.querySelectorAll(sel)];
+const ic = (nombre) => `<svg class="ic" aria-hidden="true"><use href="#i-${nombre}"/></svg>`;
 
-// --- INITIALIZATION ---
-document.addEventListener('DOMContentLoaded', async () => {
-  if (authToken) {
-    const valid = await loadCurrentUser();
-    if (valid) {
-      hideLoginOverlay();
-      await initApp();
-    } else {
-      handleUserLogout(false);
-      showLoginOverlay();
-    }
-  } else {
-    showLoginOverlay();
+const estado = {
+  token: leerToken(),
+  usuario: null,
+  cuentas: [],
+  cuitActivo: '',
+  plataforma: null,
+  clientes: [],
+  comprobantes: [],
+  cola: { items: [], isProcessing: false },
+  borradores: [],
+  sse: null,
+  sondeoCola: null,
+};
+
+function leerToken() { try { return localStorage.getItem('botarca_token') || ''; } catch { return ''; } }
+function guardarToken(t) { try { t ? localStorage.setItem('botarca_token', t) : localStorage.removeItem('botarca_token'); } catch {} }
+
+/* ---------------- Utilidades ---------------- */
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+const fmtPesos = (n) => '$ ' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtCuit = (c) => { const s = String(c || '').replace(/\D/g, ''); return s.length === 11 ? `${s.slice(0, 2)}-${s.slice(2, 10)}-${s.slice(10)}` : s; };
+const fmtFecha = (iso) => { if (!iso) return ''; const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : iso; };
+const puedeOperar = () => estado.usuario && ['admin', 'operator'].includes(estado.usuario.role);
+const esAdmin = () => estado.usuario && estado.usuario.role === 'admin';
+const cuentaActiva = () => estado.cuentas.find(c => c.cuit === estado.cuitActivo);
+
+function aviso(msg, tipo = 'ok') {
+  const el = document.createElement('div');
+  el.className = `toast ${tipo}`;
+  el.setAttribute('role', tipo === 'error' ? 'alert' : 'status');
+  el.innerHTML = `${ic(tipo === 'error' ? 'alerta' : 'check')}<span>${esc(msg)}</span>`;
+  $('#avisos').appendChild(el);
+  setTimeout(() => el.remove(), tipo === 'error' ? 7000 : 4000);
+}
+
+function ocupado(btn, si) {
+  if (!btn) return;
+  if (si) btn.setAttribute('aria-busy', 'true'); else btn.removeAttribute('aria-busy');
+}
+
+async function api(url, opciones = {}) {
+  const headers = { ...(opciones.body && !(opciones.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(estado.token ? { Authorization: `Bearer ${estado.token}` } : {}), ...(opciones.headers || {}) };
+  let res;
+  try {
+    res = await fetch(url, { ...opciones, headers, body: opciones.body && typeof opciones.body !== 'string' ? JSON.stringify(opciones.body) : opciones.body });
+  } catch {
+    return { ok: false, status: 0, data: { message: 'No hay conexión con el servidor. Revisá internet y probá de nuevo.' } };
+  }
+  if (res.status === 401 && !url.startsWith('/api/auth/login')) {
+    cerrarSesion(false);
+    return { ok: false, status: 401, data: { message: 'Tu sesión venció. Ingresá de nuevo.' } };
+  }
+  if (opciones.blob) {
+    if (!res.ok) { let d = {}; try { d = await res.json(); } catch {} return { ok: false, status: res.status, data: d }; }
+    return { ok: true, status: res.status, blob: await res.blob() };
+  }
+  let data = {};
+  try { data = await res.json(); } catch { data = { message: `Respuesta inesperada del servidor (HTTP ${res.status}).` }; }
+  return { ok: res.ok && data.success !== false, status: res.status, data };
+}
+
+function abrirBlob(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  if (nombre && /iPhone|iPad|Android/i.test(navigator.userAgent) === false) a.title = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+/* ---------------- Diálogos ---------------- */
+document.addEventListener('click', (e) => {
+  const cerrar = e.target.closest('[data-cerrar]');
+  if (cerrar) { e.preventDefault(); cerrar.closest('dialog')?.close(); }
+});
+$$('dialog').forEach(d => d.addEventListener('click', (e) => { if (e.target === d) d.close(); }));
+
+/* ======================================================================
+   INGRESO
+   ====================================================================== */
+function mostrarFormIngreso(cual) {
+  ['formIngreso', 'formOlvido', 'formRestablecer', 'formRegistro'].forEach(id => $('#' + id).classList.add('oculto'));
+  const mapa = { ingreso: 'formIngreso', olvido: 'formOlvido', restablecer: 'formRestablecer', registro: 'formRegistro' };
+  const form = $('#' + mapa[cual]);
+  form.classList.remove('oculto');
+  form.querySelector('input')?.focus();
+}
+$$('[data-vista-ingreso]').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); mostrarFormIngreso(a.dataset.vistaIngreso); }));
+
+function mensajeForm(id, texto, tipo = 'error') {
+  const el = $('#' + id);
+  el.className = `aviso ${tipo}`;
+  el.textContent = texto;
+  el.classList.toggle('oculto', !texto);
+}
+
+$('#formIngreso').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.submitter;
+  const username = $('#ingUsuario').value.trim();
+  const password = $('#ingClave').value;
+  if (!username || !password) return mensajeForm('ingMensaje', 'Completá usuario y contraseña.');
+  ocupado(btn, true);
+  const r = await api('/api/auth/login', { method: 'POST', body: { username, password } });
+  ocupado(btn, false);
+  if (!r.ok) return mensajeForm('ingMensaje', r.data.message || 'No se pudo ingresar.');
+  estado.token = r.data.token; guardarToken(r.data.token);
+  $('#ingClave').value = '';
+  mensajeForm('ingMensaje', '');
+  iniciarApp();
+});
+
+$('#formOlvido').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = $('#olvEmail').value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return mensajeForm('olvMensaje', 'Ingresá un email válido.', 'error');
+  ocupado(e.submitter, true);
+  const r = await api('/api/auth/forgot-password', { method: 'POST', body: { email } });
+  ocupado(e.submitter, false);
+  mensajeForm('olvMensaje', r.data.message || 'Listo.', r.ok ? 'info' : 'error');
+});
+
+$('#formRestablecer').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const clave = $('#resClave').value, clave2 = $('#resClave2').value;
+  if (clave !== clave2) return mensajeForm('resMensaje', 'Las contraseñas no coinciden.');
+  const token = (location.hash.match(/restablecer=([a-f0-9]+)/) || [])[1];
+  ocupado(e.submitter, true);
+  const r = await api('/api/auth/reset-password', { method: 'POST', body: { token, newPassword: clave } });
+  ocupado(e.submitter, false);
+  if (!r.ok) return mensajeForm('resMensaje', r.data.message);
+  history.replaceState(null, '', location.pathname);
+  mostrarFormIngreso('ingreso');
+  mensajeForm('ingMensaje', 'Contraseña creada. Ya podés ingresar.', 'ok');
+});
+
+$('#formRegistro').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = { name: $('#regNombre').value.trim(), username: $('#regUsuario').value.trim(), email: $('#regEmail').value.trim(), password: $('#regClave').value };
+  ocupado(e.submitter, true);
+  const r = await api('/api/auth/register', { method: 'POST', body });
+  ocupado(e.submitter, false);
+  if (!r.ok) return mensajeForm('regMensaje', r.data.message || 'No se pudo crear el usuario.');
+  estado.token = r.data.token; guardarToken(r.data.token);
+  aviso(r.data.message);
+  iniciarApp();
+});
+
+function cerrarSesion(avisar = true) {
+  estado.token = ''; guardarToken('');
+  estado.usuario = null;
+  estado.sse?.close(); estado.sse = null;
+  clearInterval(estado.sondeoCola);
+  $('#vistaApp').classList.add('oculto');
+  $('#vistaIngreso').classList.remove('oculto');
+  mostrarFormIngreso('ingreso');
+  if (avisar) aviso('Sesión cerrada.');
+}
+
+/* ======================================================================
+   ARRANQUE Y NAVEGACIÓN
+   ====================================================================== */
+async function iniciarApp() {
+  const r = await api('/api/auth/me');
+  if (!r.ok) { cerrarSesion(false); return; }
+  estado.usuario = r.data.user;
+  $('#vistaIngreso').classList.add('oculto');
+  $('#vistaApp').classList.remove('oculto');
+  $('#ajustesUsuario').textContent = `${estado.usuario.name} · @${estado.usuario.username} · ${({ admin: 'Administrador', operator: 'Operador', viewer: 'Solo lectura' })[estado.usuario.role]}`;
+  $$('[data-solo-admin]').forEach(el => el.classList.toggle('oculto', !esAdmin()));
+  $('#avisoSinPermiso').classList.toggle('oculto', puedeOperar());
+
+  if (!$('#items').children.length) agregarItem();
+  await Promise.all([cargarCuentas(), cargarClientes(), cargarPlataforma()]);
+  cargarCola();
+  ir(location.hash.replace('#', '') || 'facturar');
+}
+
+function ir(pantalla) {
+  if (!['facturar', 'comprobantes', 'ajustes'].includes(pantalla)) pantalla = 'facturar';
+  $$('[data-pantalla]').forEach(s => s.classList.toggle('oculto', s.id !== 'pantalla-' + pantalla));
+  $$('.nav button').forEach(b => b.setAttribute('aria-current', b.dataset.ir === pantalla ? 'page' : 'false'));
+  if (location.hash !== '#' + pantalla) history.replaceState(null, '', '#' + pantalla);
+  if (pantalla === 'comprobantes') cargarComprobantes();
+  if (pantalla === 'ajustes') { renderEmpresas(); renderClientes(); if (esAdmin()) { cargarUsuarios(); cargarCorreo(); } conectarLogs(); }
+  window.scrollTo({ top: 0 });
+}
+$$('.nav button').forEach(b => b.addEventListener('click', () => ir(b.dataset.ir)));
+$$('.indice a').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); $(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+
+/* ---------------- Cuentas / emisor ---------------- */
+async function cargarCuentas() {
+  const r = await api('/api/accounts');
+  if (!r.ok) return;
+  estado.cuentas = r.data.accounts || [];
+  estado.cuitActivo = r.data.activeCuit || estado.cuentas[0]?.cuit || '';
+  const sel = $('#selEmisor');
+  sel.innerHTML = estado.cuentas.length
+    ? estado.cuentas.map(c => `<option value="${c.cuit}" ${c.cuit === estado.cuitActivo ? 'selected' : ''}>${esc(c.razonSocial || c.cuit)} · ${fmtCuit(c.cuit)}</option>`).join('')
+    : '<option value="">Sin empresa cargada</option>';
+  actualizarBadgeAmbiente();
+  renderEmpresas();
+}
+
+$('#selEmisor').addEventListener('change', async (e) => {
+  const cuit = e.target.value;
+  const r = await api('/api/accounts/switch', { method: 'POST', body: { cuit } });
+  if (!r.ok) { aviso(r.data.message, 'error'); e.target.value = estado.cuitActivo; return; }
+  estado.cuitActivo = cuit;
+  actualizarBadgeAmbiente();
+  aviso(`Ahora facturás como ${cuentaActiva()?.razonSocial || cuit}.`);
+});
+
+async function cargarPlataforma() {
+  const r = await api('/api/accounts/ws/estado');
+  if (r.ok) estado.plataforma = r.data;
+  actualizarBadgeAmbiente();
+}
+
+function actualizarBadgeAmbiente() {
+  const b = $('#badgeAmbiente');
+  const c = cuentaActiva();
+  if (!c || !estado.plataforma) { b.classList.add('oculto'); return; }
+  const navegador = (c.ws?.modo || 'auto') === 'navegador';
+  const real = navegador || estado.plataforma.ambiente === 'produccion';
+  b.className = `ambiente ${real ? 'real' : 'prueba'}`;
+  b.textContent = navegador ? 'ARCA real · navegador' : real ? 'ARCA real' : 'Modo prueba';
+  b.title = real ? 'Las facturas que emitas son reales.' : 'Homologación: las facturas son de prueba y no tienen validez fiscal.';
+}
+
+/* ======================================================================
+   FACTURAR · UNA FACTURA
+   ====================================================================== */
+$$('[data-modo]').forEach(b => b.addEventListener('click', () => cambiarModo(b.dataset.modo)));
+function cambiarModo(modo) {
+  $$('[data-modo]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.modo === modo)));
+  $$('[data-modo-panel]').forEach(p => p.classList.toggle('oculto', p.dataset.modoPanel !== modo));
+  $('#resultadoEmision').classList.add('oculto');
+  if (modo === 'cola') cargarCola();
+}
+
+const discriminaIva = () => /\b(A|B)$/.test($('#facTipo').value);
+
+function agregarItem(datos = {}) {
+  const fila = document.createElement('div');
+  const n = $('#items').children.length + 1;
+  fila.className = 'item' + (discriminaIva() ? ' con-iva' : '');
+  fila.innerHTML = `
+    <div class="desc"><label for="itD${n}">Descripción</label><input id="itD${n}" data-campo="descripcion" value="${esc(datos.descripcion || '')}" placeholder="Honorarios de octubre"></div>
+    <div><label for="itC${n}">Cant.</label><input id="itC${n}" data-campo="cantidad" inputmode="decimal" value="${esc(datos.cantidad || 1)}"></div>
+    <div><label for="itP${n}">${discriminaIva() ? 'Precio sin IVA' : 'Precio'}</label><input id="itP${n}" data-campo="precio" inputmode="decimal" value="${esc(datos.precio || '')}" placeholder="0,00"></div>
+    ${discriminaIva() ? `<div><label for="itI${n}">IVA</label><select id="itI${n}" data-campo="iva"><option>21</option><option>10.5</option><option>27</option><option>5</option><option>2.5</option><option>0</option><option value="exento">Exento</option></select></div>` : ''}
+    <button type="button" class="boton quitar" aria-label="Quitar ítem">${ic('basura')}</button>`;
+  fila.querySelector('.quitar').addEventListener('click', () => { if ($('#items').children.length > 1) { fila.remove(); calcularTotal(); } else { fila.querySelectorAll('input').forEach(i => (i.value = i.dataset.campo === 'cantidad' ? '1' : '')); calcularTotal(); } });
+  fila.addEventListener('input', calcularTotal);
+  $('#items').appendChild(fila);
+  calcularTotal();
+  return fila;
+}
+$('#btnAgregarItem').addEventListener('click', () => agregarItem().querySelector('input').focus());
+
+/** Interpreta "1.500,50", "1500.50" o "150000". */
+function numero(v) {
+  let s = String(v || '').replace(/[$\s]/g, '');
+  if (!s) return 0;
+  if (s.includes(',') && s.includes('.')) s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  else if (s.includes(',')) s = /,\d{1,2}$/.test(s) ? s.replace(',', '.') : s.replace(/,/g, '');
+  else if ((s.match(/\./g) || []).length > 1 || /\.\d{3}$/.test(s)) s = s.replace(/\./g, '');
+  const n = parseFloat(s);
+  return isFinite(n) ? n : 0;
+}
+
+function leerItems() {
+  return $$('#items .item').map(f => {
+    const cantidad = numero(f.querySelector('[data-campo=cantidad]').value) || 0;
+    const precio = numero(f.querySelector('[data-campo=precio]').value);
+    const iva = f.querySelector('[data-campo=iva]')?.value;
+    return { descripcion: f.querySelector('[data-campo=descripcion]').value.trim(), cantidad, precioUnitario: precio, subtotal: Math.round(cantidad * precio * 100) / 100, alicuotaIva: iva };
+  });
+}
+
+function calcularTotal() {
+  const items = leerItems();
+  let neto = 0, iva = 0;
+  for (const it of items) {
+    neto += it.subtotal;
+    if (discriminaIva() && it.alicuotaIva && it.alicuotaIva !== 'exento') iva += Math.round(it.subtotal * parseFloat(it.alicuotaIva)) / 100;
+  }
+  const total = Math.round((neto + iva) * 100) / 100;
+  $('#facTotal').textContent = fmtPesos(total);
+  $('#facTotalFijo').textContent = fmtPesos(total);
+  $('#facDesglose').textContent = discriminaIva() ? `Neto ${fmtPesos(neto)} + IVA ${fmtPesos(iva)}` : '';
+  return { neto, iva, total };
+}
+
+function actualizarFormTipo() {
+  const items = leerItems();
+  $('#items').innerHTML = '';
+  (items.length ? items : [{}]).forEach(it => agregarItem({ descripcion: it.descripcion, cantidad: it.cantidad, precio: it.precioUnitario || '' }));
+  $('#ayudaIva').textContent = discriminaIva() ? 'En Factura A y B el precio va sin IVA: se suma la alícuota de cada ítem.' : 'El precio es el final.';
+  $('#bloqueAsociado').classList.toggle('oculto', !/Nota de Crédito/.test($('#facTipo').value));
+  const letra = ($('#facTipo').value.match(/\b([ABC])$/) || [])[1];
+  if (letra) $('#asoTipo').value = `Factura ${letra}`;
+}
+$('#facTipo').addEventListener('change', actualizarFormTipo);
+
+$('#facDocTipo').addEventListener('change', () => {
+  const cf = $('#facDocTipo').value === 'Consumidor Final';
+  $('#campoDocNro').classList.toggle('oculto', cf);
+  if (cf) { $('#facCondIva').value = 'Consumidor Final'; if (!$('#facNombre').value) $('#facNombre').value = ''; }
+});
+
+$('#facCliente').addEventListener('change', () => {
+  const c = estado.clientes.find(x => x.id === $('#facCliente').value);
+  if (!c) return;
+  $('#facDocTipo').value = c.tipoDoc === 'DNI' ? 'DNI' : c.cuit ? 'CUIT' : 'Consumidor Final';
+  $('#facDocTipo').dispatchEvent(new Event('change'));
+  $('#facDocNro').value = c.cuit || '';
+  $('#facNombre').value = c.razonSocial || '';
+  $('#facCondIva').value = c.condicionIva || '';
+  $('#facEmail').value = c.email || '';
+  $('#facDomicilio').value = c.domicilio || '';
+});
+
+function validarFactura() {
+  const errores = [];
+  const marcar = (id, mal) => $('#' + id).setAttribute('aria-invalid', String(!!mal));
+  const docTipo = $('#facDocTipo').value;
+  const doc = $('#facDocNro').value.replace(/\D/g, '');
+  const conDoc = docTipo !== 'Consumidor Final';
+  marcar('facDocNro', conDoc && ((docTipo === 'DNI' && !/^\d{7,8}$/.test(doc)) || (docTipo !== 'DNI' && doc.length !== 11)));
+  if (conDoc && docTipo === 'DNI' && !/^\d{7,8}$/.test(doc)) errores.push('El DNI tiene que tener 7 u 8 números.');
+  if (conDoc && docTipo !== 'DNI' && doc.length !== 11) errores.push(`El ${docTipo} tiene que tener 11 números.`);
+  marcar('facCondIva', !$('#facCondIva').value);
+  if (!$('#facCondIva').value) errores.push('Elegí la condición frente al IVA del cliente.');
+  if (conDoc && docTipo !== 'DNI' && !$('#facNombre').value.trim()) errores.push('Falta el nombre o razón social.');
+  if (/\bA$/.test($('#facTipo').value) && docTipo !== 'CUIT') errores.push('Una Factura A necesita CUIT del cliente.');
+  const email = $('#facEmail').value.trim();
+  marcar('facEmail', email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errores.push('El email no es válido.');
+  if (/Nota de Crédito/.test($('#facTipo').value) && (!$('#asoPv').value || !$('#asoNro').value)) errores.push('Indicá punto de venta y número de la factura que anula la nota de crédito.');
+  const items = leerItems();
+  items.forEach((it, i) => {
+    if (!it.descripcion) errores.push(`Ítem ${i + 1}: falta la descripción.`);
+    if (it.cantidad <= 0) errores.push(`Ítem ${i + 1}: la cantidad tiene que ser mayor a cero.`);
+    if (it.precioUnitario <= 0) errores.push(`Ítem ${i + 1}: falta el precio.`);
+  });
+  return errores;
+}
+
+let facturaPendiente = null;
+
+$('#formFactura').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!puedeOperar()) return aviso('Tu usuario es de solo lectura.', 'error');
+  const c = cuentaActiva();
+  if (!c) return aviso('Primero cargá la empresa que factura en Ajustes.', 'error');
+  const errores = validarFactura();
+  if (errores.length) {
+    aviso(errores[0], 'error');
+    $('[aria-invalid="true"]')?.focus();
+    return;
+  }
+  const t = calcularTotal();
+  const docTipo = $('#facDocTipo').value;
+  facturaPendiente = {
+    cuitEmisor: c.cuit,
+    razonSocialEmisor: c.razonSocial,
+    tipoComprobante: $('#facTipo').value,
+    puntoVenta: c.ws?.puntoVentaWs || c.puntoVentaDefault || 1,
+    concepto: Number($('#facConcepto').value),
+    condicionVenta: $('#facCondVenta').value,
+    fechaEmision: $('#facFecha').value || undefined,
+    periodoDesde: $('#facDesde').value || undefined,
+    periodoHasta: $('#facHasta').value || undefined,
+    vencimientoPago: $('#facVto').value || undefined,
+    receptor: {
+      tipoDoc: docTipo,
+      nroDoc: docTipo === 'Consumidor Final' ? '' : $('#facDocNro').value.replace(/\D/g, ''),
+      razonSocial: $('#facNombre').value.trim() || (docTipo === 'Consumidor Final' ? 'Consumidor Final' : ''),
+      condicionIva: $('#facCondIva').value,
+      email: $('#facEmail').value.trim() || undefined,
+      domicilio: $('#facDomicilio').value.trim() || undefined,
+    },
+    items: leerItems(),
+    comprobanteAsociado: /Nota de Crédito/.test($('#facTipo').value) ? { tipo: $('#asoTipo').value, puntoVenta: Number($('#asoPv').value), numero: $('#asoNro').value } : undefined,
+  };
+  const real = $('#badgeAmbiente').classList.contains('real');
+  const f = facturaPendiente;
+  $('#confirmarCuerpo').innerHTML = `
+    <div class="aviso ${real ? 'atencion' : 'info'}">${ic(real ? 'alerta' : 'info')}<span>${real ? 'Esto emite una factura <strong>real</strong> en ARCA. No se puede borrar: solo se anula con una nota de crédito.' : 'Modo prueba: se autoriza en el entorno de prueba de ARCA, sin validez fiscal.'}</span></div>
+    <dl class="ficha">
+      <dt>Emite</dt><dd>${esc(c.razonSocial)} · <span class="dato">${fmtCuit(c.cuit)}</span></dd>
+      <dt>Comprobante</dt><dd>${esc(f.tipoComprobante)} · ${esc($('#facConcepto').selectedOptions[0].text)}</dd>
+      <dt>Cliente</dt><dd>${esc(f.receptor.razonSocial || 'Consumidor Final')}${f.receptor.nroDoc ? ` · <span class="dato">${fmtCuit(f.receptor.nroDoc)}</span>` : ''}<br><span class="tenue">${esc(f.receptor.condicionIva)}</span></dd>
+      <dt>Ítems</dt><dd>${f.items.map(i => `${esc(i.descripcion)} × ${i.cantidad}`).join('<br>')}</dd>
+      <dt>Total</dt><dd class="monto" style="font-size:22px">${fmtPesos(t.total)}</dd>
+      ${f.receptor.email ? `<dt>Se envía a</dt><dd>${esc(f.receptor.email)}${real ? '' : ' <span class="tenue">(en modo prueba no se manda)</span>'}</dd>` : ''}
+    </dl>`;
+  $('#btnConfirmarEmision').textContent = real ? `Emitir ${fmtPesos(t.total)}` : 'Emitir de prueba';
+  $('#dlgConfirmar').showModal();
+});
+
+$('#btnConfirmarEmision').addEventListener('click', async () => {
+  const btn = $('#btnConfirmarEmision');
+  if (!facturaPendiente || btn.getAttribute('aria-busy')) return;
+  ocupado(btn, true);
+  btn.textContent = 'Emitiendo…';
+  const datos = facturaPendiente;
+  const r = await api('/api/erp/facturacion/emitir', { method: 'POST', body: datos });
+  ocupado(btn, false);
+  $('#dlgConfirmar').close();
+  mostrarResultado(r, datos);
+  if (r.ok) {
+    facturaPendiente = null;
+    guardarClienteSiEsNuevo(datos.receptor);
   }
 });
 
-async function initApp() {
-  await loadCurrentUser();
-  await loadAccounts();
-  await loadFinancialTicker();
-  await loadQueueItems();
-  await loadCRMClientes();
-  await loadComprobantesList();
-  loadGeneralPreferences();
-  if (currentUser && currentUser.role === 'admin') {
-    await loadUsersList();
-  }
-  connectLogsSSE();
-
-  // Polling automático
-  setInterval(loadFinancialTicker, 60000);
-  setInterval(loadQueueItems, 5000);
-}
-
-// --- AUTHENTICATION & LOGIN / REGISTER ---
-function showLoginOverlay() {
-  document.getElementById('loginOverlay')?.classList.remove('hidden');
-}
-
-function hideLoginOverlay() {
-  document.getElementById('loginOverlay')?.classList.add('hidden');
-}
-
-function showAuthAlert(message, type = 'error') {
-  const alertEl = document.getElementById('authAlert');
-  if (!alertEl) return;
-  alertEl.className = 'p-3.5 rounded-xl text-xs font-bold border flex items-start space-x-2.5 transition-all mb-3';
-  
-  if (type === 'error') {
-    alertEl.classList.add('bg-rose-50', 'border-rose-300', 'text-rose-900');
-    alertEl.innerHTML = `<i class="fa-solid fa-circle-exclamation text-rose-600 text-base mt-0.5 flex-shrink-0"></i> <div class="flex-1 leading-snug"><span class="font-extrabold block uppercase tracking-wide text-[10px] text-rose-700 mb-0.5">Acceso Denegado / Error:</span>${escapeHtml(message)}</div>`;
+function mostrarResultado(r, datos) {
+  const caja = $('#resultadoEmision');
+  const d = r.data || {};
+  caja.classList.remove('oculto');
+  if (!r.ok) {
+    const posible = /puede haber quedado emitido|ATENCIÓN/i.test(d.message || '');
+    caja.innerHTML = `<div class="seccion">
+      <h2>${posible ? 'Revisá en ARCA antes de reintentar' : 'No se emitió'}</h2>
+      <div class="aviso ${posible ? 'atencion' : 'error'}" style="margin-top:12px">${ic('alerta')}<span>${esc(d.message || 'Error desconocido.')}</span></div>
+      <div class="fila-acciones" style="margin-top:16px"><button class="boton" data-accion="cerrar-resultado">Volver a la factura</button></div></div>`;
   } else {
-    alertEl.classList.add('bg-emerald-50', 'border-emerald-300', 'text-emerald-900');
-    alertEl.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600 text-base mt-0.5 flex-shrink-0"></i> <div class="flex-1 leading-snug"><span class="font-extrabold block uppercase tracking-wide text-[10px] text-emerald-700 mb-0.5">Completado:</span>${escapeHtml(message)}</div>`;
+    caja.innerHTML = `<div class="seccion">
+      <p class="tenue">${esc(d.message || 'Comprobante emitido')}</p>
+      <h2 style="margin:6px 0 16px">${esc(d.tipoComprobante)} <span class="dato">${esc(d.comprobanteNro)}</span></h2>
+      <dl class="ficha">
+        <dt>CAE</dt><dd class="cae">${esc(d.cae || 'no leído')}</dd>
+        <dt>Vence</dt><dd>${esc(d.caeVencimiento || '-')}</dd>
+        <dt>Total</dt><dd class="monto" style="font-size:22px">${fmtPesos(d.totalImporte)}</dd>
+        <dt>Cliente</dt><dd>${esc(datos.receptor.razonSocial || 'Consumidor Final')}</dd>
+        ${datos.receptor.email ? `<dt>Mail</dt><dd>${d.emailEnviado ? `Enviado a ${esc(datos.receptor.email)}` : d.ambiente === 'homologacion' ? 'No se manda en modo prueba' : 'No se pudo enviar: reintentalo desde el botón'}</dd>` : ''}
+      </dl>
+      <div class="fila-acciones" style="margin-top:20px">
+        ${d.comprobanteId ? `<button class="boton" data-accion="pdf" data-id="${d.comprobanteId}">${ic('pdf')}Ver PDF</button><button class="boton" data-accion="enviar" data-id="${d.comprobanteId}">${ic('mail')}Enviar por mail</button>` : ''}
+        <button class="boton principal" data-accion="nueva">${ic('mas')}Nueva factura</button>
+      </div></div>`;
+    $('#formFactura').classList.add('oculto');
   }
+  caja.focus();
+  caja.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function hideAuthAlert() {
-  const alertEl = document.getElementById('authAlert');
-  if (alertEl) {
-    alertEl.className = 'hidden p-3.5 rounded-xl text-xs font-bold border flex items-start space-x-2.5 transition-all';
-    alertEl.innerHTML = '';
-  }
+$('#resultadoEmision').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-accion]');
+  if (!b) return;
+  const accion = b.dataset.accion;
+  if (accion === 'pdf') verPdf(b.dataset.id, b);
+  if (accion === 'enviar') abrirComprobante(b.dataset.id, true);
+  if (accion === 'cerrar-resultado') $('#resultadoEmision').classList.add('oculto');
+  if (accion === 'nueva') limpiarFactura();
+});
+
+function limpiarFactura() {
+  $('#formFactura').reset();
+  $('#items').innerHTML = '';
+  agregarItem();
+  actualizarFormTipo();
+  $('#facDocTipo').dispatchEvent(new Event('change'));
+  $$('#formFactura [aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
+  $('#resultadoEmision').classList.add('oculto');
+  $('#formFactura').classList.remove('oculto');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function switchAuthMode(mode) {
-  hideAuthAlert();
-  const loginForm = document.getElementById('loginForm');
-  const registerForm = document.getElementById('registerForm');
-  const tabLogin = document.getElementById('tabBtnLogin');
-  const tabRegister = document.getElementById('tabBtnRegister');
-
-  if (mode === 'register') {
-    loginForm?.classList.add('hidden');
-    registerForm?.classList.remove('hidden');
-
-    tabLogin?.classList.remove('text-indigo-700', 'bg-white', 'shadow-sm');
-    tabLogin?.classList.add('text-slate-600');
-
-    tabRegister?.classList.remove('text-slate-600');
-    tabRegister?.classList.add('text-indigo-700', 'bg-white', 'shadow-sm');
-
-    document.getElementById('regName')?.focus();
-  } else {
-    registerForm?.classList.add('hidden');
-    loginForm?.classList.remove('hidden');
-
-    tabRegister?.classList.remove('text-indigo-700', 'bg-white', 'shadow-sm');
-    tabRegister?.classList.add('text-slate-600');
-
-    tabLogin?.classList.remove('text-slate-600');
-    tabLogin?.classList.add('text-indigo-700', 'bg-white', 'shadow-sm');
-
-    document.getElementById('loginUsername')?.focus();
-  }
+async function guardarClienteSiEsNuevo(rec) {
+  if (!rec.nroDoc || estado.clientes.some(c => String(c.cuit).replace(/\D/g, '') === rec.nroDoc)) return;
+  const r = await api('/api/erp/clientes', { method: 'POST', body: { cuit: rec.nroDoc, razonSocial: rec.razonSocial, tipoDoc: rec.tipoDoc === 'DNI' ? 'DNI' : 'CUIT', condicionIva: rec.condicionIva, email: rec.email, domicilio: rec.domicilio } });
+  if (r.ok) cargarClientes();
 }
 
-async function handleUserLogin(e) {
-  e.preventDefault();
-  hideAuthAlert();
-  const username = document.getElementById('loginUsername').value.trim();
-  const password = document.getElementById('loginPassword').value;
-  const btn = document.getElementById('btnLoginSubmit');
+/* ======================================================================
+   FACTURAR · VARIAS (borradores)
+   ====================================================================== */
+$('#btnInterpretar').addEventListener('click', async () => {
+  const texto = $('#txtLote').value.trim();
+  if (!texto) return aviso('Pegá una lista o un mensaje primero.', 'error');
+  const btn = $('#btnInterpretar');
+  ocupado(btn, true);
+  const r = await api('/api/queue/parse-excel', { method: 'POST', body: { text: texto, forceAi: $('#chkIa').checked } });
+  ocupado(btn, false);
+  const msg = $('#loteMensaje');
+  if (!r.ok) { msg.className = 'aviso error'; msg.textContent = r.data.message || 'No se pudo leer el texto.'; return; }
+  estado.borradores = r.data.items || [];
+  const lector = { groq_ai: 'Leído con IA (Groq).', heuristic_nlp: 'Leído sin IA.', tabular: 'Leído como tabla.' }[r.data.parserUsed] || '';
+  msg.className = 'aviso info';
+  msg.textContent = estado.borradores.length
+    ? `${lector} ${estado.borradores.length} borrador(es). Revisalos antes de pasarlos a la cola.${r.data.message ? ' ' + r.data.message : ''}`
+    : `No se encontraron facturas en el texto. ${r.data.message || 'Revisá que cada línea tenga un importe.'}`;
+  renderBorradores();
+});
 
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Verificando...';
+const CONDS = ['', 'Consumidor Final', 'Responsable Inscripto', 'Monotributo', 'Exento'];
+function problemasBorrador(b) {
+  const p = [];
+  const doc = String(b.docNro || '').replace(/\D/g, '');
+  if (doc && doc.length !== 11 && (doc.length < 7 || doc.length > 8)) p.push('Documento inválido.');
+  if (doc.length === 11 && !b.condicionIva) p.push('Falta la condición frente al IVA.');
+  if (doc.length === 11 && !String(b.razonSocial || '').trim()) p.push('Falta el nombre.');
+  if (!String(b.descripcion || '').trim()) p.push('Falta la descripción.');
+  if (!(numero(b.importeTotal) > 0)) p.push('Falta el importe.');
+  if (b.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.email)) p.push('Email inválido.');
+  return p;
+}
 
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+function renderBorradores() {
+  const caja = $('#borradores');
+  caja.classList.toggle('oculto', !estado.borradores.length);
+  if (!estado.borradores.length) { caja.innerHTML = ''; return; }
+  caja.innerHTML = estado.borradores.map((b, i) => {
+    const p = [...new Set([...(b.advertencias || []).filter(a => /CUIT .* no es válido/.test(a)), ...problemasBorrador(b)])];
+    return `<div class="borrador" data-i="${i}">
+      <div class="cabecera"><strong>Borrador ${i + 1}</strong>
+        <div class="fila-acciones">${p.length ? `<span class="etiqueta-estado e-prueba">Revisar</span>` : `<span class="etiqueta-estado e-ok">Listo</span>`}
+        <button class="boton chico texto peligro" data-quitar="${i}" aria-label="Quitar borrador ${i + 1}">${ic('basura')}</button></div></div>
+      ${p.length ? `<ul class="problemas">${p.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      <div class="campos tres">
+        <div><label for="b${i}doc">CUIT / DNI</label><input id="b${i}doc" data-c="docNro" value="${esc(b.docNro)}" inputmode="numeric" placeholder="Vacío = Consumidor Final"></div>
+        <div><label for="b${i}nom">Nombre</label><input id="b${i}nom" data-c="razonSocial" value="${esc(b.razonSocial)}"></div>
+        <div><label for="b${i}iva">Condición IVA</label><select id="b${i}iva" data-c="condicionIva">${CONDS.map(c => `<option value="${c}" ${c === b.condicionIva ? 'selected' : ''}>${c || 'Elegir…'}</option>`).join('')}</select></div>
+        <div><label for="b${i}des">Descripción</label><input id="b${i}des" data-c="descripcion" value="${esc(b.descripcion)}"></div>
+        <div><label for="b${i}imp">Importe</label><input id="b${i}imp" data-c="importeTotal" value="${esc(b.importeTotal)}" inputmode="decimal"></div>
+        <div><label for="b${i}tip">Tipo</label><select id="b${i}tip" data-c="tipoComprobante">${['Factura C', 'Factura B', 'Factura A', 'Recibo C'].map(t => `<option ${t === b.tipoComprobante ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="ancho-total"><label for="b${i}mail">Email (opcional)</label><input id="b${i}mail" data-c="email" type="email" value="${esc(b.email || '')}"></div>
+      </div></div>`;
+  }).join('') + `<div class="seccion" style="border-top:1px solid var(--linea);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+      <span class="tenue">${estado.borradores.length} borrador(es) · total ${fmtPesos(estado.borradores.reduce((a, b) => a + numero(b.importeTotal), 0))}</span>
+      <button class="boton principal" id="btnACola">${ic('cola')}Pasar a la cola</button></div>`;
+}
+
+$('#borradores').addEventListener('input', (e) => {
+  const campo = e.target.dataset.c;
+  const fila = e.target.closest('[data-i]');
+  if (!campo || !fila) return;
+  const b = estado.borradores[Number(fila.dataset.i)];
+  b[campo] = e.target.value;
+  if (campo === 'importeTotal') { b.precioUnitario = numero(e.target.value); b.cantidad = 1; }
+  if (campo === 'docNro') b.advertencias = [];
+  const p = problemasBorrador(b);
+  const etiqueta = fila.querySelector('.etiqueta-estado');
+  etiqueta.className = `etiqueta-estado ${p.length ? 'e-prueba' : 'e-ok'}`;
+  etiqueta.textContent = p.length ? 'Revisar' : 'Listo';
+  let ul = fila.querySelector('.problemas');
+  if (p.length) { if (!ul) { ul = document.createElement('ul'); ul.className = 'problemas'; fila.querySelector('.cabecera').after(ul); } ul.innerHTML = p.map(x => `<li>${esc(x)}</li>`).join(''); }
+  else ul?.remove();
+});
+
+$('#borradores').addEventListener('click', async (e) => {
+  const q = e.target.closest('[data-quitar]');
+  if (q) { estado.borradores.splice(Number(q.dataset.quitar), 1); renderBorradores(); return; }
+  if (e.target.closest('#btnACola')) {
+    if (!puedeOperar()) return aviso('Tu usuario es de solo lectura.', 'error');
+    const malos = estado.borradores.map((b, i) => problemasBorrador(b).length ? i + 1 : 0).filter(Boolean);
+    if (malos.length) return aviso(`Revisá ${malos.length === 1 ? 'el borrador' : 'los borradores'} ${malos.join(', ')} antes de pasarlos a la cola.`, 'error');
+    const c = cuentaActiva();
+    const items = estado.borradores.map(b => {
+      const doc = String(b.docNro || '').replace(/\D/g, '');
+      const imp = numero(b.importeTotal);
+      return { ...b, docNro: doc, docTipo: doc.length === 11 ? 'CUIT' : doc ? 'DNI' : 'Consumidor Final', condicionIva: b.condicionIva || (doc.length === 11 ? '' : 'Consumidor Final'), importeTotal: imp, precioUnitario: imp, cantidad: 1, cuitEmisor: c?.cuit, puntoVenta: c?.ws?.puntoVentaWs || c?.puntoVentaDefault || 1 };
     });
-
-    const data = await res.json().catch(() => ({ success: false, message: 'Respuesta inválida del servidor.' }));
-    if (data.success && data.token) {
-      authToken = data.token;
-      localStorage.setItem('botarca_token', authToken);
-      currentUser = data.user;
-      hideLoginOverlay();
-      showToast(`¡Bienvenido, ${data.user.name || data.user.username}!`, 'success');
-      await initApp();
-    } else {
-      const errMsg = data.message || 'Usuario o contraseña incorrectos.';
-      showAuthAlert(errMsg, 'error');
-      showToast(errMsg, 'error');
-    }
-  } catch (err) {
-    showAuthAlert('Error conectando con el servidor. Revisa tu conexión a internet.', 'error');
-    showToast('Error conectando con el servidor.', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<span>Ingresar a la Plataforma</span> <i class="fa-solid fa-arrow-right text-xs"></i>';
+    const btn = e.target.closest('#btnACola');
+    ocupado(btn, true);
+    const r = await api('/api/queue/add', { method: 'POST', body: { items } });
+    ocupado(btn, false);
+    if (!r.ok) return aviso((r.data.problemas || [])[0] || r.data.message, 'error');
+    aviso(`${r.data.count} comprobante(s) en la cola. Nada se emite hasta que toques "Emitir pendientes".`);
+    estado.borradores = []; renderBorradores(); $('#txtLote').value = ''; $('#loteMensaje').classList.add('oculto');
+    cambiarModo('cola');
   }
+});
+
+/* ======================================================================
+   FACTURAR · COLA
+   ====================================================================== */
+const ESTADO_COLA = { pendiente: ['e-espera', 'Pendiente'], procesando: ['e-proceso', 'Emitiendo'], emitida: ['e-ok', 'Emitida'], error: ['e-error', 'Con error'] };
+
+async function cargarCola() {
+  const r = await api('/api/queue');
+  if (!r.ok) return;
+  estado.cola = r.data;
+  const pend = (r.data.items || []).filter(i => i.estado === 'pendiente').length;
+  $('#navCola').textContent = pend; $('#navCola').classList.toggle('oculto', !pend);
+  $('#segCola').textContent = pend ? `(${pend})` : '';
+  renderCola();
+  clearInterval(estado.sondeoCola);
+  if (r.data.isProcessing) estado.sondeoCola = setInterval(cargarCola, 3000);
 }
 
-async function handleUserRegister(e) {
-  e.preventDefault();
-  hideAuthAlert();
-  const name = document.getElementById('regName').value.trim();
-  const username = document.getElementById('regUsername').value.trim();
-  const email = document.getElementById('regEmail').value.trim();
-  const password = document.getElementById('regPassword').value;
-  const confirm = document.getElementById('regPasswordConfirm').value;
-  const btn = document.getElementById('btnRegisterSubmit');
-
-  if (password !== confirm) {
-    showAuthAlert('Las contraseñas no coinciden. Por favor verifícalas.', 'error');
-    showToast('Las contraseñas no coinciden.', 'warn');
-    return;
-  }
-
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Creando cuenta...';
-
-  try {
-    const res = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, username, email, password })
-    });
-
-    const data = await res.json().catch(() => ({ success: false, message: 'Respuesta inválida del servidor.' }));
-    if (data.success) {
-      showToast(data.message || '¡Cuenta creada con éxito!', 'success');
-      if (data.token) {
-        authToken = data.token;
-        localStorage.setItem('botarca_token', authToken);
-        currentUser = data.user;
-        hideLoginOverlay();
-        await initApp();
-      } else {
-        switchAuthMode('login');
-        document.getElementById('loginUsername').value = username;
-        document.getElementById('loginPassword').value = '';
-        showAuthAlert('Cuenta creada con éxito. Ya podés iniciar sesión con tus datos.', 'success');
-      }
-    } else {
-      const errMsg = data.message || (data.errors ? data.errors.join(' | ') : 'Error al registrar usuario.');
-      showAuthAlert(errMsg, 'error');
-      showToast(errMsg, 'error');
-    }
-  } catch (err) {
-    showAuthAlert('Error en la comunicación con el servidor al registrar cuenta.', 'error');
-    showToast('Error en la comunicación con el servidor.', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<span>Crear Usuario & Empezar</span> <i class="fa-solid fa-paper-plane text-xs"></i>';
-  }
+function renderCola() {
+  const items = estado.cola.items || [];
+  const pend = items.filter(i => i.estado === 'pendiente');
+  $('#btnProcesarCola').innerHTML = `${ic('play')}Emitir pendientes${pend.length ? ` (${pend.length})` : ''}`;
+  $('#colaEstado').textContent = estado.cola.isProcessing ? 'Emitiendo… podés cerrar esta pantalla, sigue en el servidor.' : '';
+  $('#listaCola').innerHTML = items.length ? items.map(it => {
+    const [cls, txt] = ESTADO_COLA[it.estado] || ['e-espera', it.estado];
+    return `<li><div class="fila" style="cursor:default">
+      <div style="min-width:0"><div class="principal-txt">${esc(it.razonSocial || 'Consumidor Final')}</div>
+        <div class="secundario">${esc(it.tipoComprobante)} · ${esc(it.descripcion)}${it.docNro ? ` · <span class="dato">${fmtCuit(it.docNro)}</span>` : ''}</div>
+        ${it.estado === 'emitida' ? `<div class="secundario">N° <span class="dato">${esc(it.comprobanteNro)}</span> · CAE <span class="dato">${esc(it.cae || '-')}</span></div>` : ''}
+        ${it.estado === 'error' ? `<div class="secundario" style="color:var(--error);white-space:normal">${esc(it.errorMensaje)}</div>` : ''}</div>
+      <div class="derecha"><div class="monto">${fmtPesos(it.importeTotal)}</div>
+        <div class="fila-acciones" style="justify-content:flex-end;margin-top:4px"><span class="etiqueta-estado ${cls}">${txt}</span>
+        ${it.estado !== 'procesando' ? `<button class="boton chico texto peligro" data-borrar-cola="${it.id}" aria-label="Quitar de la cola">${ic('basura')}</button>` : ''}</div></div>
+    </div></li>`;
+  }).join('') : `<li class="vacio"><h3>La cola está vacía</h3><p>Cargá varias facturas desde "Varias": se revisan y quedan acá hasta que decidas emitirlas.</p></li>`;
 }
 
-function fillAdminCredentials() {
-  const u = document.getElementById('loginUsername');
-  const p = document.getElementById('loginPassword');
-  if (u) u.value = 'admin';
-  if (p) p.value = 'admin123';
-  showToast('Credenciales de administrador cargadas.', 'info');
+$('#listaCola').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-borrar-cola]');
+  if (!b) return;
+  const r = await api(`/api/queue/${b.dataset.borrarCola}`, { method: 'DELETE' });
+  if (!r.ok) return aviso(r.data.message || 'No se pudo quitar.', 'error');
+  cargarCola();
+});
+
+$('#btnProcesarCola').addEventListener('click', () => {
+  if (!puedeOperar()) return aviso('Tu usuario es de solo lectura.', 'error');
+  const pend = (estado.cola.items || []).filter(i => i.estado === 'pendiente');
+  if (!pend.length) return aviso('No hay comprobantes pendientes.', 'error');
+  const real = $('#badgeAmbiente').classList.contains('real');
+  const total = pend.reduce((a, i) => a + Number(i.importeTotal || 0), 0);
+  $('#confirmarCuerpo').innerHTML = `
+    <div class="aviso ${real ? 'atencion' : 'info'}">${ic(real ? 'alerta' : 'info')}<span>${real ? `Se van a emitir <strong>${pend.length} facturas reales</strong> en ARCA, una por una.` : `Se van a autorizar ${pend.length} comprobantes de prueba.`}</span></div>
+    <dl class="ficha"><dt>Cantidad</dt><dd>${pend.length}</dd><dt>Total</dt><dd class="monto" style="font-size:22px">${fmtPesos(total)}</dd></dl>`;
+  $('#btnConfirmarEmision').textContent = real ? `Emitir ${pend.length} facturas` : 'Emitir de prueba';
+  facturaPendiente = '__cola__';
+  $('#dlgConfirmar').showModal();
+});
+
+// El mismo diálogo confirma una factura o la cola
+$('#btnConfirmarEmision').addEventListener('click', async (e) => {
+  if (facturaPendiente !== '__cola__') return;
+  e.stopImmediatePropagation();
+  facturaPendiente = null;
+  $('#dlgConfirmar').close();
+  const r = await api('/api/queue/process', { method: 'POST', body: {} });
+  if (!r.ok) return aviso(r.data.message || 'No se pudo iniciar.', 'error');
+  aviso('Emitiendo la cola. El estado se actualiza solo.');
+  setTimeout(cargarCola, 800);
+}, true);
+
+$('#btnLimpiarCola').addEventListener('click', async () => {
+  const r = await api('/api/queue/clear', { method: 'POST', body: { status: 'emitida' } });
+  if (r.ok) { aviso('Se quitaron las emitidas de la cola (siguen en Comprobantes).'); cargarCola(); }
+});
+
+/* ======================================================================
+   COMPROBANTES
+   ====================================================================== */
+async function cargarComprobantes() {
+  $('#listaComp').innerHTML = '<li class="vacio">Cargando…</li>';
+  const r = await api('/api/erp/comprobantes');
+  estado.comprobantes = r.ok ? r.data.comprobantes || [] : [];
+  renderComprobantes();
 }
 
-function handleUserLogout(notify = true) {
-  localStorage.removeItem('botarca_token');
-  authToken = '';
-  currentUser = null;
-  if (sseSource) {
-    sseSource.close();
-    sseSource = null;
-  }
-  showLoginOverlay();
-  if (notify) {
-    showToast('Sesión cerrada.', 'info');
-  }
+function renderComprobantes() {
+  const q = $('#buscarComp').value.trim().toLowerCase();
+  const filtro = $('#filtroComp').value;
+  const mes = new Date().toISOString().slice(0, 7);
+  const lista = estado.comprobantes.filter(c => {
+    if (filtro === 'Autorizado' && c.estado !== 'Autorizado') return false;
+    if (filtro === 'Prueba' && !/Prueba/.test(c.estado)) return false;
+    if (filtro === 'mes' && !String(c.fechaEmision).startsWith(mes)) return false;
+    if (!q) return true;
+    return [c.razonSocialReceptor, c.cuitReceptor, c.comprobanteFormato, c.cae, c.tipoComprobante].join(' ').toLowerCase().includes(q.replace(/-/g, '')) ||
+      [c.razonSocialReceptor, c.comprobanteFormato].join(' ').toLowerCase().includes(q);
+  });
+  $('#listaComp').innerHTML = lista.length ? lista.map(c => `<li><button class="fila" data-comp="${c.id}">
+      <div style="min-width:0"><div class="principal-txt">${esc(c.razonSocialReceptor || 'Consumidor Final')}</div>
+        <div class="secundario">${fmtFecha(c.fechaEmision)} · ${esc(c.tipoComprobante)} <span class="dato">${esc(c.comprobanteFormato)}</span></div></div>
+      <div class="derecha"><div class="monto">${fmtPesos(c.importeTotal)}</div>
+        <span class="etiqueta-estado ${/Prueba/.test(c.estado) ? 'e-prueba' : 'e-ok'}" style="margin-top:4px">${/Prueba/.test(c.estado) ? 'Prueba' : 'Autorizado'}</span></div>
+    </button></li>`).join('')
+    : estado.comprobantes.length
+      ? '<li class="vacio"><h3>Sin resultados</h3><p>Probá con otra búsqueda o filtro.</p></li>'
+      : '<li class="vacio"><h3>Todavía no emitiste comprobantes</h3><p>Las facturas que emitas aparecen acá, con su PDF y la opción de mandarlas por mail.</p></li>';
+}
+$('#buscarComp').addEventListener('input', renderComprobantes);
+$('#filtroComp').addEventListener('change', renderComprobantes);
+$('#listaComp').addEventListener('click', (e) => { const b = e.target.closest('[data-comp]'); if (b) abrirComprobante(b.dataset.comp); });
+
+async function abrirComprobante(id, enfocarMail = false) {
+  if (!estado.comprobantes.length) { const r = await api('/api/erp/comprobantes'); estado.comprobantes = r.ok ? r.data.comprobantes || [] : []; }
+  const c = estado.comprobantes.find(x => x.id === id);
+  if (!c) return aviso('No se encontró el comprobante.', 'error');
+  $('#dlgCompTitulo').innerHTML = `${esc(c.tipoComprobante)} <span class="dato">${esc(c.comprobanteFormato)}</span>`;
+  $('#dlgCompSub').textContent = `${fmtFecha(c.fechaEmision)} · ${c.estado}`;
+  const envios = c.envios || [];
+  $('#dlgCompCuerpo').innerHTML = `
+    <dl class="ficha">
+      <dt>Cliente</dt><dd>${esc(c.razonSocialReceptor)}${c.cuitReceptor ? ` · <span class="dato">${fmtCuit(c.cuitReceptor)}</span>` : ''}</dd>
+      <dt>Condición IVA</dt><dd>${esc(c.condicionIvaReceptor || '-')}</dd>
+      <dt>Total</dt><dd class="monto" style="font-size:22px">${fmtPesos(c.importeTotal)}</dd>
+      <dt>CAE</dt><dd class="dato">${esc(c.cae || '-')}</dd>
+      <dt>Vence CAE</dt><dd>${esc(c.caeVencimiento || '-')}</dd>
+      <dt>Emisor</dt><dd>${esc(c.razonSocialEmisor || '')} <span class="dato">${fmtCuit(c.cuitEmisor)}</span></dd>
+    </dl>
+    ${c.tienePdf ? `<form id="formEnviar" class="campos" novalidate>
+      <div><label for="envEmail">Mandar por mail a</label><input id="envEmail" type="email" value="${esc(c.emailReceptor || '')}" placeholder="cliente@empresa.com"></div>
+    </form>` : `<div class="aviso info">${ic('info')}<span>Se emitió por "Comprobantes en línea": el PDF original está en ARCA.</span></div>`}
+    ${envios.length ? `<div><span class="etiqueta">Envíos</span><ul class="lista">${envios.map(v => `<li class="paso-prueba"><span class="${v.ok ? 'ok' : 'mal'}">${ic(v.ok ? 'check' : 'x')}</span><span>${new Date(v.fecha).toLocaleString('es-AR')} · ${esc(v.email)}${v.ok ? '' : ` · ${esc(v.mensaje || 'falló')}`}</span></li>`).join('')}</ul></div>` : ''}`;
+  $('#dlgCompPie').innerHTML = c.tienePdf
+    ? `<button class="boton" data-cerrar>Cerrar</button><button class="boton" id="btnPdfComp">${ic('pdf')}Ver PDF</button><button class="boton principal" id="btnEnviarComp">${ic('mail')}Enviar</button>`
+    : '<button class="boton" data-cerrar>Cerrar</button>';
+  $('#dlgComprobante').showModal();
+  if (enfocarMail) $('#envEmail')?.focus();
+  $('#btnPdfComp')?.addEventListener('click', (e) => verPdf(c.id, e.currentTarget));
+  $('#btnEnviarComp')?.addEventListener('click', async (e) => {
+    const email = $('#envEmail').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('#envEmail').setAttribute('aria-invalid', 'true'); return aviso('Ingresá un email válido.', 'error'); }
+    ocupado(e.currentTarget, true);
+    const r = await api(`/api/erp/comprobantes/${c.id}/enviar`, { method: 'POST', body: { email } });
+    ocupado(e.currentTarget, false);
+    aviso(r.data.message, r.ok ? 'ok' : 'error');
+    if (r.ok) { $('#dlgComprobante').close(); cargarComprobantes(); }
+  });
 }
 
-async function loadCurrentUser() {
-  if (!authToken) return false;
-  try {
-    const res = await fetchWithAuth('/api/auth/me');
-    if (res && res.ok) {
-      const data = await res.json();
-      if (data.success && data.user) {
-        currentUser = data.user;
-        
-        const displayName = currentUser.name || currentUser.username;
-        const initials = (displayName.length > 2 ? displayName.substring(0, 2) : displayName).toUpperCase();
-
-        // Top Navbar elements
-        const elName = document.getElementById('headerUserName');
-        if (elName) elName.innerText = displayName;
-
-        const elSubtext = document.getElementById('headerUserSubtext');
-        if (elSubtext) elSubtext.innerText = `@${currentUser.username}`;
-
-        const elRole = document.getElementById('headerUserRoleBadge');
-        if (elRole) {
-          elRole.innerText = currentUser.role === 'admin' ? 'ADMIN' : 'OPERADOR';
-          elRole.className = currentUser.role === 'admin'
-            ? 'px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase'
-            : 'px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 uppercase';
-        }
-
-        const elAvatar = document.getElementById('headerUserAvatar');
-        if (elAvatar) elAvatar.innerText = initials;
-
-        // Settings tab Profile card elements
-        const pAvatar = document.getElementById('profileCardAvatar');
-        if (pAvatar) pAvatar.innerText = initials;
-
-        const pName = document.getElementById('profileCardName');
-        if (pName) pName.innerText = displayName;
-
-        const pUser = document.getElementById('profileCardUsername');
-        if (pUser) pUser.innerText = `@${currentUser.username}`;
-
-        const pEmail = document.getElementById('profileCardEmail');
-        if (pEmail) pEmail.innerText = currentUser.email || 'Sin email registrado';
-
-        const pRole = document.getElementById('profileCardRole');
-        if (pRole) {
-          pRole.innerText = currentUser.role === 'admin' ? 'Super Administrador' : 'Operador';
-          pRole.className = currentUser.role === 'admin'
-            ? 'px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200'
-            : 'px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200';
-        }
-
-        const pSince = document.getElementById('profileCardSince');
-        if (pSince && currentUser.createdAt) {
-          pSince.innerText = new Date(currentUser.createdAt).toLocaleDateString('es-AR');
-        }
-
-        const secUsers = document.getElementById('sectionUsersAdmin');
-        if (secUsers) {
-          if (currentUser.role === 'admin') secUsers.classList.remove('hidden');
-          else secUsers.classList.add('hidden');
-        }
-        return true;
-      }
-    }
-    return false;
-  } catch (e) {
-    return false;
-  }
+async function verPdf(id, btn) {
+  ocupado(btn, true);
+  const r = await api(`/api/erp/comprobantes/${id}/pdf`, { blob: true });
+  ocupado(btn, false);
+  if (!r.ok) return aviso(r.data.message || 'No se pudo generar el PDF.', 'error');
+  abrirBlob(r.blob);
 }
 
-async function fetchWithAuth(url, options = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-    ...(options.headers || {})
-  };
-
-  const response = await fetch(url, { ...options, headers });
-  // 401 = sesión vencida -> cerrar sesión. 403 = sin permiso (ej. usuario de solo lectura):
-  // NO cerrar sesión, se muestra el mensaje del servidor.
-  if (response.status === 401) {
-    handleUserLogout(false);
-    throw new Error('Sesión expirada o token inválido');
-  }
-
-  // Interceptar respuestas HTML de error (evita el "Unexpected token '<', <!DOCTYPE...")
-  const contentType = response.headers.get('content-type') || '';
-  const originalJson = response.json.bind(response);
-  response.json = async () => {
-    if (!contentType.includes('application/json')) {
-      const text = await response.text();
-      return {
-        success: false,
-        message: response.status >= 400 
-          ? `Error ${response.status}: El servidor no devolvió una respuesta válida.` 
-          : 'Respuesta no estructurada recibida del servidor.',
-        raw: text.substring(0, 300)
-      };
-    }
-    return await originalJson();
-  };
-
-  return response;
-}
-
-// --- NAVIGATION TABS ---
-function switchTab(tabId) {
-  document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-  document.querySelectorAll('.nav-tab-btn').forEach(el => el.classList.remove('active'));
-
-  const targetSection = document.getElementById(`tab-${tabId}`);
-  if (targetSection) targetSection.classList.remove('hidden');
-
-  const targetBtn = document.querySelector(`.nav-tab-btn[data-tab="${tabId}"]`);
-  if (targetBtn) targetBtn.classList.add('active');
-
-  if (tabId === 'facturar') {
-    loadQueueItems();
-    loadAccounts();
-  }
-  if (tabId === 'comprobantes') loadComprobantesList();
-  if (tabId === 'crm') loadCRMClientes();
-  if (tabId === 'settings') {
-    loadAccounts();
-    loadGeneralPreferences();
-    if (currentUser && currentUser.role === 'admin') loadUsersList();
-  }
-}
-
-// --- SUBMODE SWITCHER (LOTE vs INDIVIDUAL) ---
-function setInvoiceSubmode(mode) {
-  const btnLote = document.getElementById('btnSubmodeLote');
-  const btnManual = document.getElementById('btnSubmodeManual');
-  const viewLote = document.getElementById('subviewLote');
-  const viewManual = document.getElementById('subviewManual');
-
-  if (mode === 'manual') {
-    viewLote?.classList.add('hidden');
-    viewManual?.classList.remove('hidden');
-    
-    btnManual?.classList.add('bg-indigo-50/80', 'border-indigo-600', 'shadow-sm');
-    btnManual?.classList.remove('bg-white', 'border-slate-200');
-    
-    btnLote?.classList.remove('bg-indigo-50/80', 'border-indigo-600', 'shadow-sm');
-    btnLote?.classList.add('bg-white', 'border-slate-200');
-  } else {
-    viewManual?.classList.add('hidden');
-    viewLote?.classList.remove('hidden');
-    
-    btnLote?.classList.add('bg-indigo-50/80', 'border-indigo-600', 'shadow-sm');
-    btnLote?.classList.remove('bg-white', 'border-slate-200');
-    
-    btnManual?.classList.remove('bg-indigo-50/80', 'border-indigo-600', 'shadow-sm');
-    btnManual?.classList.add('bg-white', 'border-slate-200');
-  }
-}
-
-// --- FINANCIAL TICKER (ArgentinaDatos) ---
-async function loadFinancialTicker() {
-  try {
-    const res = await fetch('/api/finanzas/resumen');
-    if (!res.ok) return;
-    const data = await res.json();
-
-    const d = data.dolares || {};
-    if (d.oficial) document.getElementById('tickOficial') && (document.getElementById('tickOficial').innerText = `$${d.oficial.compra} / $${d.oficial.venta}`);
-    if (d.blue) document.getElementById('tickBlue') && (document.getElementById('tickBlue').innerText = `$${d.blue.venta}`);
-    if (d.mep) document.getElementById('tickMep') && (document.getElementById('tickMep').innerText = `$${d.mep.venta || d.mep.compra}`);
-    if (d.ccl) document.getElementById('tickCcl') && (document.getElementById('tickCcl').innerText = `$${d.ccl.venta || d.ccl.compra}`);
-  } catch (e) {}
-}
-
-// --- MULTI-ACCOUNT CUIT MANAGEMENT ---
-async function loadAccounts() {
-  try {
-    const res = await fetchWithAuth('/api/accounts');
-    if (!res.ok) return;
-    const data = await res.json();
-    allAccounts = data.accounts || [];
-
-    // Header selector
-    const headerSel = document.getElementById('headerAccountSelect');
-    if (headerSel) {
-      if (allAccounts.length === 0) {
-        headerSel.innerHTML = '<option value="">Sin CUIT configurado</option>';
-      } else {
-        headerSel.innerHTML = allAccounts.map(a => `
-          <option value="${a.cuit}" ${a.cuit === data.activeCuit ? 'selected' : ''}>
-            ${escapeHtml(a.razonSocial || 'Empresa')} (${formatCuit(a.cuit)})
-          </option>
-        `).join('');
-      }
-    }
-
-    // Grid in accounts tab
-    const grid = document.getElementById('accountsGrid');
-    if (grid) {
-      if (allAccounts.length === 0) {
-        grid.innerHTML = '<div class="col-span-full py-8 text-center text-slate-400">No hay empresas ni CUITs registrados aún.</div>';
-      } else {
-        grid.innerHTML = allAccounts.map(a => `
-          <div class="p-4 bg-white border ${a.cuit === data.activeCuit ? 'border-indigo-600 ring-2 ring-indigo-100 bg-indigo-50/20' : 'border-slate-200'} rounded-xl shadow-sm space-y-2.5 transition">
-            <div class="flex items-center justify-between">
-              <strong class="text-sm font-bold text-slate-900 truncate">${escapeHtml(a.razonSocial || 'Empresa')}</strong>
-              ${a.cuit === data.activeCuit ? '<span class="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold uppercase">Emisor Activo</span>' : ''}
-            </div>
-            <div class="text-xs text-slate-600">CUIT Empresa: <strong class="text-slate-900 font-mono select-all">${formatCuit(a.cuit)}</strong></div>
-            <div class="text-[11px] text-slate-500">
-              <span class="text-slate-400">Representante:</span> 
-              <strong class="text-slate-700 font-mono">${a.cuitRepresentante ? formatCuit(a.cuitRepresentante) : 'Operador Principal'}</strong>
-            </div>
-            <div class="text-[11px] text-slate-500 truncate">
-              <span class="text-slate-400">Email:</span> 
-              <span class="text-slate-700 font-medium">${escapeHtml(a.emailNotificaciones || 'Sin email de avisos')}</span>
-            </div>
-            <div class="text-xs text-slate-500">Punto de Venta: <strong>${a.puntoVentaDefault || 1}</strong>${a.ws && a.ws.puntoVentaWs ? ` · Web service: <strong>${a.ws.puntoVentaWs}</strong>` : ''}</div>
-            ${renderWsResumenCuenta(a)}
-            <div class="pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
-              <div class="flex items-center space-x-2">
-                <button onclick="openEditAccountModal('${a.cuit}')" class="text-slate-500 hover:text-indigo-600 font-semibold p-1" title="Editar empresa">
-                  <i class="fa-solid fa-pen-to-square"></i> Editar
-                </button>
-                <button onclick="deleteAccount('${a.cuit}')" class="text-slate-400 hover:text-rose-600 font-semibold p-1" title="Eliminar CUIT">
-                  <i class="fa-solid fa-trash-can"></i>
-                </button>
-              </div>
-
-              <div>
-                ${a.cuit !== data.activeCuit ? `<button onclick="switchActiveCuitAccount('${a.cuit}')" class="text-xs text-indigo-600 hover:text-indigo-800 font-bold">Usar como Emisor</button>` : '<span class="text-xs text-emerald-600 font-bold flex items-center"><i class="fa-solid fa-circle-check mr-1"></i> Seleccionada</span>'}
-              </div>
-            </div>
-          </div>
-        `).join('');
-      }
-    }
-  } catch (e) {}
-}
-
-// ---------------------------------------------------------------------------
-// CONEXIÓN CON ARCA POR WEB SERVICE (modo por cuenta, certificado, prueba)
-// ---------------------------------------------------------------------------
-const WS_MODOS = {
-  auto: { nombre: 'Automático', ayuda: 'Usa el certificado propio de la empresa si está cargado; si no, el de la plataforma (requiere que la empresa haya delegado el servicio). Nunca usa el navegador.' },
-  propio: { nombre: 'Certificado propio', ayuda: 'Todo queda a nombre de la empresa: el certificado es de su CUIT y no hace falta delegar nada.' },
-  delegado: { nombre: 'Delegado', ayuda: 'Se usa el certificado de la plataforma. La empresa tiene que delegar "Facturación Electrónica" al CUIT de la plataforma en el Administrador de Relaciones de ARCA.' },
-  navegador: { nombre: 'Navegador', ayuda: 'Flujo anterior: entra a "Comprobantes en línea" con la Clave Fiscal y completa las pantallas. Es lento y puede trabarse si ARCA cambia algo.' },
+/* ======================================================================
+   AJUSTES · EMPRESAS, CONEXIÓN Y DISEÑO
+   ====================================================================== */
+const MODOS = {
+  auto: ['Automático', 'Usa el certificado propio de la empresa si está cargado; si no, el de la plataforma (la empresa tiene que haber delegado el servicio). Nunca usa el navegador.'],
+  propio: ['Certificado propio', 'Todo a nombre de la empresa: el certificado es de su CUIT y no hace falta delegar nada.'],
+  delegado: ['Delegado', 'Usa el certificado de la plataforma. La empresa delega "Facturación Electrónica" al CUIT de la plataforma en el Administrador de Relaciones de ARCA.'],
+  navegador: ['Navegador', 'Flujo anterior: entra a "Comprobantes en línea" con la Clave Fiscal y completa las pantallas. Es lento y se traba si ARCA cambia algo.'],
 };
-let wsCuentaActual = null;
-let wsEstadoPlataforma = null;
 
-function renderWsResumenCuenta(a) {
-  const ws = a.ws || {};
-  const modo = WS_MODOS[ws.modo || 'auto'] || WS_MODOS.auto;
-  const prueba = ws.ultimaPrueba;
-  const estado = prueba
-    ? (prueba.ok
-      ? '<span class="text-emerald-700 font-semibold"><i class="fa-solid fa-circle-check mr-1"></i>Conexión OK</span>'
-      : '<span class="text-rose-700 font-semibold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Revisar conexión</span>')
-    : '<span class="text-slate-400">Sin probar</span>';
-  return `
-    <div class="flex items-center justify-between gap-2 text-[11px] bg-slate-50 rounded-lg px-2.5 py-1.5">
-      <span class="text-slate-600 truncate"><i class="fa-solid fa-plug mr-1 text-slate-400"></i>${escapeHtml(modo.nombre)}${ws.tieneCertificadoPropio ? ' · cert. propio' : ''} · ${estado}</span>
-      <button onclick="openWsModal('${a.cuit}')" class="text-indigo-600 hover:text-indigo-800 font-bold flex-shrink-0">Conexión ARCA</button>
-    </div>`;
+function renderEmpresas() {
+  const caja = $('#listaEmpresas');
+  if (!caja) return;
+  caja.innerHTML = estado.cuentas.length ? estado.cuentas.map(c => {
+    const ws = c.ws || {};
+    const prueba = ws.ultimaPrueba;
+    return `<div class="cuenta">
+      <div class="titulo"><div style="min-width:0"><h3>${esc(c.razonSocial || c.cuit)}</h3><span class="tenue dato">${fmtCuit(c.cuit)}</span></div>
+        ${c.cuit === estado.cuitActivo ? '<span class="etiqueta-estado e-ok">Factura ahora</span>' : `<button class="boton chico" data-usar="${c.cuit}">Usar para facturar</button>`}</div>
+      <p class="tenue" style="font-size:14px">${esc(MODOS[ws.modo || 'auto'][0])}${ws.tieneCertificadoPropio ? ' · certificado propio' : ''}${ws.puntoVentaWs ? ` · punto de venta ${ws.puntoVentaWs}` : ' · sin punto de venta de web service'} · diseño ${c.disenoModo === 'personalizado' ? 'personalizado' : 'genérico'}
+        ${prueba ? `<br><span style="color:${prueba.ok ? 'var(--ok)' : 'var(--error)'}">${prueba.ok ? 'Conexión probada OK' : 'La última prueba falló'}</span> · ${new Date(prueba.fecha).toLocaleDateString('es-AR')}` : ''}</p>
+      <div class="fila-acciones">
+        <button class="boton chico" data-conexion="${c.cuit}">${ic('enchufe')}Conexión ARCA</button>
+        <button class="boton chico" data-diseno="${c.cuit}">${ic('factura')}Diseño de factura</button>
+        <button class="boton chico texto" data-editar-emp="${c.cuit}">Editar</button>
+        <button class="boton chico texto peligro" data-borrar-emp="${c.cuit}">Eliminar</button>
+      </div></div>`;
+  }).join('') : '<div class="vacio"><h3>Cargá la primera empresa</h3><p>Con su CUIT y razón social; después configurás la conexión con ARCA.</p></div>';
 }
 
-async function cargarEstadoPlataformaWs() {
-  try {
-    const res = await fetchWithAuth('/api/accounts/ws/estado');
-    const data = await res.json();
-    if (data.success) wsEstadoPlataforma = data;
-  } catch (e) {}
-  return wsEstadoPlataforma;
+$('#listaEmpresas').addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.usar) { $('#selEmisor').value = b.dataset.usar; $('#selEmisor').dispatchEvent(new Event('change')); setTimeout(renderEmpresas, 300); }
+  if (b.dataset.conexion) abrirConexion(b.dataset.conexion);
+  if (b.dataset.diseno) abrirDiseno(b.dataset.diseno);
+  if (b.dataset.editarEmp) abrirEmpresa(b.dataset.editarEmp);
+  if (b.dataset.borrarEmp) {
+    if (!confirm('¿Eliminar esta empresa del sistema? Los comprobantes ya emitidos no se borran.')) return;
+    const r = await api(`/api/accounts/${b.dataset.borrarEmp}`, { method: 'DELETE' });
+    aviso(r.data.message, r.ok ? 'ok' : 'error');
+    if (r.ok) cargarCuentas();
+  }
+});
+
+$('#btnNuevaEmpresa').addEventListener('click', () => abrirEmpresa());
+function abrirEmpresa(cuit) {
+  const c = estado.cuentas.find(x => x.cuit === cuit);
+  $('#dlgEmpresaTitulo').textContent = c ? 'Editar empresa' : 'Agregar empresa';
+  $('#empCuit').value = c?.cuit || ''; $('#empCuit').readOnly = !!c;
+  $('#empRazon').value = c?.razonSocial || '';
+  $('#empEmail').value = c?.emailNotificaciones || '';
+  $('#empPv').value = c?.puntoVentaDefault || 1;
+  $('#empCuitRep').value = c?.cuitRepresentante || '';
+  $('#empClave').value = '';
+  $('#dlgEmpresa').showModal();
 }
-
-async function openWsModal(cuit) {
-  const acc = allAccounts.find(a => a.cuit === cuit);
-  if (!acc) return;
-  wsCuentaActual = acc;
-  const ws = acc.ws || {};
-  document.getElementById('wsModalCuenta').innerText = `${acc.razonSocial || 'Empresa'} · CUIT ${formatCuit(acc.cuit)}`;
-  document.getElementById('wsModo').value = ws.modo || 'auto';
-  document.getElementById('wsPuntoVenta').value = ws.puntoVentaWs || '';
-  document.getElementById('wsCondIvaEmisor').value = ws.condicionIvaEmisor || '';
-  document.getElementById('wsDomicilio').value = ws.domicilioComercial || '';
-  document.getElementById('wsIibb').value = ws.iibb || '';
-  document.getElementById('wsInicioAct').value = ws.inicioActividades || '';
-  document.getElementById('wsCertTexto').value = '';
-  document.getElementById('wsKeyTexto').value = '';
-  document.getElementById('wsCsrBox').classList.add('hidden');
-  document.getElementById('wsPruebaResultado').innerHTML = ws.ultimaPrueba
-    ? `<li class="text-slate-500">Última prueba (${new Date(ws.ultimaPrueba.fecha).toLocaleString('es-AR')}): ${ws.ultimaPrueba.ok ? 'OK' : 'con problemas'} — ${escapeHtml(ws.ultimaPrueba.mensaje)}</li>`
-    : '';
-  renderWsModoAyuda();
-  renderWsCertEstado();
-  document.getElementById('wsModal').classList.remove('hidden');
-
-  const est = await cargarEstadoPlataformaWs();
-  const badge = document.getElementById('wsAmbienteBadge');
-  const prod = est && est.ambiente === 'produccion';
-  badge.className = `px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${prod ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-800'}`;
-  badge.innerText = prod ? 'Producción (real)' : 'Homologación (prueba)';
-  const p = est && est.plataforma;
-  document.getElementById('wsPlataformaInfo').innerHTML = p && p.configurado
-    ? `Certificado de la plataforma: CUIT <strong class="font-mono">${formatCuit(p.cuit)}</strong> (alias "${escapeHtml(p.alias)}", vence ${String(p.vence || '').slice(0, 10)}${p.vencido ? ' — <strong class="text-rose-700">VENCIDO</strong>' : ''}).<br>
-       Para usar el modo delegado, la empresa entra a ARCA con su Clave Fiscal → <em>Administrador de Relaciones</em> → <em>Nueva Relación</em> → WebServices → <em>Facturación Electrónica</em>, y pone como representante <strong class="font-mono">${formatCuit(p.cuit)}</strong>.`
-    : `El certificado de la plataforma todavía no está configurado (variables <code>WSFE_PLATFORM_CERT</code> y <code>WSFE_PLATFORM_KEY</code> en Render)${p && p.error ? `: ${escapeHtml(p.error)}` : ''}. Mientras tanto, usá el certificado propio.`;
-}
-
-function closeWsModal() {
-  document.getElementById('wsModal')?.classList.add('hidden');
-  wsCuentaActual = null;
-}
-
-function renderWsModoAyuda() {
-  const modo = document.getElementById('wsModo').value;
-  document.getElementById('wsModoAyuda').innerText = (WS_MODOS[modo] || WS_MODOS.auto).ayuda;
-}
-
-function renderWsCertEstado() {
-  const tiene = !!(wsCuentaActual && wsCuentaActual.ws && wsCuentaActual.ws.tieneCertificadoPropio);
-  const el = document.getElementById('wsCertEstado');
-  el.className = `text-[11px] font-semibold ${tiene ? 'text-emerald-700' : 'text-slate-400'}`;
-  el.innerText = tiene ? 'Cargado' : 'No cargado';
-  document.getElementById('btnQuitarCert').classList.toggle('hidden', !tiene);
-}
-
-async function refrescarCuentaWs() {
-  const cuit = wsCuentaActual && wsCuentaActual.cuit;
-  await loadAccounts();
-  if (cuit) wsCuentaActual = allAccounts.find(a => a.cuit === cuit) || wsCuentaActual;
-  renderWsCertEstado();
-}
-
-async function handleSaveWs(e) {
+$('#formEmpresa').addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (!wsCuentaActual) return;
-  const btn = document.getElementById('btnSaveWs');
-  btn.disabled = true;
-  try {
-    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        modo: document.getElementById('wsModo').value,
-        puntoVentaWs: document.getElementById('wsPuntoVenta').value,
-        condicionIvaEmisor: document.getElementById('wsCondIvaEmisor').value,
-        domicilioComercial: document.getElementById('wsDomicilio').value,
-        iibb: document.getElementById('wsIibb').value,
-        inicioActividades: document.getElementById('wsInicioAct').value,
-      }),
-    });
-    const data = await res.json();
-    showToast(data.message || (data.success ? 'Guardado.' : 'No se pudo guardar.'), data.success ? 'success' : 'error');
-    if (data.success) await refrescarCuentaWs();
-  } catch (err) {
-    showToast('Error al guardar la configuración.', 'error');
-  } finally {
-    btn.disabled = false;
-  }
+  const cuit = $('#empCuit').value.replace(/\D/g, '');
+  if (cuit.length !== 11) return aviso('El CUIT tiene que tener 11 números.', 'error');
+  if (!$('#empRazon').value.trim()) return aviso('Falta la razón social.', 'error');
+  const r = await api('/api/accounts', { method: 'POST', body: { cuit, razonSocial: $('#empRazon').value.trim(), emailNotificaciones: $('#empEmail').value.trim(), puntoVentaDefault: Number($('#empPv').value) || 1, cuitRepresentante: $('#empCuitRep').value.replace(/\D/g, '') || undefined, claveFiscal: $('#empClave').value || undefined } });
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) { $('#dlgEmpresa').close(); cargarCuentas(); }
+});
+
+let conCuit = '';
+async function abrirConexion(cuit) {
+  conCuit = cuit;
+  const c = estado.cuentas.find(x => x.cuit === cuit);
+  const ws = c?.ws || {};
+  $('#conEmpresa').textContent = `${c?.razonSocial || ''} · ${fmtCuit(cuit)}`;
+  $('#conModo').value = ws.modo || 'auto';
+  $('#conModoAyuda').textContent = MODOS[$('#conModo').value][1];
+  $('#conPv').value = ws.puntoVentaWs || '';
+  $('#conCondIva').value = ws.condicionIvaEmisor || '';
+  $('#conDomicilio').value = ws.domicilioComercial || '';
+  $('#conIibb').value = ws.iibb || '';
+  $('#conInicio').value = ws.inicioActividades || '';
+  $('#conCert').value = ''; $('#conKey').value = '';
+  $('#conCsrCaja').classList.add('oculto');
+  $('#conPrueba').innerHTML = ws.ultimaPrueba ? `<p class="tenue" style="font-size:14px">Última prueba: ${new Date(ws.ultimaPrueba.fecha).toLocaleString('es-AR')} — ${esc(ws.ultimaPrueba.mensaje)}</p>` : '';
+  pintarCert(ws.tieneCertificadoPropio);
+  await cargarPlataforma();
+  const p = estado.plataforma?.plataforma;
+  $('#conDelegacion').innerHTML = p?.configurado
+    ? `Para usar el modo delegado, la empresa entra a ARCA con su Clave Fiscal → <em>Administrador de Relaciones</em> → <em>Nueva Relación</em> → WebServices → <em>Facturación Electrónica</em>, y pone como representante el CUIT <strong class="dato">${fmtCuit(p.cuit)}</strong>.${p.vencido ? ' <strong style="color:var(--error)">El certificado de la plataforma está vencido.</strong>' : ''}`
+    : 'El certificado de la plataforma todavía no está configurado (variables WSFE_PLATFORM_CERT y WSFE_PLATFORM_KEY en Render). Mientras tanto, usá el certificado propio.';
+  $('#dlgConexion').showModal();
+}
+function pintarCert(tiene) {
+  const el = $('#conCertEstado');
+  el.className = `etiqueta-estado ${tiene ? 'e-ok' : 'e-espera'}`;
+  el.textContent = tiene ? 'Cargado' : 'No cargado';
+  $('#btnQuitarCert').classList.toggle('oculto', !tiene);
+}
+$('#conModo').addEventListener('change', () => { $('#conModoAyuda').textContent = MODOS[$('#conModo').value][1]; });
+
+async function refrescarCuentaConexion() {
+  await cargarCuentas();
+  pintarCert(estado.cuentas.find(x => x.cuit === conCuit)?.ws?.tieneCertificadoPropio);
 }
 
-async function generarCsrWs() {
-  if (!wsCuentaActual) return;
-  const btn = document.getElementById('btnGenerarCsr');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Generando...';
-  try {
-    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws/csr`, { method: 'POST', body: '{}' });
-    const data = await res.json();
-    if (data.success) {
-      document.getElementById('wsCsrTexto').value = data.csrPem;
-      document.getElementById('wsCsrBox').classList.remove('hidden');
-      showToast(data.message, 'success');
-    } else {
-      showToast(data.message || 'No se pudo generar el pedido.', 'error');
-    }
-  } catch (err) {
-    showToast('Error al generar el pedido de certificado.', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-file-signature mr-1"></i> Generar pedido (CSR)';
-  }
-}
-
-function copiarCsrWs() {
-  const t = document.getElementById('wsCsrTexto').value;
-  navigator.clipboard?.writeText(t).then(() => showToast('Pedido copiado.', 'success')).catch(() => showToast('No se pudo copiar: seleccioná el texto a mano.', 'error'));
-}
-
-function descargarCsrWs() {
-  const t = document.getElementById('wsCsrTexto').value;
-  if (!t || !wsCuentaActual) return;
+$('#btnGuardarConexion').addEventListener('click', async (e) => {
+  ocupado(e.currentTarget, true);
+  const r = await api(`/api/accounts/${conCuit}/ws`, { method: 'PUT', body: { modo: $('#conModo').value, puntoVentaWs: $('#conPv').value, condicionIvaEmisor: $('#conCondIva').value, domicilioComercial: $('#conDomicilio').value, iibb: $('#conIibb').value, inicioActividades: $('#conInicio').value } });
+  ocupado(e.currentTarget, false);
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) refrescarCuentaConexion();
+});
+$('#btnCsr').addEventListener('click', async (e) => {
+  ocupado(e.currentTarget, true);
+  const r = await api(`/api/accounts/${conCuit}/ws/csr`, { method: 'POST', body: {} });
+  ocupado(e.currentTarget, false);
+  if (!r.ok) return aviso(r.data.message, 'error');
+  $('#conCsr').value = r.data.csrPem;
+  $('#conCsrCaja').classList.remove('oculto');
+  aviso('Pedido generado. Subilo a ARCA.');
+});
+$('#btnCopiarCsr').addEventListener('click', () => navigator.clipboard?.writeText($('#conCsr').value).then(() => aviso('Copiado.')).catch(() => aviso('Seleccioná el texto y copialo a mano.', 'error')));
+$('#btnBajarCsr').addEventListener('click', () => {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([t], { type: 'application/pkcs10' }));
-  a.download = `pedido_${wsCuentaActual.cuit}.csr`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  a.href = URL.createObjectURL(new Blob([$('#conCsr').value], { type: 'application/pkcs10' }));
+  a.download = `pedido_${conCuit}.csr`; a.click();
+});
+$('#btnCargarCert').addEventListener('click', async (e) => {
+  const certPem = $('#conCert').value.trim();
+  if (!certPem) return aviso('Pegá el certificado que te dio ARCA.', 'error');
+  ocupado(e.currentTarget, true);
+  const r = await api(`/api/accounts/${conCuit}/ws/certificado`, { method: 'POST', body: { certPem, keyPem: $('#conKey').value.trim() || undefined } });
+  ocupado(e.currentTarget, false);
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) { $('#conCert').value = ''; $('#conKey').value = ''; $('#conCsrCaja').classList.add('oculto'); refrescarCuentaConexion(); }
+});
+$('#btnQuitarCert').addEventListener('click', async () => {
+  if (!confirm('¿Quitar el certificado propio de esta empresa?')) return;
+  const r = await api(`/api/accounts/${conCuit}/ws/certificado`, { method: 'DELETE' });
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) refrescarCuentaConexion();
+});
+$('#btnProbarConexion').addEventListener('click', async (e) => {
+  ocupado(e.currentTarget, true);
+  $('#conPrueba').innerHTML = '<p class="tenue">Consultando a ARCA…</p>';
+  const r = await api(`/api/accounts/${conCuit}/ws/probar`, { method: 'POST', body: {} });
+  ocupado(e.currentTarget, false);
+  if (!r.ok) { $('#conPrueba').innerHTML = `<div class="aviso error">${ic('alerta')}<span>${esc(r.data.message)}</span></div>`; return; }
+  $('#conPrueba').innerHTML = r.data.pasos.map(p => `<div class="paso-prueba"><span class="${p.ok ? 'ok' : 'mal'}">${ic(p.ok ? 'check' : 'x')}</span><span><strong>${esc(p.paso)}.</strong> ${esc(p.detalle)}</span></div>`).join('') +
+    `<div class="aviso ${r.data.ok ? 'ok' : 'atencion'}" style="margin-top:8px">${ic(r.data.ok ? 'check' : 'alerta')}<span>${r.data.ok ? 'Lista para facturar por web service.' : 'Todavía no puede facturar por web service.'}</span></div>`;
+  refrescarCuentaConexion();
+});
+
+/* Diseño */
+let disCuit = '';
+let disLogo = '';
+let disModo = 'generico';
+async function abrirDiseno(cuit) {
+  disCuit = cuit;
+  const c = estado.cuentas.find(x => x.cuit === cuit);
+  $('#disEmpresa').textContent = `${c?.razonSocial || ''} · ${fmtCuit(cuit)}`;
+  const r = await api(`/api/accounts/${cuit}/diseno`);
+  if (!r.ok) return aviso(r.data.message, 'error');
+  const d = r.data.diseno;
+  disLogo = d.logoDataUrl || '';
+  $('#disLogoPos').value = d.logoPosicion; $('#disEsquema').value = d.esquema;
+  $('#disColor1').value = d.colorPrincipal; $('#disColor2').value = d.colorAcento;
+  $('#disFuente').value = d.tipografia; $('#disFantasia').value = d.nombreFantasia || '';
+  $('#disTel').value = d.telefono || ''; $('#disWeb').value = d.web || ''; $('#disEmailContacto').value = d.emailContacto || '';
+  $('#disNotas').value = d.notas || ''; $('#disPie').value = d.leyendaPie || '';
+  $('#disAsunto').value = d.mail?.asunto || ''; $('#disAsunto').placeholder = r.data.asuntoDefault;
+  $('#disCuerpo').value = d.mail?.cuerpo || ''; $('#disCuerpo').placeholder = r.data.cuerpoDefault;
+  $('#disResponder').value = d.mail?.responderA || '';
+  $('#disLogo').value = '';
+  pintarLogo();
+  modoDiseno(d.modo);
+  $('#dlgDiseno').showModal();
 }
-
-async function cargarCertificadoWs() {
-  if (!wsCuentaActual) return;
-  const certPem = document.getElementById('wsCertTexto').value.trim();
-  const keyPem = document.getElementById('wsKeyTexto').value.trim();
-  if (!certPem) { showToast('Pegá el certificado (.crt) que te dio ARCA.', 'error'); return; }
-  const btn = document.getElementById('btnCargarCert');
-  btn.disabled = true;
-  try {
-    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws/certificado`, {
-      method: 'POST',
-      body: JSON.stringify({ certPem, keyPem: keyPem || undefined }),
-    });
-    const data = await res.json();
-    showToast(data.message, data.success ? 'success' : 'error');
-    if (data.success) {
-      document.getElementById('wsCertTexto').value = '';
-      document.getElementById('wsKeyTexto').value = '';
-      document.getElementById('wsCsrBox').classList.add('hidden');
-      await refrescarCuentaWs();
-    }
-  } catch (err) {
-    showToast('Error al cargar el certificado.', 'error');
-  } finally {
-    btn.disabled = false;
-  }
+function modoDiseno(m) {
+  disModo = m;
+  $$('[data-dis-modo]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.disModo === m)));
+  $('#disCampos').classList.toggle('oculto', m !== 'personalizado');
+  $('#disAyuda').textContent = m === 'personalizado'
+    ? 'Logo, colores, tipografía y textos propios para esta empresa.'
+    : 'El diseño estándar de BotArca: sobrio, con todo lo que exige ARCA. Sirve para cualquier cliente.';
 }
-
-async function quitarCertificadoWs() {
-  if (!wsCuentaActual) return;
-  if (!confirm('¿Quitar el certificado propio de esta cuenta? Vas a necesitar cargarlo de nuevo para usar el modo propio.')) return;
-  try {
-    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws/certificado`, { method: 'DELETE' });
-    const data = await res.json();
-    showToast(data.message, data.success ? 'success' : 'error');
-    if (data.success) await refrescarCuentaWs();
-  } catch (err) {
-    showToast('Error al quitar el certificado.', 'error');
-  }
+$$('[data-dis-modo]').forEach(b => b.addEventListener('click', () => modoDiseno(b.dataset.disModo)));
+function pintarLogo() {
+  $('#disLogoPrevia').innerHTML = disLogo ? '<img class="logo-previa" alt="Logo cargado">' : '';
+  if (disLogo) $('#disLogoPrevia img').src = disLogo;
+  $('#btnQuitarLogo').classList.toggle('oculto', !disLogo);
 }
-
-async function probarConexionWs() {
-  if (!wsCuentaActual) return;
-  const btn = document.getElementById('btnProbarWs');
-  const lista = document.getElementById('wsPruebaResultado');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Probando...';
-  lista.innerHTML = '<li class="text-slate-500">Consultando a ARCA...</li>';
-  try {
-    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws/probar`, { method: 'POST', body: '{}' });
-    const data = await res.json();
-    if (!data.success) {
-      lista.innerHTML = `<li class="text-rose-700">${escapeHtml(data.message || 'No se pudo probar la conexión.')}</li>`;
-      return;
-    }
-    lista.innerHTML = data.pasos.map(p => `
-      <li class="flex items-start gap-2">
-        <i class="fa-solid ${p.ok ? 'fa-circle-check text-emerald-600' : 'fa-circle-xmark text-rose-600'} mt-0.5 flex-shrink-0"></i>
-        <span><strong class="text-slate-800">${escapeHtml(p.paso)}:</strong> <span class="text-slate-600">${escapeHtml(p.detalle)}</span></span>
-      </li>`).join('') +
-      `<li class="pt-1 font-bold ${data.ok ? 'text-emerald-700' : 'text-rose-700'}">${data.ok ? 'Lista para facturar por web service.' : 'Todavía no se puede facturar por web service con esta cuenta.'}</li>`;
-    await refrescarCuentaWs();
-  } catch (err) {
-    lista.innerHTML = '<li class="text-rose-700">Error al probar la conexión.</li>';
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-plug-circle-check mr-1"></i> Probar';
-  }
-}
-
-async function switchActiveCuitAccount(cuit) {
-  if (!cuit) return;
-  try {
-    const res = await fetchWithAuth('/api/accounts/switch', {
-      method: 'POST',
-      body: JSON.stringify({ cuit })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast(`Emisor cambiado a CUIT ${cuit}.`, 'success');
-      await loadAccounts();
-      await loadAuthStatus();
-    }
-  } catch (e) {
-    showToast('Error al cambiar cuenta.', 'error');
-  }
-}
-
-function openNewAccountModal() {
-  const modal = document.getElementById('accountModal');
-  const title = document.getElementById('accountModalTitle');
-  const cuitInp = document.getElementById('accCuit');
-  const rsInp = document.getElementById('accRazonSocial');
-  const repInp = document.getElementById('accCuitRepresentante');
-  const emailInp = document.getElementById('accEmailNotificaciones');
-  const passInp = document.getElementById('accClaveFiscal');
-  const ptoInp = document.getElementById('accPuntoVenta');
-  const btnSubmit = document.getElementById('btnSubmitAccount');
-
-  if (title) title.innerText = 'Agregar Empresa / CUIT Emisor';
-  if (cuitInp) {
-    cuitInp.value = '';
-    cuitInp.disabled = false;
-  }
-  if (rsInp) rsInp.value = '';
-  if (repInp) repInp.value = '';
-  if (emailInp) emailInp.value = '';
-  if (passInp) passInp.value = '';
-  if (ptoInp) ptoInp.value = '1';
-  if (btnSubmit) btnSubmit.innerText = 'Guardar Empresa';
-
-  modal?.classList.remove('hidden');
-  cuitInp?.focus();
-}
-
-function openEditAccountModal(cuit) {
-  const acc = allAccounts.find(a => a.cuit === cuit);
-  if (!acc) return;
-
-  const modal = document.getElementById('accountModal');
-  const title = document.getElementById('accountModalTitle');
-  const cuitInp = document.getElementById('accCuit');
-  const rsInp = document.getElementById('accRazonSocial');
-  const repInp = document.getElementById('accCuitRepresentante');
-  const emailInp = document.getElementById('accEmailNotificaciones');
-  const passInp = document.getElementById('accClaveFiscal');
-  const ptoInp = document.getElementById('accPuntoVenta');
-  const btnSubmit = document.getElementById('btnSubmitAccount');
-
-  if (title) title.innerText = 'Editar Empresa / CUIT Emisor';
-  if (cuitInp) {
-    cuitInp.value = acc.cuit;
-    cuitInp.disabled = false;
-  }
-  if (rsInp) rsInp.value = acc.razonSocial || '';
-  if (repInp) repInp.value = acc.cuitRepresentante || '';
-  if (emailInp) emailInp.value = acc.emailNotificaciones || '';
-  if (passInp) passInp.value = '';
-  if (ptoInp) ptoInp.value = acc.puntoVentaDefault || 1;
-  if (btnSubmit) btnSubmit.innerText = 'Actualizar Empresa';
-
-  modal?.classList.remove('hidden');
-}
-
-function closeAccountModal() {
-  document.getElementById('accountModal')?.classList.add('hidden');
-}
-
-async function deleteAccount(cuit) {
-  if (!confirm(`¿Eliminar la empresa con CUIT ${formatCuit(cuit)} de la lista?`)) return;
-  try {
-    const res = await fetchWithAuth(`/api/accounts/${cuit}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success) {
-      showToast(`Empresa con CUIT ${formatCuit(cuit)} eliminada.`, 'info');
-      await loadAccounts();
-      await loadAuthStatus();
-    } else {
-      showToast(data.message || 'Error al eliminar cuenta.', 'error');
-    }
-  } catch (e) {
-    showToast('Error al eliminar cuenta.', 'error');
-  }
-}
-
-async function handleSaveAccount(e) {
-  e.preventDefault();
-  const cuit = document.getElementById('accCuit').value.trim();
-  const razonSocial = document.getElementById('accRazonSocial').value.trim();
-  const cuitRepresentante = document.getElementById('accCuitRepresentante')?.value?.trim();
-  const emailNotificaciones = document.getElementById('accEmailNotificaciones')?.value?.trim();
-  const claveFiscal = document.getElementById('accClaveFiscal').value;
-  const puntoVentaDefault = parseInt(document.getElementById('accPuntoVenta').value || '1', 10);
-
-  try {
-    const res = await fetchWithAuth('/api/accounts', {
-      method: 'POST',
-      body: JSON.stringify({ cuit, razonSocial, cuitRepresentante, emailNotificaciones, claveFiscal, puntoVentaDefault })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Empresa guardada y configurada correctamente.', 'success');
-      closeAccountModal();
-      await loadAccounts();
-      await loadAuthStatus();
-    } else {
-      showToast(data.message, 'error');
-    }
-  } catch (e) {
-    showToast('Error al guardar cuenta.', 'error');
-  }
-}
-
-// --- EXCEL & WHATSAPP SMART PASTING (CARGA MASIVA & IA) ---
-let parseDebounceTimer = null;
-
-async function handleExcelPasteChange(text) {
-  clearTimeout(parseDebounceTimer);
-  if (!text || text.trim().length === 0) {
-    parsedExcelItems = [];
-    renderExcelPreview([]);
-    updateParserBadge('auto', 0);
-    return;
-  }
-
-  parseDebounceTimer = setTimeout(async () => {
-    try {
-      const res = await fetchWithAuth('/api/queue/parse-excel', {
-        method: 'POST',
-        body: JSON.stringify({ text })
-      });
-      const data = await res.json();
-      if (data.success) {
-        parsedExcelItems = data.items || [];
-        renderExcelPreview(parsedExcelItems);
-        updateParserBadge(data.parserUsed, parsedExcelItems.length);
-      }
-    } catch (e) {}
-  }, 350);
-}
-
-async function handleParseWithGroq() {
-  const text = document.getElementById('excelPasteArea')?.value?.trim();
-  if (!text) {
-    showToast('Pegá un texto o una tabla antes de interpretar.', 'warn');
-    return;
-  }
-
-  const btn = document.getElementById('btnParseWithAi');
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Analizando con IA...';
-  }
-
-  try {
-    const res = await fetchWithAuth('/api/queue/parse-smart', {
-      method: 'POST',
-      body: JSON.stringify({ text, forceAi: true })
-    });
-    const data = await res.json();
-    if (data.success && data.items) {
-      parsedExcelItems = data.items;
-      renderExcelPreview(parsedExcelItems);
-      updateParserBadge(data.parserUsed, parsedExcelItems.length);
-      if (data.items.length > 0) {
-        const provName = data.parserUsed === 'groq_ai' ? 'Groq IA (Llama-3.3-70B)' : 'Motor Inteligente';
-        showToast(`¡${data.items.length} facturas extraídas con ${provName}!`, 'success');
-      } else {
-        showToast('No se encontraron datos fiscales válidos en el texto.', 'warn');
-      }
-    } else {
-      showToast(data.message || 'Error al interpretar con IA.', 'error');
-    }
-  } catch (err) {
-    showToast('Error de comunicación con el motor de IA.', 'error');
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="fa-solid fa-brain text-[10px] mr-1"></i> Interpretar con IA';
-    }
-  }
-}
-
-function updateParserBadge(parserUsed, count) {
-  const badge = document.getElementById('parserBadge');
-  if (!badge) return;
-
-  if (parserUsed === 'groq_ai') {
-    badge.innerHTML = '<i class="fa-solid fa-brain text-indigo-600 mr-1.5"></i> <strong class="text-indigo-900">Inteligencia Artificial Groq (Llama-3.3-70B)</strong>';
-    badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold';
-  } else if (parserUsed === 'heuristic_nlp') {
-    badge.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles text-indigo-600 mr-1.5"></i> <strong class="text-indigo-900">Lectura Inteligente de Texto Libre</strong>';
-    badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold';
-  } else {
-    badge.innerHTML = '<i class="fa-solid fa-table text-slate-600 mr-1.5"></i> Formato Tabular Excel / CSV';
-    badge.className = 'inline-flex items-center px-3 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold';
-  }
-}
-
-function renderExcelPreview(items) {
-  const tbody = document.getElementById('excelPreviewTbody');
-  const countText = document.getElementById('excelParsedCountText');
-  const totalDisplay = document.getElementById('excelPreviewTotal');
-  const btnAdd = document.getElementById('btnAddToQueue');
-  const btnAddText = document.getElementById('btnAddToQueueText');
-
-  if (countText) countText.innerText = `${items.length} comprobante${items.length === 1 ? '' : 's'} listo${items.length === 1 ? '' : 's'}`;
-
-  let sum = 0;
-  items.forEach(i => sum += (Number(i.importeTotal) || 0));
-  if (totalDisplay) totalDisplay.innerText = `$ ${sum.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-
-  if (btnAdd) btnAdd.disabled = items.length === 0;
-  if (btnAddText) btnAddText.innerText = items.length > 0 ? `⚡ FACTURAR ${items.length} COMPROBANTES EN ARCA` : '⚡ FACTURAR TODO EN ARCA AHORA';
-
-  if (!tbody) return;
-  if (items.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="py-10 text-center text-slate-400 text-sm"><i class="fa-solid fa-clipboard-list text-3xl text-slate-300 block mb-2"></i>Pegá texto libre o filas de Excel arriba para generar la vista previa.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = items.map((it, idx) => `
-    <tr class="hover:bg-slate-50 transition group">
-      <td class="py-3 px-3 text-slate-400 font-bold text-center text-xs">${idx + 1}</td>
-      <td class="py-2 px-2">
-        <input type="text" value="${escapeHtml(it.docNro || '')}" oninput="updateDraftRow(${idx}, 'docNro', this.value)" class="input-field !py-1 text-xs font-mono font-bold text-slate-800" placeholder="CUIT / DNI">
-      </td>
-      <td class="py-2 px-2">
-        <input type="text" value="${escapeHtml(it.razonSocial || '')}" oninput="updateDraftRow(${idx}, 'razonSocial', this.value)" class="input-field !py-1 text-xs font-semibold text-slate-800" placeholder="Nombre / Razón Social">
-      </td>
-      <td class="py-2 px-2">
-        <select onchange="updateDraftRow(${idx}, 'tipoComprobante', this.value)" class="input-field !py-1 text-xs font-bold text-indigo-700">
-          <option value="Factura C" ${it.tipoComprobante === 'Factura C' ? 'selected' : ''}>Factura C</option>
-          <option value="Factura A" ${it.tipoComprobante === 'Factura A' ? 'selected' : ''}>Factura A</option>
-          <option value="Factura B" ${it.tipoComprobante === 'Factura B' ? 'selected' : ''}>Factura B</option>
-          <option value="Recibo C" ${it.tipoComprobante === 'Recibo C' ? 'selected' : ''}>Recibo C</option>
-        </select>
-      </td>
-      <td class="py-2 px-2">
-        <input type="text" value="${escapeHtml(it.descripcion || '')}" oninput="updateDraftRow(${idx}, 'descripcion', this.value)" class="input-field !py-1 text-xs text-slate-700" placeholder="Descripción del item">
-      </td>
-      <td class="py-2 px-2 text-right">
-        <div class="relative inline-block w-32">
-          <input type="number" step="any" value="${it.importeTotal || 0}" oninput="updateDraftRow(${idx}, 'importeTotal', this.value)" class="input-field !py-1 text-xs font-bold text-emerald-700 text-right">
-        </div>
-      </td>
-      <td class="py-2 px-2 text-center">
-        <button type="button" onclick="deleteDraftRow(${idx})" class="text-slate-400 hover:text-rose-600 p-1.5 transition" title="Eliminar fila">
-          <i class="fa-solid fa-trash-can text-xs"></i>
-        </button>
-      </td>
-    </tr>
-  `).join('');
-}
-
-function updateDraftRow(idx, field, value) {
-  if (!parsedExcelItems[idx]) return;
-
-  if (field === 'importeTotal') {
-    const valNum = parseFloat(value) || 0;
-    parsedExcelItems[idx].importeTotal = valNum;
-    parsedExcelItems[idx].precioUnitario = valNum;
-    let sum = 0;
-    parsedExcelItems.forEach(i => sum += (Number(i.importeTotal) || 0));
-    const totalDisplay = document.getElementById('excelPreviewTotal');
-    if (totalDisplay) totalDisplay.innerText = `$${sum.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-  } else if (field === 'concepto') {
-    parsedExcelItems[idx].concepto = parseInt(value, 10) || 2;
-  } else {
-    parsedExcelItems[idx][field] = value;
-  }
-}
-
-function deleteDraftRow(idx) {
-  if (parsedExcelItems[idx]) {
-    parsedExcelItems.splice(idx, 1);
-    renderExcelPreview(parsedExcelItems);
-    showToast('Fila eliminada de la vista previa.', 'info');
-  }
-}
-
-function loadSampleExcelData() {
-  const sample = `30712345678\tEmpresa Alpha SRL\tServicios de Desarrollo de Software y APIs\t250000
-20309998887\tMartín Rodríguez\tHonorarios Profesionales de Consultoría IT\t120000
-30654321098\tGlobal Trade SA\tMantenimiento y soporte mensual Cloud\t180000
-27321112223\tLucía Benítez\tAsesoramiento impositivo y contable\t95000`;
-  const area = document.getElementById('excelPasteArea');
-  if (area) {
-    area.value = sample;
-    handleExcelPasteChange(sample);
-  }
-}
-
-function loadSampleTextMsg() {
-  const sample = `Facturarle a Tech Solutions SRL CUIT 30-71234567-8 la suma de $185.000 por honorarios profesionales de desarrollo web y APIs.
-Factura C a Gómez Distribuidora CUIT 27-33889900-4 por $75.000 por consultoría mensual de marketing.
-Emitir a Lopez Construcciones CUIT 20-28776655-1 el monto de $320.000 por materiales e instalación.`;
-  const area = document.getElementById('excelPasteArea');
-  if (area) {
-    area.value = sample;
-    handleExcelPasteChange(sample);
-  }
-}
-const loadSampleWhatsAppMsg = loadSampleTextMsg;
-
-function clearExcelPasteArea() {
-  const area = document.getElementById('excelPasteArea');
-  if (area) {
-    area.value = '';
-    handleExcelPasteChange('');
-  }
-}
-
-async function submitExcelBatchToQueue() {
-  if (parsedExcelItems.length === 0) {
-    showToast('No hay facturas para agregar a la cola.', 'warn');
-    return false;
-  }
-
-  const btn = document.getElementById('btnAddToQueue');
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Preparando facturas...';
-  }
-
-  try {
-    const res = await fetchWithAuth('/api/queue/add', {
-      method: 'POST',
-      body: JSON.stringify({ items: parsedExcelItems })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast(`¡${data.count} facturas preparadas para emitir!`, 'success');
-      clearExcelPasteArea();
-      await loadQueueItems();
-      return true;
-    } else {
-      showToast(data.message, 'error');
-      return false;
-    }
-  } catch (e) {
-    showToast('Error al agregar a la cola.', 'error');
-    return false;
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="fa-solid fa-bolt text-xs mr-1.5"></i> <span id="btnAddToQueueText">⚡ FACTURAR TODO EN ARCA AHORA</span>';
-    }
-  }
-}
-
-async function submitAndStartBatch() {
-  if (parsedExcelItems.length === 0) {
-    showToast('Pegá un texto o una tabla antes de emitir.', 'warn');
-    return;
-  }
-  const ok = await submitExcelBatchToQueue();
-  if (ok) {
-    await startProcessingQueue();
-  }
-}
-
-// --- LIVE QUEUE ENGINE (COLA DE FACTURACIÓN) ---
-async function loadQueueItems() {
-  try {
-    const res = await fetchWithAuth('/api/queue');
-    if (!res.ok) return;
-    const data = await res.json();
-
-    const badgePendientes = document.getElementById('badgeColaPendientes');
-    const qPend = document.getElementById('queueCountPendientes');
-    const qEmit = document.getElementById('queueCountEmitidas');
-    const btnProcess = document.getElementById('btnProcessQueue');
-    const cockpit = document.getElementById('cockpitBanner');
-
-    if (badgePendientes) badgePendientes.innerText = data.pendientes || 0;
-    if (qPend) qPend.innerText = `${data.pendientes || 0} pendientes`;
-    if (qEmit) qEmit.innerText = `${data.emitidas || 0} emitidas`;
-
-    if (btnProcess) btnProcess.disabled = data.isProcessing || data.pendientes === 0;
-
-    // Cockpit status
-    if (cockpit) {
-      if (data.isProcessing) {
-        cockpit.classList.remove('hidden');
-        const pct = data.total > 0 ? Math.round(((data.emitidas + data.errores) / data.total) * 100) : 0;
-        document.getElementById('cockpitPercent').innerText = `${pct}%`;
-        document.getElementById('cockpitProgressBar').style.width = `${pct}%`;
-        document.getElementById('cockpitStatusMsg').innerText = `Procesando lote en ARCA: ${data.emitidas + data.errores} de ${data.total} comprobantes procesados...`;
-      } else {
-        cockpit.classList.add('hidden');
-      }
-    }
-
-    renderQueueTable(data.items || []);
-  } catch (e) {}
-}
-
-function renderQueueTable(items) {
-  const tbody = document.getElementById('queueTableBody');
-  if (!tbody) return;
-
-  if (items.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-400 text-sm">No hay facturas en proceso en este momento.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = items.map(it => {
-    let statusBadge = '<span class="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold uppercase"><i class="fa-solid fa-clock mr-1"></i> Pendiente</span>';
-    if (it.estado === 'procesando') {
-      statusBadge = '<span class="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold uppercase animate-pulse"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Emitiendo</span>';
-    } else if (it.estado === 'emitida') {
-      statusBadge = '<span class="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold uppercase"><i class="fa-solid fa-circle-check mr-1"></i> Emitida</span>';
-    } else if (it.estado === 'error') {
-      statusBadge = '<span class="inline-flex items-center px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold uppercase"><i class="fa-solid fa-circle-xmark mr-1"></i> Error</span>';
-    }
-
-    let resultado = it.cae 
-      ? `<span class="text-emerald-700 font-bold select-all text-xs">CAE: ${it.cae}</span> <span class="text-slate-400 text-xs font-semibold">(${it.comprobanteNro || ''})</span>` 
-      : (it.errorMensaje ? `<span class="text-rose-600 text-xs font-medium truncate max-w-[220px] block" title="${escapeHtml(it.errorMensaje)}">${escapeHtml(it.errorMensaje)}</span>` : '<span class="text-slate-400">-</span>');
-
-    return `
-      <tr class="hover:bg-slate-50 transition">
-        <td class="py-3 px-3">${statusBadge}</td>
-        <td class="py-3 px-3">
-          <div class="text-slate-900 font-bold text-xs truncate max-w-[200px]">${escapeHtml(it.razonSocial)}</div>
-          <div class="text-[11px] text-slate-500 font-mono">Doc: ${it.docNro}</div>
-        </td>
-        <td class="py-3 px-3 text-slate-700 text-xs truncate max-w-[200px]">${escapeHtml(it.descripcion)}</td>
-        <td class="py-3 px-3 text-slate-600 text-xs font-semibold">${it.tipoComprobante} (Pto ${it.puntoVenta})</td>
-        <td class="py-3 px-3 text-right font-extrabold text-slate-900 text-xs">$ ${(it.importeTotal || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
-        <td class="py-3 px-3">${resultado}</td>
-        <td class="py-3 px-3 text-center">
-          ${it.estado === 'pendiente' ? `<button onclick="deleteQueueItem('${it.id}')" class="text-slate-400 hover:text-rose-600 transition p-1" title="Eliminar de la cola"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
-        </td>
-      </tr>
-    `;
-  }).join('');
-}
-
-async function startProcessingQueue() {
-  showToast('Iniciando procesamiento de la cola de facturación en ARCA...', 'info');
-  try {
-    const res = await fetchWithAuth('/api/queue/process', { method: 'POST' });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Motor iniciado. Procesando comprobantes en ARCA...', 'success');
-      await loadQueueItems();
-    }
-  } catch (e) {
-    showToast('Error al iniciar procesamiento de la cola.', 'error');
-  }
-}
-
-async function deleteQueueItem(id) {
-  try {
-    await fetchWithAuth(`/api/queue/${id}`, { method: 'DELETE' });
-    await loadQueueItems();
-  } catch (e) {}
-}
-
-async function clearQueueCompleted() {
-  try {
-    await fetchWithAuth('/api/queue/clear', { method: 'POST', body: JSON.stringify({ status: 'emitida' }) });
-    showToast('Comprobantes emitidos removidos de la cola.', 'info');
-    await loadQueueItems();
-  } catch (e) {}
-}
-
-// --- USER MANAGEMENT (ADMIN PANEL) ---
-async function loadUsersList() {
-  if (!currentUser || currentUser.role !== 'admin') return;
-  try {
-    const res = await fetchWithAuth('/api/users');
-    if (!res.ok) return;
-    const data = await res.json();
-    const tbody = document.getElementById('usersTableBody');
-    if (!tbody) return;
-
-    tbody.innerHTML = (data.users || []).map(u => `
-      <tr class="hover:bg-slate-50 transition">
-        <td class="py-3 px-4">
-          <strong class="text-slate-900 text-xs block">${escapeHtml(u.name)}</strong>
-          <span class="text-slate-500 text-[11px]">@${escapeHtml(u.username)}</span>
-        </td>
-        <td class="py-3 px-4 text-slate-600 text-xs">${escapeHtml(u.email)}</td>
-        <td class="py-3 px-4">
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${u.role === 'admin' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
-            ${u.role}
-          </span>
-        </td>
-        <td class="py-3 px-4">
-          <span class="inline-flex items-center text-xs font-semibold ${u.active ? 'text-emerald-600' : 'text-rose-600'}">
-            <span class="w-1.5 h-1.5 rounded-full ${u.active ? 'bg-emerald-500' : 'bg-rose-500'} mr-1.5"></span>
-            ${u.active ? 'Activo' : 'Inactivo'}
-          </span>
-        </td>
-        <td class="py-3 px-4 text-slate-500 text-xs">${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('es-AR') : 'Nunca'}</td>
-        <td class="py-3 px-4 text-right">
-          ${u.id !== currentUser.id ? `<button onclick="deleteUser('${u.id}')" class="text-slate-400 hover:text-rose-600 p-1 transition" title="Eliminar"><i class="fa-solid fa-trash-can text-xs"></i></button>` : '<span class="text-xs text-slate-400 font-bold">Tú</span>'}
-        </td>
-      </tr>
-    `).join('');
-  } catch (e) {}
-}
-
-function openNewUserModal() {
-  document.getElementById('userModal')?.classList.remove('hidden');
-}
-
-function closeUserModal() {
-  document.getElementById('userModal')?.classList.add('hidden');
-}
-
-async function handleSaveUser(e) {
-  e.preventDefault();
-  const name = document.getElementById('usrName').value.trim();
-  const username = document.getElementById('usrUsername').value.trim();
-  const email = document.getElementById('usrEmail').value.trim();
-  const password = document.getElementById('usrPassword').value;
-  const role = document.getElementById('usrRole').value;
-
-  try {
-    const res = await fetchWithAuth('/api/users', {
-      method: 'POST',
-      body: JSON.stringify({ name, username, email, password, role })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast(`Usuario @${username} creado con éxito.`, 'success');
-      closeUserModal();
-      await loadUsersList();
-    } else {
-      showToast(data.message, 'error');
-    }
-  } catch (e) {
-    showToast('Error al crear usuario.', 'error');
-  }
-}
-
-async function deleteUser(id) {
-  if (!confirm('¿Seguro de eliminar este usuario?')) return;
-  try {
-    const res = await fetchWithAuth(`/api/users/${id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Usuario eliminado.', 'info');
-      await loadUsersList();
-    } else {
-      showToast(data.message, 'error');
-    }
-  } catch (e) {}
-}
-
-// --- FAST INVOICING (INDIVIDUAL) ---
-function addInvoiceItem() {
-  const container = document.getElementById('invoiceItemsContainer');
-  const div = document.createElement('div');
-  div.className = 'invoice-item-row grid grid-cols-12 gap-2 items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200';
-  div.innerHTML = `
-    <div class="col-span-12 sm:col-span-6">
-      <input type="text" class="item-desc input-field text-xs" placeholder="Descripción del producto o servicio..." required>
-    </div>
-    <div class="col-span-3 sm:col-span-2">
-      <input type="number" class="item-qty input-field text-xs text-center" value="1" min="1" oninput="calculateInvoiceTotals()" required>
-    </div>
-    <div class="col-span-7 sm:col-span-3">
-      <input type="number" class="item-price input-field text-xs" value="0" min="0" step="0.01" oninput="calculateInvoiceTotals()" required>
-    </div>
-    <div class="col-span-2 sm:col-span-1 text-center">
-      <button type="button" onclick="removeInvoiceItem(this)" class="text-slate-400 hover:text-rose-600 transition text-sm p-1" title="Quitar ítem">
-        <i class="fa-solid fa-trash-can"></i>
-      </button>
-    </div>
-  `;
-  container.appendChild(div);
-  calculateInvoiceTotals();
-}
-
-function removeInvoiceItem(btn) {
-  const row = btn.closest('.invoice-item-row');
-  const container = document.getElementById('invoiceItemsContainer');
-  if (container.children.length > 1) {
-    row.remove();
-    calculateInvoiceTotals();
-  }
-}
-
-function setQuickItemDesc(desc) {
-  const firstDesc = document.querySelector('.invoice-item-row .item-desc');
-  if (firstDesc) firstDesc.value = desc;
-}
-
-function calculateInvoiceTotals() {
-  const rows = document.querySelectorAll('.invoice-item-row');
-  let total = 0;
-  rows.forEach(r => {
-    const qty = parseFloat(r.querySelector('.item-qty')?.value || '0');
-    const price = parseFloat(r.querySelector('.item-price')?.value || '0');
-    total += (qty * price);
-  });
-  const displayEl = document.getElementById('facTotalDisplay');
-  if (displayEl) displayEl.innerText = `$${total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-  return total;
-}
-
-function formatInputCuit(input) {
-  let val = input.value.replace(/\D/g, '');
-  if (val.length === 11) {
-    input.value = `${val.substring(0, 2)}-${val.substring(2, 10)}-${val.substring(10, 11)}`;
-  }
-}
-
-async function handleEmitirFactura(e) {
-  e.preventDefault();
-  const tipoComprobante = document.getElementById('facTipo').value;
-  const puntoVenta = parseInt(document.getElementById('facPuntoVenta').value || '1', 10);
-  const concepto = parseInt(document.getElementById('facConcepto').value || '2', 10);
-  const tipoDoc = document.getElementById('facTipoDoc').value;
-  const nroDoc = document.getElementById('facNroDoc').value.replace(/\D/g, '');
-  const razonSocial = document.getElementById('facRazonSocial').value.trim();
-  const condicionIva = document.getElementById('facCondIva').value;
-  const condicionVenta = document.getElementById('facCondVenta').value;
-
-  const rows = document.querySelectorAll('.invoice-item-row');
-  const items = [];
-  rows.forEach(r => {
-    const descripcion = r.querySelector('.item-desc').value.trim();
-    const cantidad = parseFloat(r.querySelector('.item-qty').value || '1');
-    const precioUnitario = parseFloat(r.querySelector('.item-price').value || '0');
-    items.push({ descripcion, cantidad, precioUnitario, subtotal: cantidad * precioUnitario });
-  });
-
-  const payload = { tipoComprobante, puntoVenta, concepto, condicionVenta, receptor: { tipoDoc, nroDoc, razonSocial, condicionIva }, items };
-
-  const btn = document.getElementById('btnEmitirComprobante');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Conectando con ARCA...';
-
-  // Activar Cockpit con barra de progreso 0-100%
-  const cockpit = document.getElementById('invoiceProgressCockpit');
-  const bar = document.getElementById('invoiceProgressBar');
-  const percentEl = document.getElementById('invoiceProgressPercent');
-  const msgEl = document.getElementById('invoiceProgressStatusMsg');
-  const stepEl = document.getElementById('invoiceProgressStepCounter');
-
-  const updateProgress = (pct, msg, step) => {
-    if (bar) bar.style.width = `${pct}%`;
-    if (percentEl) percentEl.innerText = `${pct}%`;
-    if (msgEl) msgEl.innerText = msg;
-    if (stepEl) stepEl.innerText = step;
+$('#disLogo').addEventListener('change', () => {
+  const f = $('#disLogo').files[0];
+  if (!f) return;
+  if (!/image\/(png|jpeg)/.test(f.type)) return aviso('El logo tiene que ser PNG o JPG.', 'error');
+  if (f.size > 400 * 1024) return aviso('El logo pesa más de 400 KB.', 'error');
+  const lector = new FileReader();
+  lector.onload = () => { disLogo = lector.result; pintarLogo(); };
+  lector.readAsDataURL(f);
+});
+$('#btnQuitarLogo').addEventListener('click', () => { disLogo = ''; $('#disLogo').value = ''; pintarLogo(); });
+function leerDiseno() {
+  return {
+    modo: disModo, esquema: $('#disEsquema').value, colorPrincipal: $('#disColor1').value, colorAcento: $('#disColor2').value,
+    tipografia: $('#disFuente').value, logoDataUrl: disLogo || undefined, logoPosicion: $('#disLogoPos').value,
+    nombreFantasia: $('#disFantasia').value, telefono: $('#disTel').value, web: $('#disWeb').value, emailContacto: $('#disEmailContacto').value,
+    notas: $('#disNotas').value, leyendaPie: $('#disPie').value,
+    mail: { asunto: $('#disAsunto').value, cuerpo: $('#disCuerpo').value, responderA: $('#disResponder').value },
   };
-
-  if (cockpit) {
-    cockpit.classList.remove('hidden');
-    cockpit.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-
-  updateProgress(10, 'Iniciando navegador headless y autenticando en portal ARCA...', 'Paso 1 de 5');
-
-  // Simulación temporal en vivo de las fases mientras el backend ejecuta el pipeline
-  const t1 = setTimeout(() => updateProgress(28, 'Autenticación con Clave Fiscal exitosa. Abriendo subsistema "Comprobantes en línea"...', 'Paso 2 de 5'), 3500);
-  const t2 = setTimeout(() => updateProgress(52, 'Seleccionando CUIT emisor representado en RCEL...', 'Paso 3 de 5'), 8500);
-  const t3 = setTimeout(() => updateProgress(75, 'Cargando datos de receptor y detalle de items a facturar...', 'Paso 4 de 5'), 14000);
-  const t4 = setTimeout(() => updateProgress(90, 'Solicitando autorización formal de CAE a servidores AFIP...', 'Paso 5 de 5'), 22000);
-
-  try {
-    const res = await fetchWithAuth('/api/erp/facturacion/emitir', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4);
-
-    const data = await res.json();
-    if (data.success) {
-      updateProgress(100, '¡Comprobante autorizado con éxito por ARCA! Generando PDF...', 'Completado');
-      showToast('¡Comprobante autorizado con éxito en ARCA!', 'success');
-      document.getElementById('lastCaeNumber').innerText = data.cae || '-';
-      document.getElementById('lastCaeVto').innerText = data.caeVencimiento || '-';
-      document.getElementById('lastComprobanteNro').innerText = data.comprobanteNro || '-';
-      document.getElementById('caeStatusDot').className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse';
-
-      // Mostrar botón de descarga de PDF si está disponible
-      const pdfContainer = document.getElementById('lastCaePdfContainer');
-      const pdfBtn = document.getElementById('lastCaePdfBtn');
-      if (pdfContainer && pdfBtn) {
-        if (data.pdfUrl) {
-          pdfBtn.href = data.pdfUrl;
-          pdfContainer.classList.remove('hidden');
-        } else if (data.pdfBufferBase64) {
-          pdfBtn.href = `data:application/pdf;base64,${data.pdfBufferBase64}`;
-          pdfContainer.classList.remove('hidden');
-        }
-      }
-      
-      // Resaltar la tarjeta del CAE visible en pantalla
-      const card = document.getElementById('lastCaeCard');
-      if (card) {
-        card.classList.add('ring-4', 'ring-emerald-400');
-        setTimeout(() => card.classList.remove('ring-4', 'ring-emerald-400'), 5000);
-      }
-
-      loadComprobantesList();
-    } else {
-      updateProgress(100, `Error de autorización: ${data.message}`, 'Detenido');
-      showToast(`Error de emisión: ${data.message}`, 'error');
-    }
-  } catch (err) {
-    clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4);
-    updateProgress(0, `Error de comunicación: ${err.message}`, 'Fallo');
-    showToast(`Error de comunicación: ${err.message}`, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs mr-1"></i> <span>EMITIR EN ARCA AHORA</span>';
-    setTimeout(() => {
-      // Dejar la barra visible si fue exitoso o esconder si se resetea
-    }, 4000);
-  }
 }
+$('#btnVistaPrevia').addEventListener('click', async (e) => {
+  ocupado(e.currentTarget, true);
+  const r = await api(`/api/accounts/${disCuit}/diseno/vista-previa`, { method: 'POST', body: { diseno: leerDiseno() }, blob: true });
+  ocupado(e.currentTarget, false);
+  if (!r.ok) return aviso(r.data.message || 'No se pudo armar la vista previa.', 'error');
+  abrirBlob(r.blob);
+});
+$('#btnGuardarDiseno').addEventListener('click', async (e) => {
+  ocupado(e.currentTarget, true);
+  const r = await api(`/api/accounts/${disCuit}/diseno`, { method: 'PUT', body: { diseno: leerDiseno() } });
+  ocupado(e.currentTarget, false);
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) { $('#dlgDiseno').close(); cargarCuentas(); }
+});
 
-// --- COMPROBANTES HISTORIAL ---
-async function loadComprobantesList() {
-  try {
-    const res = await fetchWithAuth('/api/erp/comprobantes');
-    if (!res.ok) return;
-    const data = await res.json();
-    allComprobantes = data.comprobantes || [];
-    renderComprobantesTable(allComprobantes);
-  } catch (e) {}
+/* ======================================================================
+   AJUSTES · CLIENTES
+   ====================================================================== */
+async function cargarClientes() {
+  const r = await api('/api/erp/clientes');
+  estado.clientes = r.ok ? r.data.clientes || [] : [];
+  $('#facCliente').innerHTML = '<option value="">Cargar a mano</option>' + estado.clientes
+    .slice().sort((a, b) => String(a.razonSocial).localeCompare(String(b.razonSocial)))
+    .map(c => `<option value="${c.id}">${esc(c.razonSocial)}${c.cuit ? ' · ' + fmtCuit(c.cuit) : ''}</option>`).join('');
+  renderClientes();
 }
-
-function renderComprobantesTable(list) {
-  const tbody = document.getElementById('comprobantesTableBody');
-  if (!tbody) return;
-
-  if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-slate-400 text-xs">No hay comprobantes emitidos registrados aún.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = list.map(c => `
-    <tr class="hover:bg-slate-50/80 transition">
-      <td class="py-3 px-4 text-slate-500 text-xs">${c.fechaEmision || c.fecha_emision || '-'}</td>
-      <td class="py-3 px-4">
-        <strong class="text-indigo-600 font-bold text-xs">${escapeHtml(c.tipoComprobante || c.tipo_comprobante || 'Factura C')}</strong>
-        <span class="text-slate-500 ml-1 font-mono text-xs font-semibold">${c.comprobanteFormato || c.comprobante_formato || '-'}</span>
-      </td>
-      <td class="py-3 px-4">
-        <div class="text-slate-900 font-bold text-xs truncate max-w-[220px]">${escapeHtml(c.razonSocialReceptor || c.razon_social_receptor || 'Consumidor Final')}</div>
-        <div class="text-[11px] text-slate-500 font-mono">CUIT: ${c.cuitReceptor || c.cuit_receptor || '-'}</div>
-      </td>
-      <td class="py-3 px-4 text-right font-extrabold text-slate-900 text-xs">$${(c.importeTotal || c.importe_total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
-      <td class="py-3 px-4">
-        <span class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold font-mono">CAE: ${c.cae || '-'}</span>
-      </td>
-    </tr>
-  `).join('');
+function renderClientes() {
+  $('#listaClientes').innerHTML = estado.clientes.length ? estado.clientes.map(c => `<li><button class="fila" data-cli="${c.id}">
+    <div style="min-width:0"><div class="principal-txt">${esc(c.razonSocial)}</div><div class="secundario">${c.cuit ? `<span class="dato">${fmtCuit(c.cuit)}</span> · ` : ''}${esc(c.condicionIva)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>
+    <span class="tenue">${ic('lapiz')}</span></button></li>`).join('')
+    : '<li class="vacio"><p>Los clientes a los que les facturás se guardan acá automáticamente.</p></li>';
 }
-
-function filterComprobantesTable(query) {
-  const q = query.toLowerCase();
-  const filtered = allComprobantes.filter(c => 
-    (c.cae && c.cae.includes(q)) ||
-    (c.cuitReceptor && c.cuitReceptor.includes(q)) ||
-    (c.razonSocialReceptor && c.razonSocialReceptor.toLowerCase().includes(q))
-  );
-  renderComprobantesTable(filtered);
+let cliId = '';
+function abrirCliente(id) {
+  const c = estado.clientes.find(x => x.id === id);
+  cliId = id || '';
+  $('#dlgClienteTitulo').textContent = c ? 'Editar cliente' : 'Agregar cliente';
+  $('#cliTipoDoc').value = c?.tipoDoc || 'CUIT'; $('#cliDoc').value = c?.cuit || ''; $('#cliNombre').value = c?.razonSocial || '';
+  $('#cliCondIva').value = c?.condicionIva || 'Consumidor Final'; $('#cliEmail').value = c?.email || ''; $('#cliDomicilio').value = c?.domicilio || '';
+  $('#formCliente').querySelector('.d-pie').querySelector('[data-borrar-cli]')?.remove();
+  if (c) $('#formCliente .d-pie').insertAdjacentHTML('afterbegin', `<button type="button" class="boton texto peligro" data-borrar-cli="${c.id}" style="margin-right:auto">Eliminar</button>`);
+  $('#dlgCliente').showModal();
 }
-
-// --- CLIENTES CRM LIGERO ---
-async function loadCRMClientes() {
-  try {
-    const res = await fetchWithAuth('/api/erp/clientes');
-    if (!res.ok) return;
-    const data = await res.json();
-    allClients = data.clientes || [];
-    renderClientsGrid(allClients);
-    populateQuickClientSelector(allClients);
-  } catch (e) {}
-}
-
-function renderClientsGrid(clients) {
-  const container = document.getElementById('clientsGrid');
-  if (!container) return;
-
-  if (clients.length === 0) {
-    container.innerHTML = '<div class="col-span-full py-8 text-center text-slate-400 text-xs">No hay clientes frecuentes registrados.</div>';
-    return;
-  }
-
-  container.innerHTML = clients.map(c => `
-    <div class="p-4 bg-white border border-slate-200/90 rounded-xl space-y-2.5 text-xs shadow-sm hover:border-slate-300 hover:shadow transition">
-      <div class="flex items-start justify-between">
-        <div class="truncate">
-          <strong class="text-slate-900 text-sm font-bold block truncate">${escapeHtml(c.razonSocial)}</strong>
-          <span class="text-slate-500 text-xs font-mono">CUIT: ${c.cuit}</span>
-        </div>
-        <button onclick="deleteClient('${c.id}')" class="text-slate-400 hover:text-rose-600 transition p-1" title="Eliminar"><i class="fa-solid fa-trash-can text-xs"></i></button>
-      </div>
-      <div class="text-xs text-slate-600">Condición: <span class="font-semibold text-slate-800">${escapeHtml(c.condicionIva || 'Consumidor Final')}</span></div>
-      <div class="pt-2 border-t border-slate-100 flex justify-end">
-        <button onclick="selectClientAndInvoice('${c.id}')" class="text-xs text-indigo-600 hover:text-indigo-700 font-bold flex items-center space-x-1.5 transition">
-          <span>Facturar a este cliente</span>
-          <i class="fa-solid fa-arrow-right text-[10px]"></i>
-        </button>
-      </div>
-    </div>
-  `).join('');
-}
-
-function populateQuickClientSelector(clients) {
-  const select = document.getElementById('facQuickClientSelect');
-  if (!select) return;
-  select.innerHTML = '<option value="">-- Cargar de Clientes --</option>' +
-    clients.map(c => `<option value="${c.id}">${escapeHtml(c.razonSocial)} (${c.cuit})</option>`).join('');
-}
-
-function applySelectedClientToInvoice(clientId) {
-  if (!clientId) return;
-  const client = allClients.find(c => c.id === clientId);
-  if (!client) return;
-  document.getElementById('facRazonSocial').value = client.razonSocial;
-  document.getElementById('facNroDoc').value = client.cuit;
-  document.getElementById('facCondIva').value = client.condicionIva || 'Consumidor Final';
-  showToast(`Datos de ${client.razonSocial} cargados.`, 'info');
-}
-
-function selectClientAndInvoice(clientId) {
-  switchTab('facturar');
-  setInvoiceSubmode('manual');
-  const select = document.getElementById('facQuickClientSelect');
-  if (select) select.value = clientId;
-  applySelectedClientToInvoice(clientId);
-}
-
-function openClientModal() {
-  document.getElementById('clientModal')?.classList.remove('hidden');
-}
-
-function closeClientModal() {
-  document.getElementById('clientModal')?.classList.add('hidden');
-}
-
-async function handleSaveClient(e) {
+$('#btnNuevoCliente').addEventListener('click', () => abrirCliente());
+$('#listaClientes').addEventListener('click', (e) => { const b = e.target.closest('[data-cli]'); if (b) abrirCliente(b.dataset.cli); });
+$('#formCliente').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-borrar-cli]');
+  if (!b || !confirm('¿Eliminar este cliente? Sus comprobantes no se borran.')) return;
+  const r = await api(`/api/erp/clientes/${b.dataset.borrarCli}`, { method: 'DELETE' });
+  if (r.ok) { $('#dlgCliente').close(); cargarClientes(); aviso('Cliente eliminado.'); }
+});
+$('#formCliente').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const razonSocial = document.getElementById('crmRazonSocial').value.trim();
-  const tipoDoc = document.getElementById('crmTipoDoc').value;
-  const cuit = document.getElementById('crmCuit').value.replace(/\D/g, '');
-  const condicionIva = document.getElementById('crmCondIva').value;
+  const doc = $('#cliDoc').value.replace(/\D/g, '');
+  if (!$('#cliNombre').value.trim()) return aviso('Falta el nombre.', 'error');
+  if (!doc) return aviso('Falta el número de documento (los clientes se identifican por CUIT o DNI).', 'error');
+  const r = await api('/api/erp/clientes', { method: 'POST', body: { id: cliId || undefined, cuit: doc, tipoDoc: $('#cliTipoDoc').value, razonSocial: $('#cliNombre').value.trim(), condicionIva: $('#cliCondIva').value, email: $('#cliEmail').value.trim(), domicilio: $('#cliDomicilio').value.trim() } });
+  aviso(r.ok ? 'Cliente guardado.' : r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) { $('#dlgCliente').close(); cargarClientes(); }
+});
 
-  try {
-    const res = await fetchWithAuth('/api/erp/clientes', {
-      method: 'POST',
-      body: JSON.stringify({ razonSocial, tipoDoc, cuit, condicionIva })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Cliente guardado.', 'success');
-      closeClientModal();
-      await loadCRMClientes();
-    } else {
-      showToast(data.message, 'error');
-    }
-  } catch (e) {
-    showToast('Error al guardar cliente.', 'error');
+/* ======================================================================
+   AJUSTES · USUARIOS (admin)
+   ====================================================================== */
+let usuarios = [];
+const ROL = { admin: 'Administrador', operator: 'Operador', viewer: 'Solo lectura' };
+async function cargarUsuarios() {
+  const r = await api('/api/users');
+  usuarios = r.ok ? r.data.users || [] : [];
+  $('#listaUsuarios').innerHTML = usuarios.map(u => `<li><button class="fila" data-usr="${u.id}">
+    <div style="min-width:0"><div class="principal-txt">${esc(u.name)} <span class="tenue">@${esc(u.username)}</span></div>
+      <div class="secundario">${esc(u.email)} · ${u.lastLoginAt ? 'último ingreso ' + new Date(u.lastLoginAt).toLocaleDateString('es-AR') : 'nunca ingresó'}</div></div>
+    <span class="etiqueta-estado ${!u.active ? 'e-error' : u.role === 'viewer' ? 'e-espera' : 'e-ok'}">${u.active ? ROL[u.role] : 'Desactivado'}</span></button></li>`).join('');
+}
+let usrId = '';
+function abrirUsuario(id) {
+  const u = usuarios.find(x => x.id === id);
+  usrId = id || '';
+  $('#dlgUsuarioTitulo').textContent = u ? 'Editar usuario' : 'Agregar usuario';
+  $('#usrNombre').value = u?.name || ''; $('#usrUsuario').value = u?.username || ''; $('#usrUsuario').readOnly = !!u;
+  $('#usrEmail').value = u?.email || ''; $('#usrRol').value = u?.role || 'operator'; $('#usrActivo').value = u && !u.active ? '0' : '1';
+  $('#usrClave').value = '';
+  $('#usrClaveCampo').classList.toggle('oculto', !!u);
+  $('#usrActivoCampo').classList.toggle('oculto', !u);
+  $('#btnBorrarUsuario').classList.toggle('oculto', !u || u.id === estado.usuario.id);
+  $('#btnResetClave').classList.toggle('oculto', !u);
+  $('#dlgUsuario').showModal();
+}
+$('#btnNuevoUsuario').addEventListener('click', () => abrirUsuario());
+$('#listaUsuarios').addEventListener('click', (e) => { const b = e.target.closest('[data-usr]'); if (b) abrirUsuario(b.dataset.usr); });
+$('#formUsuario').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = { name: $('#usrNombre').value.trim(), email: $('#usrEmail').value.trim(), role: $('#usrRol').value };
+  const r = usrId
+    ? await api(`/api/users/${usrId}`, { method: 'PUT', body: { ...body, active: $('#usrActivo').value === '1' } })
+    : await api('/api/users', { method: 'POST', body: { ...body, username: $('#usrUsuario').value.trim(), password: $('#usrClave').value } });
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) { $('#dlgUsuario').close(); cargarUsuarios(); }
+});
+$('#btnResetClave').addEventListener('click', async () => {
+  const clave = prompt('Contraseña nueva para este usuario (mínimo 8 caracteres, con letras y números). Se le cierran las sesiones y le llega un aviso por mail.');
+  if (!clave) return;
+  const r = await api(`/api/users/${usrId}/reset-password`, { method: 'PUT', body: { newPassword: clave } });
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+});
+$('#btnBorrarUsuario').addEventListener('click', async () => {
+  if (!confirm('¿Eliminar este usuario? No se puede deshacer.')) return;
+  const r = await api(`/api/users/${usrId}`, { method: 'DELETE' });
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) { $('#dlgUsuario').close(); cargarUsuarios(); }
+});
+
+/* ======================================================================
+   AJUSTES · CORREO, MI CUENTA, SISTEMA
+   ====================================================================== */
+async function cargarCorreo() {
+  const r = await api('/api/settings/mail');
+  if (!r.ok) return;
+  const m = r.data.mail;
+  $('#mailProveedor').value = m.provider || 'auto';
+  $('#mailRemitente').value = m.senderEmail || ''; $('#mailNombre').value = m.senderName || ''; $('#mailAdmin').value = m.adminNotifyEmail || '';
+  $('#mailResend').value = ''; $('#mailResend').placeholder = m.hasResendKey ? `Guardada: ${m.resendKeyMasked}` : 're_…';
+  $('#mailBrevo').value = ''; $('#mailBrevo').placeholder = m.hasBrevoKey ? `Guardada: ${m.brevoKeyMasked}` : 'xkeysib-…';
+  $('#groqClave').value = ''; $('#groqClave').placeholder = m.hasGroqKey ? `Guardada: ${m.groqKeyMasked}` : 'gsk_…';
+}
+$('#aj-correo').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const r = await api('/api/settings/mail', { method: 'POST', body: { provider: $('#mailProveedor').value, senderEmail: $('#mailRemitente').value, senderName: $('#mailNombre').value, adminNotifyEmail: $('#mailAdmin').value, resendApiKey: $('#mailResend').value, brevoApiKey: $('#mailBrevo').value, groqApiKey: $('#groqClave').value } });
+  aviso(r.ok ? 'Configuración guardada.' : r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) cargarCorreo();
+});
+$('#btnProbarMail').addEventListener('click', async (e) => {
+  ocupado(e.currentTarget, true);
+  const r = await api('/api/settings/mail/test', { method: 'POST', body: { testEmail: $('#mailPrueba').value.trim() || undefined } });
+  ocupado(e.currentTarget, false);
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+});
+
+$('#aj-cuenta').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if ($('#clvNueva').value !== $('#clvNueva2').value) return aviso('Las contraseñas nuevas no coinciden.', 'error');
+  const r = await api('/api/users/me/password', { method: 'PUT', body: { currentPassword: $('#clvActual').value, newPassword: $('#clvNueva').value } });
+  aviso(r.data.message, r.ok ? 'ok' : 'error');
+  if (r.ok) { aviso('Ingresá de nuevo con la contraseña nueva.'); setTimeout(() => cerrarSesion(false), 1200); }
+});
+$('#btnSalir').addEventListener('click', () => cerrarSesion());
+
+function conectarLogs() {
+  if (estado.sse) return;
+  const term = $('#terminal');
+  const p = estado.plataforma;
+  $('#sisResumen').textContent = p ? `Ambiente: ${p.ambiente === 'produccion' ? 'producción (facturas reales)' : 'homologación (pruebas)'}. Certificado de la plataforma: ${p.plataforma?.configurado ? `CUIT ${fmtCuit(p.plataforma.cuit)}, vence ${String(p.plataforma.vence || '').slice(0, 10)}` : 'no configurado'}.` : '';
+  api('/api/logs?limit=80').then(r => { if (r.status === 200) (r.data.logs || []).forEach(agregarLog); });
+  estado.sse = new EventSource(`/api/logs/stream?token=${encodeURIComponent(estado.token)}`);
+  estado.sse.onmessage = (ev) => { try { agregarLog(JSON.parse(ev.data)); } catch {} };
+  function agregarLog(l) {
+    const linea = document.createElement('div');
+    linea.className = { error: 't-error', success: 't-ok', warn: 't-warn' }[l.level] || '';
+    linea.textContent = `${l.timestamp || ''} ${l.category ? `[${l.category}] ` : ''}${l.message || ''}`;
+    term.appendChild(linea);
+    while (term.childElementCount > 400) term.firstChild.remove();
+    term.scrollTop = term.scrollHeight;
   }
 }
+$('#btnLimpiarLog').addEventListener('click', () => { $('#terminal').innerHTML = ''; });
 
-async function deleteClient(id) {
-  if (!confirm('¿Eliminar cliente?')) return;
-  try {
-    await fetchWithAuth(`/api/erp/clientes/${id}`, { method: 'DELETE' });
-    showToast('Cliente eliminado.', 'info');
-    await loadCRMClientes();
-  } catch (e) {}
-}
+/* ======================================================================
+   INICIO
+   ====================================================================== */
+window.addEventListener('hashchange', () => {
+  if (location.hash.startsWith('#restablecer=')) { $('#vistaApp').classList.add('oculto'); $('#vistaIngreso').classList.remove('oculto'); mostrarFormIngreso('restablecer'); return; }
+  if (estado.usuario) ir(location.hash.replace('#', ''));
+});
 
-// --- CONFIG & SUPABASE ---
-async function loadAuthStatus() {
-  try {
-    const res = await fetchWithAuth('/api/auth/status');
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.cuit) {
-      const facPto = document.getElementById('facPuntoVenta');
-      if (facPto) facPto.value = data.puntoVentaDefault || 1;
-    }
-  } catch (e) {}
-}
-
-async function testArcaConnection() {
-  const btn = document.getElementById('btnTestArca');
-  const originalHtml = btn ? btn.innerHTML : '';
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-indigo-600 mr-1.5"></i> Conectando...';
+(function arrancar() {
+  if (location.hash.startsWith('#restablecer=')) {
+    $('#vistaIngreso').classList.remove('oculto');
+    mostrarFormIngreso('restablecer');
+    return;
   }
-
-  showToast('Iniciando sesión en ARCA en modo Headless... Esto puede demorar unos 30-45 segundos.', 'info');
-  try {
-    const res = await fetchWithAuth('/api/auth/test-login', { method: 'POST', body: JSON.stringify({}) });
-    const data = await res.json();
-    if (data.success) {
-      showToast(`¡Conexión Exitosa con ARCA! Titular: ${data.razonSocial}`, 'success');
-      await loadAccounts();
-    } else {
-      showToast(`Fallo de conexión: ${data.message}`, 'error');
-    }
-  } catch (e) {
-    showToast(`Error: ${e.message}`, 'error');
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-}
-window.testArcaConnection = testArcaConnection;
-
-// --- PREFERENCIAS DE FACTURACIÓN Y ESTADO CLOUD AUTOGESTIONADO ---
-function loadGeneralPreferences() {
-  try {
-    const raw = localStorage.getItem('botarca_general_prefs');
-    if (raw) {
-      const prefs = JSON.parse(raw);
-      if (prefs.puntoVenta && document.getElementById('prefPuntoVenta')) {
-        document.getElementById('prefPuntoVenta').value = prefs.puntoVenta;
-      }
-      if (prefs.concepto && document.getElementById('prefConcepto')) {
-        document.getElementById('prefConcepto').value = prefs.concepto;
-      }
-      if (prefs.condicionVenta && document.getElementById('prefCondicionVenta')) {
-        document.getElementById('prefCondicionVenta').value = prefs.condicionVenta;
-      }
-      if (prefs.tipoComprobante && document.getElementById('prefTipoComprobante')) {
-        document.getElementById('prefTipoComprobante').value = prefs.tipoComprobante;
-      }
-
-      // Sincronizar también con el Facturador Rápido
-      if (prefs.puntoVenta && document.getElementById('facPuntoVenta')) {
-        document.getElementById('facPuntoVenta').value = prefs.puntoVenta;
-      }
-      if (prefs.concepto && document.getElementById('facConcepto')) {
-        document.getElementById('facConcepto').value = prefs.concepto;
-      }
-      if (prefs.tipoComprobante && document.getElementById('facTipo')) {
-        document.getElementById('facTipo').value = prefs.tipoComprobante;
-      }
-    }
-  } catch (e) {
-    console.error('Error cargando preferencias:', e);
-  }
-}
-
-function handleSaveGeneralPreferences(e) {
-  if (e) e.preventDefault();
-  const puntoVenta = document.getElementById('prefPuntoVenta')?.value || 1;
-  const concepto = document.getElementById('prefConcepto')?.value || '2';
-  const condicionVenta = document.getElementById('prefCondicionVenta')?.value || 'Contado';
-  const tipoComprobante = document.getElementById('prefTipoComprobante')?.value || 'Factura C';
-
-  const prefs = { puntoVenta, concepto, condicionVenta, tipoComprobante };
-  localStorage.setItem('botarca_general_prefs', JSON.stringify(prefs));
-
-  // Sincronizar inmediatamente con Facturador Rápido
-  if (document.getElementById('facPuntoVenta')) document.getElementById('facPuntoVenta').value = puntoVenta;
-  if (document.getElementById('facConcepto')) document.getElementById('facConcepto').value = concepto;
-  if (document.getElementById('facTipo')) document.getElementById('facTipo').value = tipoComprobante;
-
-  showToast('Preferencias de facturación guardadas correctamente.', 'success');
-}
-
-async function checkCloudHealthStatus() {
-  showToast('Verificando conexión de servicios Cloud en tiempo real...', 'info');
-  try {
-    const res = await fetch('/api/finanzas/resumen');
-    if (res.ok) {
-      showToast('Todos los servicios Cloud (Servidor, Base de Datos, IA Groq y ARCA) están 100% operativos.', 'success');
-    } else {
-      showToast('Servidor respondiendo pero con latencia.', 'warn');
-    }
-  } catch (err) {
-    showToast('Error al conectar con los servicios Cloud.', 'error');
-  }
-}
-
-// --- LIVE LOGS SSE ---
-function connectLogsSSE() {
-  if (sseSource) sseSource.close();
-  try {
-    // EventSource no puede mandar el header Authorization: el token va en la URL
-    sseSource = new EventSource(`/api/logs/stream?token=${encodeURIComponent(authToken || '')}`);
-    sseSource.onmessage = (event) => {
-      try {
-        const log = JSON.parse(event.data);
-        appendTerminalLog(log);
-      } catch (e) {}
-    };
-    sseSource.onerror = () => {
-      if (sseSource) sseSource.close();
-    };
-  } catch (e) {}
-}
-
-function appendTerminalLog(log) {
-  const screen = document.getElementById('terminalScreen');
-  if (!screen) return;
-
-  const div = document.createElement('div');
-  const levelClass = `log-level-${log.level.toLowerCase()}`;
-  div.innerHTML = `<span class="text-slate-400 font-mono">[${log.timestamp.split('T')[1].split('.')[0]}]</span> <strong class="${levelClass}">[${log.module}]</strong> <span class="text-slate-700">${escapeHtml(log.message)}</span>`;
-  screen.appendChild(div);
-  screen.scrollTop = screen.scrollHeight;
-}
-
-function clearLogsConsole() {
-  const screen = document.getElementById('terminalScreen');
-  if (screen) screen.innerHTML = '<div class="text-slate-400 font-mono text-xs">[SISTEMA] Consola limpia.</div>';
-}
-
-function reconnectLogsSSE() {
-  connectLogsSSE();
-  showToast('Reconectando streaming de logs...', 'info');
-}
-
-// --- UTILS & TOASTS ---
-function formatCuit(cuit) {
-  if (!cuit) return '-';
-  const c = String(cuit).replace(/\D/g, '');
-  if (c.length === 11) {
-    return `${c.substring(0, 2)}-${c.substring(2, 10)}-${c.substring(10, 11)}`;
-  }
-  return c;
-}
-
-function showToast(message, type = 'info') {
-  const container = document.getElementById('toastContainer');
-  if (!container) return;
-
-  const toast = document.createElement('div');
-  const colors = {
-    success: 'bg-white border-2 border-emerald-500 text-emerald-950 shadow-2xl ring-1 ring-emerald-500/20',
-    error: 'bg-white border-2 border-rose-500 text-rose-950 shadow-2xl ring-1 ring-rose-500/20',
-    warn: 'bg-white border-2 border-amber-500 text-amber-950 shadow-2xl ring-1 ring-amber-500/20',
-    info: 'bg-white border-2 border-indigo-500 text-slate-900 shadow-2xl ring-1 ring-indigo-500/20',
-  };
-
-  const icons = {
-    success: 'fa-circle-check text-emerald-600',
-    error: 'fa-circle-exclamation text-rose-600',
-    warn: 'fa-triangle-exclamation text-amber-500',
-    info: 'fa-circle-info text-indigo-600',
-  };
-
-  toast.className = `pointer-events-auto p-4 rounded-xl border-2 shadow-2xl flex items-center space-x-3.5 text-xs font-bold transition-all duration-200 translate-y-2 opacity-0 ${colors[type] || colors.info}`;
-  toast.innerHTML = `
-    <i class="fa-solid ${icons[type] || icons.info} text-lg flex-shrink-0"></i>
-    <span class="flex-1 leading-snug tracking-normal text-slate-900">${escapeHtml(message)}</span>
-  `;
-
-  container.appendChild(toast);
-  setTimeout(() => toast.classList.remove('translate-y-2', 'opacity-0'), 10);
-  setTimeout(() => {
-    toast.classList.add('opacity-0', 'translate-y-2');
-    setTimeout(() => toast.remove(), 300);
-  }, 5000);
-}
-
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+  if (estado.token) iniciarApp();
+  else { $('#vistaIngreso').classList.remove('oculto'); mostrarFormIngreso('ingreso'); }
+})();

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { config } from './config.js';
 import { encrypt, decrypt } from './crypto.js';
+import type { DisenoComprobante } from './engine/ws/diseno.js';
 
 export interface ArcaAccountRecord {
   id: string;
@@ -16,6 +17,8 @@ export interface ArcaAccountRecord {
   createdAt: string;
   /** Configuración de emisión por web service de ARCA (WSFEv1) */
   ws?: WsConfigCuenta;
+  /** Diseño del PDF y del mail (genérico o personalizado) */
+  diseno?: DisenoComprobante;
 }
 
 /**
@@ -102,6 +105,12 @@ export interface ComprobanteRecord {
   caeVencimiento?: string;
   estado: string;
   createdAt: string;
+  /** Datos completos para regenerar el PDF (solo comprobantes emitidos por web service) */
+  detalle?: any;
+  emailReceptor?: string;
+  ambiente?: string;
+  via?: string;
+  envios?: Array<{ fecha: string; email: string; ok: boolean; mensaje?: string }>;
 }
 
 export interface UserRecord {
@@ -486,6 +495,7 @@ class DatabaseManager {
         inicioActividades: a.ws?.inicioActividades,
         ultimaPrueba: a.ws?.ultimaPrueba,
       } as any,
+      disenoModo: a.diseno?.modo || 'generico',
     }));
   }
 
@@ -524,11 +534,14 @@ class DatabaseManager {
       const { supabase } = await import('./services/supabase.js');
       const client = supabase.getClient();
       if (!client) return;
-      const { data, error } = await client.from('configuraciones').select('id, valor').like('id', 'ws%');
+      const { data, error } = await client.from('configuraciones').select('id, valor');
       if (error || !data) return;
       for (const row of data as Array<{ id: string; valor: any }>) {
         if (row.id === 'wsaa_tickets' && row.valor && typeof row.valor === 'object') {
           this.data.wsaaTickets = { ...(row.valor || {}), ...(this.data.wsaaTickets || {}) };
+        } else if (row.id.startsWith('diseno_')) {
+          const acc = this.getAccountRecord(row.id.replace('diseno_', ''));
+          if (acc && row.valor && !acc.diseno) acc.diseno = row.valor as DisenoComprobante;
         } else if (row.id.startsWith('ws_cuenta_')) {
           const acc = this.getAccountRecord(row.id.replace('ws_cuenta_', ''));
           if (acc && row.valor) acc.ws = { ...(row.valor as WsConfigCuenta), ...(acc.ws || {}) };
@@ -536,6 +549,19 @@ class DatabaseManager {
       }
       this.save();
     } catch { /* Supabase es opcional */ }
+  }
+
+  public updateAccountDiseno(cuit: string, diseno: DisenoComprobante): ArcaAccountRecord | undefined {
+    const acc = this.getAccountRecord(cuit);
+    if (!acc) return undefined;
+    acc.diseno = diseno;
+    this.save();
+    import('./services/supabase.js').then(async ({ supabase }) => {
+      const client = supabase.getClient();
+      if (!client) return;
+      await client.from('configuraciones').upsert({ id: 'diseno_' + acc.cuit, valor: diseno, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    }).catch(() => {});
+    return acc;
   }
 
   public getWsaaTicket(clave: string): { token: string; sign: string; expiracion: string } | null {

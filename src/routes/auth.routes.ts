@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { db } from '../database.js';
 import { arcaSession } from '../engine/arcaSession.js';
 import { userService } from '../services/auth/userService.js';
-import { authenticateToken, AuthenticatedRequest } from '../middleware/auth.middleware.js';
+import { authenticateToken, requireAdmin, requireOperator, AuthenticatedRequest } from '../middleware/auth.middleware.js';
 import { validateLogin, validateRegister, validateCredentials } from '../middleware/validation.middleware.js';
 import { logger } from '../services/logger.js';
 
@@ -45,6 +45,22 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
   }
 });
 
+// Olvidé mi contraseña: manda un link por mail (respuesta igual exista o no el email)
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  const email = String(req.body?.email || '');
+  // El link apunta SIEMPRE a la URL configurada del servicio, nunca a un Host enviado por el cliente
+  const base = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3000}`;
+  const result = await userService.requestPasswordReset(email, base);
+  res.json(result);
+});
+
+// Crear contraseña nueva con el link recibido por mail
+router.post('/reset-password', async (req: Request, res: Response) => {
+  const { token, newPassword } = req.body || {};
+  const result = await userService.resetPasswordWithToken(String(token || ''), String(newPassword || ''));
+  res.status(result.success ? 200 : 400).json(result);
+});
+
 // Perfil de usuario autenticado
 router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
   const user = userService.getUserById(req.user!.id);
@@ -55,7 +71,7 @@ router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) 
 });
 
 // Estado actual de credenciales y sesión en ARCA
-router.get('/status', (req: Request, res: Response) => {
+router.get('/status', authenticateToken, (req: Request, res: Response) => {
   const creds = db.getCredentials();
   res.json({
     cuit: creds.cuit,
@@ -68,7 +84,7 @@ router.get('/status', (req: Request, res: Response) => {
 });
 
 // Guardar o actualizar credenciales
-router.post('/credentials', (req: Request, res: Response) => {
+router.post('/credentials', authenticateToken, requireAdmin, (req: Request, res: Response) => {
   const { cuit, claveFiscal, puntoVentaDefault, razonSocial } = req.body;
 
   if (!cuit) {
@@ -99,7 +115,7 @@ router.post('/credentials', (req: Request, res: Response) => {
 });
 
 // Probar login en vivo contra ARCA
-router.post('/test-login', async (req: Request, res: Response) => {
+router.post('/test-login', authenticateToken, requireOperator, async (req: Request, res: Response) => {
   const { cuit, claveFiscal } = req.body;
   const creds = db.getCredentials();
 
@@ -158,7 +174,7 @@ router.post('/test-login', async (req: Request, res: Response) => {
 });
 
 // Cerrar sesión
-router.post('/logout', async (req: Request, res: Response) => {
+router.post('/logout', authenticateToken, requireOperator, async (req: Request, res: Response) => {
   await arcaSession.closeAll();
   db.updateSessionStatus(false);
   logger.info('AUTH', 'Sesión cerrada manualmente.');

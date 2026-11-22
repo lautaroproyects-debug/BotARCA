@@ -5,6 +5,8 @@ import { encrypt, decrypt } from '../crypto.js';
 import { requireAdmin } from '../middleware/auth.middleware.js';
 import { generarCsr, leerCertificado, normalizarPem, verificarParClave } from '../engine/ws/certificados.js';
 import { estadoPlataforma, probarConexion } from '../engine/ws/wsfeEmisor.js';
+import { sanearDiseno, DISENO_GENERICO, ASUNTO_MAIL_DEFAULT, CUERPO_MAIL_DEFAULT } from '../engine/ws/diseno.js';
+import { generarPdfComprobante, datosEjemplo } from '../engine/ws/pdfComprobante.js';
 
 const router = Router();
 
@@ -210,6 +212,48 @@ router.post('/:cuit/ws/probar', async (req: Request, res: Response) => {
     res.json({ success: true, ...r });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// DISEÑO DEL COMPROBANTE (PDF) Y DEL MAIL
+// ------------------------------------------------------------------
+router.get('/:cuit/diseno', (req: Request, res: Response) => {
+  const acc = db.getAccountRecord(String(req.params.cuit));
+  if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+  res.json({ success: true, diseno: acc.diseno || DISENO_GENERICO, generico: DISENO_GENERICO, asuntoDefault: ASUNTO_MAIL_DEFAULT, cuerpoDefault: CUERPO_MAIL_DEFAULT });
+});
+
+router.put('/:cuit/diseno', (req: Request, res: Response) => {
+  const acc = db.getAccountRecord(String(req.params.cuit));
+  if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+  try {
+    const diseno = sanearDiseno(req.body?.diseno);
+    db.updateAccountDiseno(acc.cuit, diseno);
+    res.json({ success: true, message: diseno.modo === 'generico' ? 'Se usa el diseño genérico.' : 'Diseño personalizado guardado.', diseno });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// Vista previa en PDF con datos de ejemplo (no emite ni guarda nada)
+router.post('/:cuit/diseno/vista-previa', async (req: Request, res: Response) => {
+  const acc = db.getAccountRecord(String(req.params.cuit));
+  if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+  try {
+    const diseno = sanearDiseno(req.body?.diseno || acc.diseno || DISENO_GENERICO);
+    const pdf = await generarPdfComprobante(datosEjemplo({
+      razonSocial: acc.razonSocial || acc.cuit,
+      cuit: acc.cuit,
+      condicionIva: acc.ws?.condicionIvaEmisor || 'Responsable Monotributo',
+      domicilio: acc.ws?.domicilioComercial,
+      iibb: acc.ws?.iibb,
+      inicioActividades: acc.ws?.inicioActividades,
+    }), diseno);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.send(pdf);
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
   }
 });
 

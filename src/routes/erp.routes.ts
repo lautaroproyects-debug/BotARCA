@@ -6,6 +6,7 @@ import { db } from '../database.js';
 import { FacturaRequest } from '../engine/modules/facturacion.js';
 import { logger } from '../services/logger.js';
 import { emitirComprobante } from '../services/emisionService.js';
+import { comprobantesService } from '../services/comprobantesService.js';
 
 const router = Router();
 
@@ -98,53 +99,7 @@ router.post('/facturacion/emitir', async (req: Request, res: Response) => {
     const resultado = await emitirComprobante(datos);
 
     if (resultado.success) {
-      // Guardar en la base de comprobantes
-      const record = {
-        id: 'comp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-        tipoOperacion: 'Emitido',
-        tipoComprobante: datos.tipoComprobante,
-        puntoVenta: resultado.puntoVenta || datos.puntoVenta,
-        numero: parseInt(resultado.comprobanteNro?.split('-')[1] || '1', 10),
-        comprobanteFormato: resultado.comprobanteNro || `0000${datos.puntoVenta}-00000001`,
-        fechaEmision: resultado.fechaEmision || new Date().toISOString().split('T')[0],
-        cuitEmisor: datos.cuitEmisor || creds.cuit,
-        cuitReceptor: datos.receptor.nroDoc || '',
-        razonSocialReceptor: datos.receptor.razonSocial || 'Consumidor Final',
-        condicionIvaReceptor: datos.receptor.condicionIva,
-        importeTotal: resultado.totalImporte || 0,
-        cae: resultado.cae,
-        caeVencimiento: resultado.caeVencimiento,
-        estado: 'Autorizado',
-        createdAt: new Date().toISOString(),
-      };
-
-      if (!db.data.comprobantes) db.data.comprobantes = [];
-      db.data.comprobantes.unshift(record);
-      db.save();
-
-      const supa = supabase.getClient();
-      if (supa) {
-        Promise.resolve(
-          supa.from('comprobantes').insert({
-            id: record.id,
-            tipo_operacion: record.tipoOperacion,
-            tipo_comprobante: record.tipoComprobante,
-            punto_venta: record.puntoVenta,
-            numero: record.numero,
-            comprobante_formato: record.comprobanteFormato,
-            fecha_emision: record.fechaEmision,
-            cuit_emisor: record.cuitEmisor,
-            cuit_receptor: record.cuitReceptor,
-            razon_social_receptor: record.razonSocialReceptor,
-            condicion_iva_receptor: record.condicionIvaReceptor,
-            importe_total: record.importeTotal,
-            cae: record.cae,
-            cae_vencimiento: record.caeVencimiento,
-            estado: record.estado,
-          })
-        ).catch(() => {});
-      }
-
+      // El comprobante ya quedó guardado en el repositorio (emisionService → comprobantesService)
       return res.json(resultado);
     } else {
       return res.status(400).json(resultado);
@@ -160,8 +115,24 @@ router.post('/facturacion/emitir', async (req: Request, res: Response) => {
 
 // --- LISTAR COMPROBANTES ---
 router.get('/comprobantes', (req: Request, res: Response) => {
-  const comprobantes = db.data.comprobantes || [];
+  // Sin el detalle completo (pesa): se pide aparte al ver el PDF
+  const comprobantes = comprobantesService.listar().map(({ detalle, ...c }) => ({ ...c, tienePdf: !!detalle }));
   res.json({ success: true, comprobantes });
+});
+
+// PDF del comprobante (se regenera con el diseño actual de la cuenta)
+router.get('/comprobantes/:id/pdf', async (req: Request, res: Response) => {
+  const r = await comprobantesService.pdf(String(req.params.id));
+  if (!r.ok) return res.status(404).json({ success: false, message: r.mensaje });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(r.nombre)}"`);
+  res.send(r.buffer);
+});
+
+// Enviar o reenviar el comprobante por mail
+router.post('/comprobantes/:id/enviar', async (req: Request, res: Response) => {
+  const r = await comprobantesService.enviarPorMail(String(req.params.id), req.body?.email);
+  res.status(r.success ? 200 : 400).json(r);
 });
 
 // --- SUPABASE CLOUD SYNC ---

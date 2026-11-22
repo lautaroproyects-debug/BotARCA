@@ -120,6 +120,8 @@ const server = app.listen(config.port, () => {
     db.syncFromSupabase()
       .catch(() => {})
       .then(() => db.restoreWsFromSupabase())
+      .then(() => import('./services/comprobantesService.js'))
+      .then(({ comprobantesService }) => comprobantesService.restaurarDesdeSupabase())
       .catch(() => {});
   }).catch(() => {});
 });

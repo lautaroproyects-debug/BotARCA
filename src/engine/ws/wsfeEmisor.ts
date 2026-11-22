@@ -308,6 +308,8 @@ export interface ResultadoWs extends FacturaResponse {
   modoConexion?: 'propio' | 'delegado';
   ambiente?: AmbienteArca;
   recuperado?: boolean;
+  /** Todo lo necesario para regenerar el PDF más adelante */
+  datosPdf?: DatosPdf;
 }
 
 async function autenticar(acc: ArcaAccountRecord): Promise<{ auth: AuthWsfe; cred: CredencialesWs; ambiente: AmbienteArca }> {
@@ -395,8 +397,7 @@ export async function emitirPorWebService(acc: ArcaAccountRecord, datos: Factura
 
     // PDF (si falla, el comprobante igual está emitido)
     let pdfBase64: string | undefined;
-    try {
-      const pdf = await generarPdfComprobante({
+    const datosPdf: DatosPdf = {
         ambiente,
         letra: prep.tipo.letra,
         codigoTipo: prep.tipo.codigo,
@@ -431,7 +432,9 @@ export async function emitirPorWebService(acc: ArcaAccountRecord, datos: Factura
         cae: r.cae,
         caeVencimiento: aDdmmyyyy(r.caeVencimiento),
         qr: { tipoDocRec: prep.doc.codigo, nroDocRec: prep.doc.nro, fechaIso: aIso(prep.solicitud.cbteFch) },
-      });
+    };
+    try {
+      const pdf = await generarPdfComprobante(datosPdf, acc.diseno);
       pdfBase64 = pdf.toString('base64');
     } catch (errPdf: any) {
       logger.warn('WSFE', `El comprobante se emitió pero no se pudo generar el PDF: ${errPdf.message}`);
@@ -453,6 +456,7 @@ export async function emitirPorWebService(acc: ArcaAccountRecord, datos: Factura
       modoConexion: cred.modoUsado,
       ambiente,
       recuperado,
+      datosPdf,
     };
   } catch (err: any) {
     const mensaje = explicarError(err, acc, cred);

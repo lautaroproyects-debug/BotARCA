@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -10,7 +11,13 @@ const __dirname = path.dirname(__filename);
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   encryptionKey: process.env.ENCRYPTION_KEY || process.env.APP_SECRET || 'botarca_dev_secret_key_9988_min32chars_required',
-  appSecret: process.env.APP_SECRET || 'botarca_dev_secret_key_9988_min32chars_required',
+  // Firma de las sesiones. Antes había una clave fija de respaldo escrita en el código (pública en
+  // el repo): con ella cualquiera podía fabricar una sesión de admin. Si falta APP_SECRET se usa una
+  // aleatoria: las sesiones se cierran en cada reinicio, pero nadie puede falsificarlas.
+  appSecret: process.env.APP_SECRET || (() => {
+    console.warn('[SEGURIDAD] Falta APP_SECRET: se usa una clave aleatoria (las sesiones se cierran al reiniciar).');
+    return crypto.randomBytes(48).toString('hex');
+  })(),
   arca: {
     cuit: (process.env.ARCA_CUIT || process.env.AFIP_CUIT || '').replace(/\D/g, ''),
     claveFiscal: process.env.ARCA_CLAVE_FISCAL || process.env.AFIP_PASSWORD || process.env.AFIP_CLAVE_FISCAL || '',

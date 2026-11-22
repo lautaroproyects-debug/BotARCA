@@ -1,6 +1,15 @@
 import axios from 'axios';
-import { db, InvoicingQueueItem } from '../database.js';
+import { db } from '../database.js';
 import { logger } from './logger.js';
+
+/*
+ * Convierte texto libre (WhatsApp, mails, notas) o filas pegadas de Excel/CSV en BORRADORES de
+ * facturas. Nada se emite desde acá: el usuario revisa cada borrador y lo confirma.
+ *
+ * Regla principal: no inventar datos fiscales. Si la condición frente al IVA de un receptor con
+ * CUIT no está escrita, queda vacía y el borrador se marca para revisar (antes se asumía
+ * "Responsable Inscripto", y ARCA valida ese dato).
+ */
 
 export interface ParsedInvoiceDraft {
   cuitEmisor?: string;
@@ -17,354 +26,299 @@ export interface ParsedInvoiceDraft {
   precioUnitario: number;
   importeTotal: number;
   email?: string;
+  /** Lo que hay que revisar antes de emitir (vacío = listo) */
+  advertencias: string[];
+}
+
+const CONDICIONES_IVA = ['Responsable Inscripto', 'Monotributo', 'Exento', 'Consumidor Final'];
+const TIPOS = ['Factura A', 'Factura B', 'Factura C', 'Recibo C', 'Nota de Crédito A', 'Nota de Crédito B', 'Nota de Crédito C'];
+const CONDICIONES_VENTA = ['Contado', 'Transferencia', 'Tarjeta de Débito', 'Tarjeta de Crédito', 'Cuenta Corriente', 'Cheque', 'Otra'];
+
+// Modelos de Groq en orden de preferencia (si uno no está disponible, se prueba el siguiente)
+const MODELOS_GROQ = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile'];
+
+/** Verifica el dígito verificador de un CUIT/CUIL. */
+export function cuitValido(cuit: string): boolean {
+  const c = String(cuit || '').replace(/\D/g, '');
+  if (c.length !== 11) return false;
+  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const suma = pesos.reduce((acc, p, i) => acc + p * Number(c[i]), 0);
+  let dv = 11 - (suma % 11);
+  if (dv === 11) dv = 0;
+  if (dv === 10) dv = 9;
+  return dv === Number(c[10]);
+}
+
+/**
+ * Interpreta importes en formato argentino o internacional:
+ * "$ 150.000" -> 150000 · "2.500,50" -> 2500.5 · "1500.50" -> 1500.5 · "150k" -> 150000
+ */
+export function parseImporte(valor: unknown): number {
+  if (typeof valor === 'number') return isFinite(valor) ? valor : 0;
+  let s = String(valor || '').toLowerCase().replace(/\$|ars|pesos|\s/g, '');
+  if (!s) return 0;
+  let mult = 1;
+  if (/k$/.test(s)) { mult = 1000; s = s.slice(0, -1); }
+  else if (/(mil|lucas)$/.test(s)) { mult = 1000; s = s.replace(/(mil|lucas)$/, ''); }
+  const tienePunto = s.includes('.'), tieneComa = s.includes(',');
+  if (tienePunto && tieneComa) {
+    // El que aparece último es el separador decimal
+    s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  } else if (tieneComa) {
+    // "2500,50" es decimal; "150,000" son miles
+    s = /,\d{1,2}$/.test(s) ? s.replace(',', '.') : s.replace(/,/g, '');
+  } else if (tienePunto) {
+    const partes = s.split('.');
+    // "150.000" o "1.500.000" son miles; "1500.50" es decimal
+    if (partes.length > 2 || (partes[1] || '').length === 3) s = s.replace(/\./g, '');
+  }
+  const n = parseFloat(s);
+  return isFinite(n) ? Math.round(n * mult * 100) / 100 : 0;
+}
+
+function normalizarOpcion(valor: unknown, opciones: string[]): string {
+  const v = String(valor || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  if (!v) return '';
+  const exacta = opciones.find(o => o.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase() === v);
+  if (exacta) return exacta;
+  if (v.includes('inscripto') || v === 'ri') return opciones.includes('Responsable Inscripto') ? 'Responsable Inscripto' : '';
+  if (v.includes('monotrib')) return opciones.includes('Monotributo') ? 'Monotributo' : '';
+  if (v.includes('exento')) return opciones.includes('Exento') ? 'Exento' : '';
+  if (v.includes('consumidor') || v === 'cf') return opciones.includes('Consumidor Final') ? 'Consumidor Final' : '';
+  return opciones.find(o => v.includes(o.toLowerCase())) || '';
 }
 
 class AiParserService {
-  /**
-   * Obtiene la API Key de Groq desde base de datos o variable de entorno
-   */
   public getGroqApiKey(): string {
     const settings = db.getSettings() as any;
     return settings.groqApiKey || process.env.GROQ_API_KEY || '';
   }
 
-  /**
-   * Parsea texto inteligente proveniente de Excel, WhatsApp, correos o texto desestructurado
-   */
+  private valoresPorDefecto() {
+    const creds = db.getCredentials();
+    const acc = creds.cuit ? db.getAccountRecord(creds.cuit) : undefined;
+    return { cuitEmisor: creds.cuit, puntoVenta: acc?.ws?.puntoVentaWs || creds.puntoVentaDefault || 1 };
+  }
+
+  /** Completa, limpia y valida un borrador. Nunca inventa la condición frente al IVA de un CUIT. */
+  public normalizarBorrador(raw: any): ParsedInvoiceDraft {
+    const def = this.valoresPorDefecto();
+    const adv: string[] = [];
+
+    const docNro = String(raw.docNro || '').replace(/\D/g, '');
+    let docTipo: ParsedInvoiceDraft['docTipo'] =
+      docNro.length === 11 ? 'CUIT' : docNro.length >= 7 && docNro.length <= 8 ? 'DNI' : 'Consumidor Final';
+    if (raw.docTipo === 'DNI' && docNro.length >= 7 && docNro.length <= 8) docTipo = 'DNI';
+    if (docNro && docTipo === 'Consumidor Final') adv.push(`El documento "${raw.docNro}" no parece CUIT (11 dígitos) ni DNI (7 u 8).`);
+    if (docTipo === 'CUIT' && !cuitValido(docNro)) adv.push(`El CUIT ${docNro} no es válido (dígito verificador). Revisalo.`);
+
+    let condicionIva = normalizarOpcion(raw.condicionIva, CONDICIONES_IVA);
+    if (!condicionIva) {
+      if (docTipo === 'CUIT') adv.push('Falta la condición frente al IVA del cliente (no se adivina).');
+      else condicionIva = 'Consumidor Final';
+    }
+
+    const tipoComprobante = normalizarOpcion(raw.tipoComprobante, TIPOS) || 'Factura C';
+    if (tipoComprobante === 'Factura A' && docTipo !== 'CUIT') adv.push('Una Factura A necesita que el cliente tenga CUIT.');
+    if (tipoComprobante.startsWith('Nota de Crédito')) adv.push('Las notas de crédito necesitan el comprobante asociado: cargalas desde "Facturar".');
+
+    const cantidad = Number(raw.cantidad) > 0 ? Number(raw.cantidad) : 1;
+    let precioUnitario = parseImporte(raw.precioUnitario);
+    let importeTotal = parseImporte(raw.importeTotal);
+    if (!precioUnitario && importeTotal) precioUnitario = Math.round((importeTotal / cantidad) * 100) / 100;
+    if (!importeTotal && precioUnitario) importeTotal = Math.round(precioUnitario * cantidad * 100) / 100;
+    if (importeTotal <= 0) adv.push('Falta el importe.');
+
+    const razonSocial = String(raw.razonSocial || '').trim();
+    if (!razonSocial && docTipo === 'CUIT') adv.push('Falta el nombre o razón social del cliente.');
+
+    const descripcion = String(raw.descripcion || '').trim();
+    if (!descripcion) adv.push('Falta la descripción de lo que se factura.');
+
+    const concepto = [1, 2, 3].includes(Number(raw.concepto)) ? Number(raw.concepto) : 2;
+    const email = String(raw.email || '').trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) adv.push(`El email "${email}" no es válido.`);
+
+    return {
+      cuitEmisor: def.cuitEmisor,
+      puntoVenta: Number(raw.puntoVenta) || def.puntoVenta,
+      tipoComprobante,
+      concepto,
+      docTipo,
+      docNro: docTipo === 'Consumidor Final' ? '' : docNro,
+      razonSocial: razonSocial || (docTipo === 'CUIT' ? '' : 'Consumidor Final'),
+      condicionIva,
+      condicionVenta: normalizarOpcion(raw.condicionVenta, CONDICIONES_VENTA) || 'Contado',
+      descripcion,
+      cantidad,
+      precioUnitario,
+      importeTotal,
+      email: email || undefined,
+      advertencias: adv,
+    };
+  }
+
   public async parseSmart(rawText: string, options: { forceAi?: boolean } = {}): Promise<{
     items: ParsedInvoiceDraft[];
     parserUsed: 'groq_ai' | 'heuristic_nlp' | 'tabular';
     message?: string;
   }> {
-    if (!rawText || !rawText.trim()) {
-      return { items: [], parserUsed: 'tabular' };
-    }
+    const text = String(rawText || '').trim();
+    if (!text) return { items: [], parserUsed: 'tabular' };
 
-    const text = rawText.trim();
-    const isTabular = text.includes('\t') || (text.includes(';') && text.includes('\n')) || (text.includes(',') && text.split('\n')[0].split(',').length >= 3);
+    const pareceTabla = text.includes('\t') || /;.*\n/.test(text) || (text.split('\n')[0].split(',').length >= 3 && text.includes('\n'));
     const groqKey = this.getGroqApiKey();
+    let aviso = '';
 
-    // 1. Si se solicita IA explícitamente o tiene formato libre / mensaje de WhatsApp y hay API key de Groq
-    if ((options.forceAi || !isTabular || text.length > 50) && groqKey) {
+    if (groqKey && (options.forceAi || !pareceTabla)) {
       try {
-        const groqItems = await this.parseWithGroq(text, groqKey);
-        if (groqItems.length > 0) {
-          logger.success('AI-PARSER', `Interpretadas ${groqItems.length} facturas con IA Groq (Llama-3.3-70B).`);
-          return { items: groqItems, parserUsed: 'groq_ai' };
+        const items = await this.parseWithGroq(text, groqKey);
+        if (items.length) {
+          logger.success('AI-PARSER', `Groq armó ${items.length} borrador(es). Hay que revisarlos antes de emitir.`);
+          return { items, parserUsed: 'groq_ai' };
         }
+        aviso = 'La IA no encontró facturas en el texto.';
       } catch (err: any) {
-        logger.warn('AI-PARSER', `Fallo al interpretar con Groq: ${err.message}. Pasando a parser heurístico...`);
+        aviso = `No se pudo usar la IA (${err.message}).`;
+        logger.warn('AI-PARSER', `Groq falló: ${err.message}. Se usa el lector sin IA.`);
       }
+    } else if (!groqKey && !pareceTabla) {
+      aviso = 'No hay clave de Groq configurada: se usó el lector sin IA, que entiende menos.';
     }
 
-    // 2. Si no es tabular tradicional pero contiene texto tipo WhatsApp o notas
-    if (!isTabular || options.forceAi) {
-      const heuristicItems = this.parseWithHeuristics(text);
-      if (heuristicItems.length > 0) {
-        return { items: heuristicItems, parserUsed: 'heuristic_nlp' };
-      }
+    if (pareceTabla) {
+      return { items: this.parseTabular(text), parserUsed: 'tabular', message: aviso || undefined };
     }
-
-    // 3. Parser tabular estándar (Excel / CSV)
-    const tabularItems = this.parseTabular(text);
-    return { items: tabularItems, parserUsed: 'tabular' };
+    return { items: this.parseWithHeuristics(text), parserUsed: 'heuristic_nlp', message: aviso || undefined };
   }
 
-  /**
-   * Extracción inteligente mediante Groq LLM API (Llama 3.3 70B Versatile)
-   */
   public async parseWithGroq(rawText: string, apiKey: string): Promise<ParsedInvoiceDraft[]> {
-    const creds = db.getCredentials();
-    const defaultPtoVta = creds.puntoVentaDefault || 1;
+    const systemPrompt = `Extraés datos para emitir facturas electrónicas en Argentina (ARCA) a partir de mensajes, mails, notas o tablas.
+Devolvé SOLO un objeto JSON con esta forma: {"comprobantes":[{...}]}. Cada comprobante tiene:
+- "tipoComprobante": "Factura A" | "Factura B" | "Factura C" | "Recibo C". Si no se dice, "Factura C".
+- "concepto": 1 (productos), 2 (servicios, honorarios, alquileres) o 3 (ambos). Si no se dice, 2.
+- "docNro": CUIT (11 dígitos) o DNI (7-8 dígitos) del cliente, solo números. Vacío si no aparece.
+- "razonSocial": nombre o razón social del cliente tal como aparece. Vacío si no aparece.
+- "condicionIva": "Responsable Inscripto" | "Monotributo" | "Exento" | "Consumidor Final", SOLO si el texto lo dice. Si no lo dice, dejalo vacío: NO lo adivines.
+- "condicionVenta": "Contado" | "Transferencia" | "Cuenta Corriente" | "Tarjeta de Débito" | "Tarjeta de Crédito". Si no se dice, "Contado".
+- "descripcion": qué se factura, breve.
+- "cantidad": número (1 si no se dice).
+- "importeTotal": número sin símbolos ni separadores de miles (150k = 150000; $2.500,50 = 2500.5).
+- "email": email del cliente si aparece; si no, vacío.
+No inventes CUIT, nombres ni importes. Si un pedido no tiene importe, no lo incluyas.`;
 
-    const systemPrompt = `Eres un extractor experto de datos de facturación fiscal para la República Argentina (ARCA / ex-AFIP).
-Tu objetivo es analizar mensajes de texto libre, conversaciones de WhatsApp, correos electrónicos, notas desestructuradas o tablas pegadas, y extraer una lista de comprobantes a emitir en formato JSON estructurado.
-
-Reglas de extracción para Argentina:
-1. CUIT: Extrae números de CUIT válidos (11 dígitos, normalmente empiezan con 20, 23, 24, 27, 30, 33, 34). Limpia guiones y espacios.
-2. DNI: Si son 7 u 8 dígitos sin prefijo de CUIT, asigna docTipo "DNI".
-3. Razón Social: Extrae el nombre o empresa del receptor. Si no se menciona explícitamente, usa "Consumidor Final" o el nombre de contacto.
-4. Importe: Extrae el monto total. Entiende formatos argentinos ($150.000, 150000, 150k = 150000, $ 2.500,50 = 2500.50).
-5. Concepto:
-   - 1 = Productos / Mercadería
-   - 2 = Servicios / Honorarios / Consultoría / Desarrollo / Alquileres (Por defecto)
-   - 3 = Productos y Servicios
-6. Tipo Comprobante: "Factura C" por defecto para Monotributistas, o "Factura A" / "Factura B" según corresponda.
-7. Condición IVA: "Responsable Inscripto", "Monotributo" o "Consumidor Final".
-
-Devuelve EXCLUSIVAMENTE un arreglo JSON válido (sin explicaciones, sin formato markdown adicional, solo el JSON raw):
-[
-  {
-    "puntoVenta": ${defaultPtoVta},
-    "tipoComprobante": "Factura C",
-    "concepto": 2,
-    "docTipo": "CUIT",
-    "docNro": "30712345678",
-    "razonSocial": "Empresa Ejemplo SRL",
-    "condicionIva": "Responsable Inscripto",
-    "condicionVenta": "Contado",
-    "descripcion": "Honorarios profesionales de desarrollo web",
-    "cantidad": 1,
-    "precioUnitario": 150000,
-    "importeTotal": 150000,
-    "email": "contacto@ejemplo.com"
-  }
-]`;
-
-    const modelsToTry = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
     let content = '';
-
-    for (const modelName of modelsToTry) {
-      try {
-        const response = await axios.post(
-          'https://api.groq.com/openai/v1/chat/completions',
-          {
-            model: modelName,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: rawText }
-            ],
-            temperature: 0.1,
-            max_tokens: 2048,
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${apiKey.trim()}`,
-              'Content-Type': 'application/json'
+    let ultimoError = '';
+    for (const model of MODELOS_GROQ) {
+      for (const formatoJson of [true, false]) {
+        try {
+          const response = await axios.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+              model,
+              messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: rawText.slice(0, 12000) }],
+              temperature: 0,
+              max_tokens: 4096,
+              ...(formatoJson ? { response_format: { type: 'json_object' } } : {}),
             },
-            timeout: 15000
-          }
-        );
-
-        content = response.data?.choices?.[0]?.message?.content || '';
-        if (content) break;
-      } catch (err: any) {
-        logger.warn('AI-GROQ', `Modelo ${modelName} no disponible: ${err.message}. Probando siguiente...`);
-      }
-    }
-
-    if (!content) return [];
-
-    try {
-      const cleanJson = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
-      const parsed = JSON.parse(cleanJson);
-      const itemsArray: any[] = Array.isArray(parsed) 
-        ? parsed 
-        : (parsed.items || parsed.facturas || parsed.comprobantes || Object.values(parsed)[0] || []);
-
-      if (!Array.isArray(itemsArray)) return [];
-
-      return itemsArray.map(item => ({
-        cuitEmisor: creds.cuit,
-        puntoVenta: Number(item.puntoVenta) || defaultPtoVta,
-        tipoComprobante: item.tipoComprobante || 'Factura C',
-        concepto: Number(item.concepto) || 2,
-        docTipo: item.docTipo || (String(item.docNro).length === 11 ? 'CUIT' : 'Consumidor Final'),
-        docNro: String(item.docNro || '').replace(/\D/g, ''),
-        razonSocial: item.razonSocial || `Receptor ${item.docNro}`,
-        condicionIva: item.condicionIva || 'Consumidor Final',
-        condicionVenta: item.condicionVenta || 'Contado',
-        descripcion: item.descripcion || 'Servicios profesionales',
-        cantidad: Number(item.cantidad) || 1,
-        precioUnitario: Number(item.precioUnitario) || Number(item.importeTotal) || 0,
-        importeTotal: Number(item.importeTotal) || (Number(item.precioUnitario) * (Number(item.cantidad) || 1)) || 0,
-        email: item.email || '',
-      })).filter(x => x.docNro && x.importeTotal > 0);
-    } catch (e) {
-      return [];
-    }
-  }
-
-  /**
-   * Parser heurístico basado en expresiones regulares y NLP para WhatsApp / Chat sin depender de APIs externas
-   */
-  public parseWithHeuristics(rawText: string): ParsedInvoiceDraft[] {
-    const creds = db.getCredentials();
-    const defaultPtoVta = creds.puntoVentaDefault || 1;
-    const items: ParsedInvoiceDraft[] = [];
-
-    // Limpiar marcas de tiempo de WhatsApp tipo "[28/9, 14:32] Juan:" o "28/09/2026 14:30 - Lautaro: "
-    const cleanLines = rawText.split(/\r?\n/).map(line => {
-      return line.replace(/^\[?\d{1,2}\/\d{1,2}(?:\/\d{2,4})?,?\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\]?\s*[-–]?\s*[^:]+:\s*/i, '').trim();
-    }).filter(l => l.length > 0);
-
-    // Agrupar mensajes continuos o analizarlos por bloques
-    const textBlob = cleanLines.join('\n');
-    const messageBlocks = textBlob.split(/(?=\b(?:facturar|factura|hacer factura|emitir|cuit|cliente|para)\b)/i).filter(b => b.trim().length > 0);
-
-    const blocksToProcess = messageBlocks.length > 1 ? messageBlocks : cleanLines;
-
-    for (const block of blocksToProcess) {
-      // 1. Detectar CUIT o DNI
-      const cuitMatch = block.match(/\b(20|23|24|27|30|33|34)-?(\d{8})-?(\d)\b/) || block.match(/\b(20|23|24|27|30|33|34)(\d{9})\b/);
-      let docNro = '';
-      let docTipo: 'CUIT' | 'DNI' | 'Consumidor Final' = 'CUIT';
-
-      if (cuitMatch) {
-        docNro = cuitMatch[0].replace(/\D/g, '');
-        docTipo = 'CUIT';
-      } else {
-        const dniMatch = block.match(/\b(?:dni|documento)?\s*(\d{7,8})\b/i);
-        if (dniMatch) {
-          docNro = dniMatch[1];
-          docTipo = 'DNI';
+            { headers: { Authorization: `Bearer ${apiKey.trim()}`, 'Content-Type': 'application/json' }, timeout: 25000 }
+          );
+          content = response.data?.choices?.[0]?.message?.content || '';
+          if (content) break;
+        } catch (err: any) {
+          const status = err.response?.status;
+          ultimoError = `${model}: ${err.response?.data?.error?.message || err.message}`;
+          if (status === 401) throw new Error('La clave de Groq no es válida.');
+          // 400 con formato JSON: el modelo no lo soporta, se reintenta sin forzar el formato
+          if (!(formatoJson && status === 400)) break;
         }
       }
-
-      // 2. Detectar Importe Monetario ($150.000, $150000, 150k, 50 mil)
-      let importe = 0;
-      const kMatch = block.match(/\b(\d+(?:[.,]\d+)?)\s*k\b/i);
-      const milMatch = block.match(/\b(\d+(?:[.,]\d+)?)\s*(?:mil|lucas)\b/i);
-      const currencyMatch = block.match(/\$\s*([\d.,]+)/) || block.match(/\b([\d.,]+)\s*(?:pesos|ars|\$)\b/i) || block.match(/\b(?:por|monto|total|suma de|importe)?\s*([\d.,]{3,})\b/i);
-
-      if (kMatch) {
-        importe = parseFloat(kMatch[1].replace(',', '.')) * 1000;
-      } else if (milMatch) {
-        importe = parseFloat(milMatch[1].replace(',', '.')) * 1000;
-      } else if (currencyMatch) {
-        importe = this.parseNumeric(currencyMatch[1]);
-      }
-
-      if (!docNro || importe <= 0) continue;
-
-      // 3. Detectar Razón Social / Nombre
-      let razonSocial = '';
-      const razonMatch = block.match(/(?:a nombre de|cliente|razon social|titular|para|empresa)[:\s]+([^,\n\.$]+)/i)
-        || block.match(/(?:facturale a|factura a|hacela a|emitir a)[:\s]+([^,\n\.$0-9]+)/i);
-
-      if (razonMatch && razonMatch[1]) {
-        razonSocial = razonMatch[1].trim().replace(/\b(?:cuit|dni|por|monto|pesos)\b.*/i, '').trim();
-      }
-      if (!razonSocial) {
-        razonSocial = docTipo === 'CUIT' ? `Cliente CUIT ${docNro}` : `Consumidor Final ${docNro}`;
-      }
-
-      // 4. Detectar Descripción y Concepto
-      let descripcion = 'Servicios profesionales';
-      let concepto = 2; // Servicios por defecto
-
-      const descMatch = block.match(/(?:concepto|descripcion|por|detalle|en concepto de)[:\s]+([^,\n\$]+)/i);
-      if (descMatch && descMatch[1]) {
-        descripcion = descMatch[1].trim();
-      }
-
-      if (/producto|mercaderia|articulos|venta de|insumo/i.test(block)) {
-        concepto = 1;
-      } else if (/servicio|honorario|consultoria|asesoramiento|mantenimiento|desarrollo|alquiler/i.test(block)) {
-        concepto = 2;
-      }
-
-      // 5. Detectar Tipo Comprobante
-      let tipoComprobante = 'Factura C';
-      if (/factura a\b/i.test(block)) tipoComprobante = 'Factura A';
-      else if (/factura b\b/i.test(block)) tipoComprobante = 'Factura B';
-      else if (/recibo c\b/i.test(block)) tipoComprobante = 'Recibo C';
-
-      items.push({
-        cuitEmisor: creds.cuit,
-        puntoVenta: defaultPtoVta,
-        tipoComprobante,
-        concepto,
-        docTipo,
-        docNro,
-        razonSocial,
-        condicionIva: docTipo === 'CUIT' ? 'Responsable Inscripto' : 'Consumidor Final',
-        condicionVenta: 'Contado',
-        descripcion,
-        cantidad: 1,
-        precioUnitario: importe,
-        importeTotal: importe,
-      });
+      if (content) break;
+      logger.warn('AI-GROQ', `Modelo no disponible (${ultimoError}). Probando el siguiente...`);
     }
+    if (!content) throw new Error(ultimoError || 'Groq no respondió.');
 
-    return items;
+    const limpio = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    let parsed: any;
+    try {
+      parsed = JSON.parse(limpio);
+    } catch {
+      const m = limpio.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      parsed = m ? JSON.parse(m[0]) : null;
+    }
+    const lista: any[] = Array.isArray(parsed) ? parsed : (parsed?.comprobantes || parsed?.facturas || parsed?.items || []);
+    if (!Array.isArray(lista)) return [];
+    return lista
+      .map(item => this.normalizarBorrador(item))
+      .filter(b => b.importeTotal > 0);
+  }
+
+  /** Lector sin IA para mensajes simples (CUIT/DNI + importe por línea o bloque). */
+  public parseWithHeuristics(rawText: string): ParsedInvoiceDraft[] {
+    const lineas = rawText.split(/\r?\n/).map(line =>
+      line.replace(/^\[?\d{1,2}\/\d{1,2}(?:\/\d{2,4})?,?\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\]?\s*[-–]?\s*[^:]+:\s*/i, '').trim()
+    ).filter(Boolean);
+    // Un pedido nuevo empieza con "factura/facturale/facturar/emitir"; el CUIT y el nombre quedan en el mismo bloque
+    const bloques = lineas.join('\n').split(/(?=\b(?:facturar|facturale|factura|hacer factura|emitir)\b)/i).filter(b => /\d/.test(b));
+    const fuentes = bloques.length > 1 ? bloques : lineas;
+
+    const borradores: ParsedInvoiceDraft[] = [];
+    for (const bloque of fuentes) {
+      const cuit = (bloque.match(/\b(20|23|24|27|30|33|34)-?\d{8}-?\d\b/) || [])[0];
+      const dni = cuit ? '' : ((bloque.match(/\b(?:dni|documento)\s*:?\s*(\d{7,8})\b/i) || [])[1] || '');
+      const importeTxt = (bloque.match(/\$\s*([\d.,]+\s*(?:k|mil)?)/i) || bloque.match(/\b([\d.,]+\s*(?:k|mil|lucas))\b/i) || bloque.match(/\b(?:por|monto|total|importe)\s*:?\s*([\d.,]{3,})/i) || [])[1];
+      const importe = parseImporte(importeTxt);
+      if (!importe) continue;
+
+      const nombre = ((bloque.match(/(?:a nombre de|factur(?:ale|ar|á|a) a|hacele (?:la )?factura a|cliente|raz[oó]n social|para)\s*:?\s+([^,\n.$0-9]+)/i) || [])[1] || '')
+        .replace(/\b(?:cuit|dni|por|monto|pesos)\b.*/i, '').trim();
+      const desc = ((bloque.match(/(?:concepto|descripci[oó]n|detalle|en concepto de)\s*:?\s+([^,\n$]+)/i) || [])[1] || '').trim();
+      const condIva = /responsable inscripto|\bri\b/i.test(bloque) ? 'Responsable Inscripto'
+        : /monotribut/i.test(bloque) ? 'Monotributo' : /exento/i.test(bloque) ? 'Exento' : /consumidor final/i.test(bloque) ? 'Consumidor Final' : '';
+      const tipo = /factura a\b/i.test(bloque) ? 'Factura A' : /factura b\b/i.test(bloque) ? 'Factura B' : /recibo/i.test(bloque) ? 'Recibo C' : 'Factura C';
+
+      borradores.push(this.normalizarBorrador({
+        tipoComprobante: tipo,
+        concepto: /producto|mercader[ií]a|art[ií]culo|insumo/i.test(bloque) ? 1 : 2,
+        docNro: cuit || dni,
+        docTipo: dni ? 'DNI' : undefined,
+        razonSocial: nombre,
+        condicionIva: condIva,
+        descripcion: desc,
+        importeTotal: importe,
+        email: (bloque.match(/[^\s@]+@[^\s@]+\.[^\s@,]+/) || [])[0],
+      }));
+    }
+    return borradores;
   }
 
   /**
-   * Parser tabular tradicional para filas de Excel o CSV
+   * Filas pegadas de Excel/CSV. Columnas aceptadas (con o sin encabezado):
+   * CUIT/DNI · Razón social · Descripción · Importe · Email · Condición IVA
+   * (o con punto de venta y tipo adelante: PV · Tipo · CUIT/DNI · Razón social · Descripción · Importe)
    */
   public parseTabular(rawText: string): ParsedInvoiceDraft[] {
-    const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-    const parsed: ParsedInvoiceDraft[] = [];
-    const creds = db.getCredentials();
-    const defaultPtoVta = creds.puntoVentaDefault || 1;
+    const lineas = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const borradores: ParsedInvoiceDraft[] = [];
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      let cols: string[] = [];
-      if (line.includes('\t')) cols = line.split('\t').map(c => c.trim());
-      else if (line.includes(';')) cols = line.split(';').map(c => c.trim());
-      else if (line.includes(',')) cols = line.split(',').map(c => c.trim());
-      else cols = [line];
+    lineas.forEach((linea, i) => {
+      const sep = linea.includes('\t') ? '\t' : linea.includes(';') ? ';' : ',';
+      const c = linea.split(sep).map(x => x.trim());
+      const encabezado = c.join(' ').toLowerCase();
+      if (i === 0 && /cuit|importe|raz[oó]n|monto|dni/.test(encabezado)) return;
 
-      const lowerHeader = cols.join(' ').toLowerCase();
-      if (i === 0 && (lowerHeader.includes('cuit') || lowerHeader.includes('importe') || lowerHeader.includes('razon') || lowerHeader.includes('monto'))) {
-        continue;
+      let fila: any;
+      if (c.length >= 6 && /^\d{1,5}$/.test(c[0]) && /factura|recibo|nota/i.test(c[1])) {
+        fila = { puntoVenta: c[0], tipoComprobante: c[1], docNro: c[2], razonSocial: c[3], descripcion: c[4], importeTotal: c[5], email: c[6], condicionIva: c[7] };
+      } else {
+        fila = { docNro: c[0], razonSocial: c[1], descripcion: c[2], importeTotal: c[3], email: c[4], condicionIva: c[5] };
+        if (c.length === 2) fila = { docNro: c[0], importeTotal: c[1] };
+        if (c.length === 3) fila = { docNro: c[0], descripcion: c[1], importeTotal: c[2] };
       }
-
-      let ptoVta = defaultPtoVta;
-      let tipoComp = 'Factura C';
-      let docNro = '';
-      let razonSocial = '';
-      let descripcion = 'Servicios profesionales';
-      let importe = 0;
-      let email = '';
-
-      if (cols.length >= 4 && cols[0].length <= 4 && !isNaN(Number(cols[0]))) {
-        ptoVta = parseInt(cols[0], 10) || defaultPtoVta;
-        tipoComp = cols[1] || 'Factura C';
-        docNro = cols[2]?.replace(/\D/g, '') || '';
-        razonSocial = cols[3] || 'Consumidor Final';
-        descripcion = cols[4] || 'Servicios profesionales';
-        importe = this.parseNumeric(cols[5] || cols[cols.length - 1]);
-      } else if (cols.length >= 4) {
-        docNro = cols[0]?.replace(/\D/g, '') || '';
-        razonSocial = cols[1] || 'Consumidor Final';
-        descripcion = cols[2] || 'Servicios profesionales';
-        importe = this.parseNumeric(cols[3]);
-        if (cols[4]) email = cols[4];
-      } else if (cols.length === 3) {
-        docNro = cols[0]?.replace(/\D/g, '') || '';
-        if (isNaN(this.parseNumeric(cols[1])) && !isNaN(this.parseNumeric(cols[2]))) {
-          razonSocial = cols[1];
-          importe = this.parseNumeric(cols[2]);
-        } else {
-          descripcion = cols[1];
-          importe = this.parseNumeric(cols[2]);
-        }
-      } else if (cols.length === 2) {
-        docNro = cols[0]?.replace(/\D/g, '') || '';
-        importe = this.parseNumeric(cols[1]);
-        razonSocial = `Cliente ${docNro}`;
-      }
-
-      if (docNro && importe > 0) {
-        parsed.push({
-          cuitEmisor: creds.cuit,
-          puntoVenta: ptoVta,
-          tipoComprobante: tipoComp,
-          concepto: 2,
-          docTipo: docNro.length === 11 ? 'CUIT' : (docNro.length === 8 ? 'DNI' : 'Consumidor Final'),
-          docNro,
-          razonSocial: razonSocial || `Receptor ${docNro}`,
-          condicionIva: docNro.length === 11 ? 'Responsable Inscripto' : 'Consumidor Final',
-          condicionVenta: 'Contado',
-          descripcion: descripcion || 'Servicios profesionales',
-          cantidad: 1,
-          precioUnitario: importe,
-          importeTotal: importe,
-          email,
-        });
-      }
-    }
-
-    return parsed;
-  }
-
-  private parseNumeric(val: string): number {
-    if (!val) return 0;
-    const clean = val.replace(/\$/g, '').trim().replace(/\./g, '').replace(',', '.');
-    return parseFloat(clean) || 0;
+      const b = this.normalizarBorrador(fila);
+      if (b.importeTotal > 0) borradores.push(b);
+    });
+    return borradores;
   }
 }
 

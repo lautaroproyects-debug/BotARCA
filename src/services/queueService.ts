@@ -125,7 +125,7 @@ class QueueService {
             }],
           }, { obtenerSesionNavegador });
 
-          if (res.success && res.cae) {
+          if (res.success) { // (en modo navegador puede no leerse el CAE en pantalla, pero el comprobante igual se emitió)
             exitosos++;
             db.updateQueueItem(item.id, {
               estado: 'emitida',
@@ -135,7 +135,7 @@ class QueueService {
             });
 
             // Guardar en comprobantes
-            await this.saveComprobanteEmitido(item, res);
+            // (el comprobante ya quedó guardado en el repositorio al emitir)
             logger.success('COLA', `[${i + 1}/${queue.length}] ¡Emitido con éxito! CAE: ${res.cae} - Comprobante: ${res.comprobanteNro}`);
           } else {
             fallidos++;
@@ -163,55 +163,6 @@ class QueueService {
     }
 
     return { total: queue.length, exitosos, fallidos };
-  }
-
-  private async saveComprobanteEmitido(item: InvoicingQueueItem, res: any) {
-    const record = {
-      id: 'comp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      tipoOperacion: 'Emitido',
-      tipoComprobante: item.tipoComprobante,
-      puntoVenta: res.puntoVenta || item.puntoVenta,
-      numero: parseInt(res.comprobanteNro?.split('-')[1] || '1', 10),
-      comprobanteFormato: res.comprobanteNro || '0001-00000001',
-      fechaEmision: new Date().toISOString().split('T')[0],
-      cuitEmisor: item.cuitEmisor,
-      cuitReceptor: item.docNro,
-      razonSocialReceptor: item.razonSocial,
-      condicionIvaReceptor: item.condicionIva,
-      importeTotal: item.importeTotal,
-      cae: res.cae,
-      caeVencimiento: res.caeVencimiento,
-      estado: 'Autorizado',
-      createdAt: new Date().toISOString(),
-    };
-
-    if (!db.data.comprobantes) db.data.comprobantes = [];
-    db.data.comprobantes.unshift(record);
-    db.save();
-
-    // Sincronizar en Supabase comprobantes
-    const supa = supabase.getClient();
-    if (supa) {
-      try {
-        await supa.from('comprobantes').insert({
-          id: record.id,
-          tipo_operacion: record.tipoOperacion,
-          tipo_comprobante: record.tipoComprobante,
-          punto_venta: record.puntoVenta,
-          numero: record.numero,
-          comprobante_formato: record.comprobanteFormato,
-          fecha_emision: record.fechaEmision,
-          cuit_emisor: record.cuitEmisor,
-          cuit_receptor: record.cuitReceptor,
-          razon_social_receptor: record.razonSocialReceptor,
-          condicion_iva_receptor: record.condicionIvaReceptor,
-          importe_total: record.importeTotal,
-          cae: record.cae,
-          cae_vencimiento: record.caeVencimiento,
-          estado: record.estado,
-        });
-      } catch (e) {}
-    }
   }
 
   public getStatus() {

@@ -113,3 +113,11 @@ CREATE INDEX IF NOT EXISTS idx_comprobantes_fecha ON comprobantes(fecha_emision)
 CREATE INDEX IF NOT EXISTS idx_comprobantes_cae ON comprobantes(cae);
 CREATE INDEX IF NOT EXISTS idx_comprobantes_receptor ON comprobantes(cuit_receptor);
 CREATE INDEX IF NOT EXISTS idx_usuarios_username ON usuarios(username);
+
+-- =====================================================================
+-- Migración BotArca (web service + repositorio de comprobantes).
+-- Se puede correr más de una vez sin problema.
+-- =====================================================================
+-- Detalle completo del comprobante: permite regenerar el PDF y reenviarlo después de un reinicio
+ALTER TABLE comprobantes ADD COLUMN IF NOT EXISTS detalle JSONB;
+ALTER TABLE comprobantes ADD COLUMN IF NOT EXISTS email_receptor VARCHAR(255);

@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../database.js';
 import { arcaSession } from '../engine/arcaSession.js';
-import { facturacionModule, FacturaRequest } from '../engine/modules/facturacion.js';
+import { FacturaRequest } from '../engine/modules/facturacion.js';
+import { emitirComprobante } from '../services/emisionService.js';
 import { comprobantesModule } from '../engine/modules/comprobantes.js';
 import { monotributoModule } from '../engine/modules/monotributo.js';
 import { notificacionesModule } from '../engine/modules/notificaciones.js';
@@ -14,10 +15,10 @@ router.post('/facturar', async (req: Request, res: Response) => {
   const facturaData: FacturaRequest = req.body;
   const creds = db.getCredentials();
 
-  if (!creds.cuit || !creds.claveFiscal) {
+  if (!creds.cuit && !facturaData?.cuitEmisor) {
     return res.status(400).json({
       success: false,
-      message: 'Debes configurar primero tu CUIT y Clave Fiscal en el panel de configuración.',
+      message: 'Debes configurar primero un CUIT emisor en "Cuentas y CUITs".',
     });
   }
 
@@ -35,12 +36,8 @@ router.post('/facturar', async (req: Request, res: Response) => {
   });
 
   try {
-    const session = await arcaSession.ensureActiveSession();
-    if (!session.success) {
-      throw new Error(session.message);
-    }
-
-    const resultado = await facturacionModule.emitirFactura(session, facturaData);
+    // Web service o navegador según la configuración de la cuenta emisora
+    const resultado = await emitirComprobante(facturaData);
 
     if (resultado.success) {
       db.updateTask(task.id, {

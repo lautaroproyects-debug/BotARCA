@@ -1,4 +1,5 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import { authenticateToken, requireOperator, AuthenticatedRequest } from './middleware/auth.middleware.js';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -68,6 +69,21 @@ app.use('/api/queue/process', heavyOperationRateLimiter);
 app.use('/api/queue/parse-smart', heavyOperationRateLimiter);
 app.use('/api/storage/upload', heavyOperationRateLimiter);
 
+// 9. Autenticación obligatoria. Antes estas rutas respondían SIN login: cualquiera con la URL
+//    podía listar cuentas, emitir comprobantes o procesar la cola.
+//    Públicas: /api/auth, /api/users/login|register (propias), /api/finanzas (cotizaciones),
+//    /api/ping y /api/keepalive/ping|health (monitores de uptime).
+const soloOperadorParaEscrituras = (req: Request, res: Response, next: NextFunction) =>
+  req.method === 'GET' ? next() : requireOperator(req as AuthenticatedRequest, res, next);
+
+for (const ruta of ['/api/tasks', '/api/logs', '/api/erp', '/api/queue', '/api/accounts', '/api/storage']) {
+  app.use(ruta, authenticateToken, soloOperadorParaEscrituras);
+}
+app.use('/api/keepalive', (req: Request, res: Response, next: NextFunction) => {
+  if (req.method === 'GET' && (req.path === '/ping' || req.path === '/health')) return next();
+  return authenticateToken(req as AuthenticatedRequest, res, () => soloOperadorParaEscrituras(req, res, next));
+});
+
 // Rutas de la API
 app.use('/api/users', usersRoutes);
 app.use('/api/auth', authRoutes);
@@ -101,7 +117,12 @@ const server = app.listen(config.port, () => {
   keepAliveService.init();
   schedulerService.init();
   import('./database.js').then(({ db }) => {
-    db.syncFromSupabase().catch(() => {});
+    db.syncFromSupabase()
+      .catch(() => {})
+      .then(() => db.restoreWsFromSupabase())
+      .then(() => import('./services/comprobantesService.js'))
+      .then(({ comprobantesService }) => comprobantesService.restaurarDesdeSupabase())
+      .catch(() => {});
   }).catch(() => {});
 });
 

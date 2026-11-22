@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { queueService } from '../services/queueService.js';
 import { db } from '../database.js';
+import { aiParserService } from '../services/aiParserService.js';
 
 const router = Router();
 
@@ -51,7 +52,19 @@ router.post('/add', async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'La lista de comprobantes está vacía.' });
   }
 
-  const added = await queueService.addBatch(items);
+  // Se vuelve a validar cada borrador en el servidor: no entra a la cola nada con datos faltantes
+  const problemas: string[] = [];
+  const limpios = items.map((raw: any, i: number) => {
+    const b = aiParserService.normalizarBorrador(raw);
+    if (b.advertencias.length) problemas.push(`Fila ${i + 1}: ${b.advertencias.join(' ')}`);
+    const { advertencias, ...item } = b;
+    return { ...item, docNro: item.docNro || '', cuitEmisor: raw.cuitEmisor || item.cuitEmisor, email: item.email || '' };
+  });
+  if (problemas.length) {
+    return res.status(400).json({ success: false, message: 'Hay borradores para revisar antes de pasarlos a la cola.', problemas });
+  }
+
+  const added = await queueService.addBatch(limpios as any);
   res.json({ success: true, count: added.length, items: added });
 });
 

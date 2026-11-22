@@ -68,7 +68,7 @@ router.put('/me/password', authenticateToken, async (req: AuthenticatedRequest, 
     return res.status(400).json({ success: false, message: 'La contraseña actual no es correcta.' });
   }
 
-  const result = await userService.resetPassword(user.id, newPassword);
+  const result = await userService.resetPassword(user.id, newPassword, 'propio');
   res.json(result);
 });
 
@@ -109,7 +109,7 @@ router.post('/', authenticateToken, requireAdmin, async (req: AuthenticatedReque
 // Actualizar usuario
 router.put('/:id', authenticateToken, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const { name, email, role, active } = req.body;
-  const result = await userService.updateUser(req.params.id as string, { name, email, role, active });
+  const result = await userService.updateUser(req.params.id as string, { name, email, role, active }, req.user!.id);
   res.json(result);
 });
 

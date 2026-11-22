@@ -49,3 +49,17 @@ export function requireAdmin(req: AuthenticatedRequest, res: Response, next: Nex
   }
   next();
 }
+
+/**
+ * Middleware para operaciones que cambian datos o emiten comprobantes (Role: admin u operator).
+ * Los usuarios "viewer" (por ejemplo, los auto-registrados) solo pueden consultar.
+ */
+export function requireOperator(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'operator')) {
+    return res.status(403).json({
+      success: false,
+      message: 'Tu usuario es de solo lectura. Pedile a un administrador que te habilite como operador para emitir o modificar datos.',
+    });
+  }
+  next();
+}

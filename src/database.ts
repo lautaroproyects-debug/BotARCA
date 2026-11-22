@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { config } from './config.js';
 import { encrypt, decrypt } from './crypto.js';
+import type { DisenoComprobante } from './engine/ws/diseno.js';
 
 export interface ArcaAccountRecord {
   id: string;
@@ -14,6 +15,38 @@ export interface ArcaAccountRecord {
   puntoVentaDefault: number;
   activa: boolean;
   createdAt: string;
+  /** Configuración de emisión por web service de ARCA (WSFEv1) */
+  ws?: WsConfigCuenta;
+  /** Diseño del PDF y del mail (genérico o personalizado) */
+  diseno?: DisenoComprobante;
+}
+
+/**
+ * Cómo se conecta cada CUIT emisor con ARCA:
+ * - 'propio':    certificado digital a nombre del propio emisor (sin delegación).
+ * - 'delegado':  certificado de la plataforma; el emisor delegó "Facturación Electrónica" a ese CUIT.
+ * - 'auto':      usa el propio si hay, si no el delegado (nunca cae al navegador).
+ * - 'navegador': flujo viejo con Clave Fiscal + Chromium en "Comprobantes en línea". Solo si se elige a mano.
+ */
+export type ModoConexionArca = 'auto' | 'propio' | 'delegado' | 'navegador';
+
+export interface WsConfigCuenta {
+  modo: ModoConexionArca;
+  /** Punto de venta habilitado para web services (distinto al de Comprobantes en línea) */
+  puntoVentaWs?: number;
+  /** Certificado propio (público) en PEM */
+  certPropioPem?: string;
+  /** Clave privada del certificado propio, cifrada con AES-256-GCM */
+  encryptedKeyPropio?: string;
+  /** Pedido de certificado generado en el panel, esperando el .crt de ARCA */
+  csrPendientePem?: string;
+  encryptedKeyPendiente?: string;
+  /** Datos del emisor para el PDF */
+  condicionIvaEmisor?: string;
+  domicilioComercial?: string;
+  iibb?: string;
+  inicioActividades?: string;
+  ultimaPrueba?: { fecha: string; ok: boolean; modo?: string; mensaje: string };
 }
 
 export interface InvoicingQueueItem {
@@ -72,6 +105,12 @@ export interface ComprobanteRecord {
   caeVencimiento?: string;
   estado: string;
   createdAt: string;
+  /** Datos completos para regenerar el PDF (solo comprobantes emitidos por web service) */
+  detalle?: any;
+  emailReceptor?: string;
+  ambiente?: string;
+  via?: string;
+  envios?: Array<{ fecha: string; email: string; ok: boolean; mensaje?: string }>;
 }
 
 export interface UserRecord {
@@ -130,6 +169,8 @@ export interface AppDatabase {
   tasks: TaskRecord[];
   sessionCookies: any[];
   lastKeepAliveAt?: string;
+  /** Tickets de acceso WSAA vigentes (token/sign cifrados), por ambiente + certificado + servicio */
+  wsaaTickets?: Record<string, { token: string; sign: string; expiracion: string }>;
 }
 
 const DB_FILE = path.join(config.paths.dataDir, 'botarca_db.json');
@@ -443,7 +484,112 @@ class DatabaseManager {
       puntoVentaDefault: a.puntoVentaDefault,
       activa: a.activa,
       createdAt: a.createdAt,
+      // Resumen público de la conexión por web service (nunca la clave privada)
+      ws: {
+        modo: a.ws?.modo || 'auto',
+        puntoVentaWs: a.ws?.puntoVentaWs,
+        tieneCertificadoPropio: !!(a.ws?.certPropioPem && a.ws?.encryptedKeyPropio),
+        condicionIvaEmisor: a.ws?.condicionIvaEmisor,
+        domicilioComercial: a.ws?.domicilioComercial,
+        iibb: a.ws?.iibb,
+        inicioActividades: a.ws?.inicioActividades,
+        ultimaPrueba: a.ws?.ultimaPrueba,
+      } as any,
+      disenoModo: a.diseno?.modo || 'generico',
     }));
+  }
+
+  // --- WEB SERVICE ARCA (WSFEv1) ---
+  public getAccountRecord(cuit: string): ArcaAccountRecord | undefined {
+    const clean = String(cuit || '').replace(/\D/g, '');
+    return (this.data.accounts || []).find(a => a.cuit === clean);
+  }
+
+  public updateAccountWs(cuit: string, cambios: Partial<WsConfigCuenta>): ArcaAccountRecord | undefined {
+    const acc = this.getAccountRecord(cuit);
+    if (!acc) return undefined;
+    acc.ws = { modo: 'auto', ...(acc.ws || {}), ...cambios };
+    this.save();
+    this.persistirWsEnSupabase(acc).catch(() => {});
+    return acc;
+  }
+
+  private async persistirWsEnSupabase(acc: ArcaAccountRecord) {
+    try {
+      const { supabase } = await import('./services/supabase.js');
+      const client = supabase.getClient();
+      if (!client || !acc.ws) return;
+      // La clave privada ya va cifrada; el resto de la configuración no es secreta
+      await client.from('configuraciones').upsert({
+        id: `ws_cuenta_${acc.cuit}`,
+        valor: acc.ws,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+    } catch { /* Supabase es opcional */ }
+  }
+
+  /** Recupera de Supabase la configuración de web service y los tickets (sobrevive reinicios de Render). */
+  public async restoreWsFromSupabase() {
+    try {
+      const { supabase } = await import('./services/supabase.js');
+      const client = supabase.getClient();
+      if (!client) return;
+      const { data, error } = await client.from('configuraciones').select('id, valor');
+      if (error || !data) return;
+      for (const row of data as Array<{ id: string; valor: any }>) {
+        if (row.id === 'wsaa_tickets' && row.valor && typeof row.valor === 'object') {
+          this.data.wsaaTickets = { ...(row.valor || {}), ...(this.data.wsaaTickets || {}) };
+        } else if (row.id.startsWith('diseno_')) {
+          const acc = this.getAccountRecord(row.id.replace('diseno_', ''));
+          if (acc && row.valor && !acc.diseno) acc.diseno = row.valor as DisenoComprobante;
+        } else if (row.id.startsWith('ws_cuenta_')) {
+          const acc = this.getAccountRecord(row.id.replace('ws_cuenta_', ''));
+          if (acc && row.valor) acc.ws = { ...(row.valor as WsConfigCuenta), ...(acc.ws || {}) };
+        }
+      }
+      this.save();
+    } catch { /* Supabase es opcional */ }
+  }
+
+  public updateAccountDiseno(cuit: string, diseno: DisenoComprobante): ArcaAccountRecord | undefined {
+    const acc = this.getAccountRecord(cuit);
+    if (!acc) return undefined;
+    acc.diseno = diseno;
+    this.save();
+    import('./services/supabase.js').then(async ({ supabase }) => {
+      const client = supabase.getClient();
+      if (!client) return;
+      await client.from('configuraciones').upsert({ id: 'diseno_' + acc.cuit, valor: diseno, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    }).catch(() => {});
+    return acc;
+  }
+
+  public getWsaaTicket(clave: string): { token: string; sign: string; expiracion: string } | null {
+    const t = this.data.wsaaTickets?.[clave];
+    if (!t) return null;
+    const token = decrypt(t.token);
+    const sign = decrypt(t.sign);
+    if (!token || !sign) return null;
+    return { token, sign, expiracion: t.expiracion };
+  }
+
+  public setWsaaTicket(clave: string, ticket: { token: string; sign: string; expiracion: string }) {
+    if (!this.data.wsaaTickets) this.data.wsaaTickets = {};
+    // Limpiar tickets vencidos
+    for (const [k, v] of Object.entries(this.data.wsaaTickets)) {
+      if (new Date(v.expiracion).getTime() < Date.now()) delete this.data.wsaaTickets[k];
+    }
+    this.data.wsaaTickets[clave] = { token: encrypt(ticket.token), sign: encrypt(ticket.sign), expiracion: ticket.expiracion };
+    this.save();
+    import('./services/supabase.js').then(async ({ supabase }) => {
+      const client = supabase.getClient();
+      if (!client) return;
+      await client.from('configuraciones').upsert({
+        id: 'wsaa_tickets',
+        valor: this.data.wsaaTickets,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+    }).catch(() => {});
   }
 
   public switchActiveAccount(cuit: string) {

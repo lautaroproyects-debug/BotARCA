@@ -1,5 +1,5 @@
-const RENDER_API_KEY = 'rnd_xfxmD9gW1Rf9g2HEW9AI9Ps4UhnW';
-const SERVICE_ID = 'srv-dasuvcd9fdbs73f80ckg';
+const RENDER_API_KEY = process.env.RENDER_API_KEY || ''; // nunca escribir la clave en el código (el repo es público)
+const SERVICE_ID = process.env.RENDER_SERVICE_ID || '';
 
 async function main() {
   console.log('--- Services on Render Account ---');

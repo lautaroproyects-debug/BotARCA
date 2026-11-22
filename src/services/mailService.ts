@@ -15,6 +15,8 @@ export interface SendMailOptions {
   subject: string;
   html: string;
   attachments?: MailAttachment[];
+  /** Email al que responde el cliente (por ejemplo, el de la empresa emisora) */
+  replyTo?: string;
 }
 
 class MailService {
@@ -51,7 +53,7 @@ class MailService {
   /**
    * Envía un email utilizando Resend o Brevo según la configuración
    */
-  public async sendMail(options: SendMailOptions): Promise<{ success: boolean; message: string; id?: string }> {
+  public async sendMail(options: SendMailOptions): Promise<{ success: boolean; message: string; id?: string; simulado?: boolean }> {
     const cfg = this.getConfig();
 
     // 1. Modo Simulación (si no hay API keys configuradas)
@@ -59,7 +61,8 @@ class MailService {
       logger.info('MAIL-SIMULATOR', `[SIMULADO] Email para: ${options.to} | Asunto: "${options.subject}" (Para envíos reales agrega RESEND_API_KEY o BREVO_API_KEY en Configuración)`);
       return {
         success: true,
-        message: 'Email simulado correctamente en entorno de desarrollo.',
+        simulado: true,
+        message: 'Mail NO enviado: no hay un proveedor de correo configurado (Resend o Brevo). Quedó simulado.',
       };
     }
 
@@ -80,6 +83,7 @@ class MailService {
           to: [options.to],
           subject: options.subject,
           html: options.html,
+          ...(options.replyTo ? { reply_to: options.replyTo } : {}),
         };
 
         if (options.attachments && options.attachments.length > 0) {
@@ -132,6 +136,7 @@ class MailService {
           ],
           subject: options.subject,
           htmlContent: options.html,
+          ...(options.replyTo ? { replyTo: { email: options.replyTo } } : {}),
         };
 
         if (options.attachments && options.attachments.length > 0) {

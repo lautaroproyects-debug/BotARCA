@@ -19,7 +19,7 @@ export class UptimeRobotService {
 
   private getApiKey(): string {
     const settings = db.getSettings();
-    return settings.uptimeRobotApiKey || config.uptimeRobotApiKey || 'u3807259-da5acf1c8d7f897703ff3f2b';
+    return settings.uptimeRobotApiKey || config.uptimeRobotApiKey || '';
   }
 
   /**

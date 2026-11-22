@@ -1,14 +1,15 @@
 import { config } from '../config.js';
 import { logger } from './logger.js';
 
-const RENDER_API_KEY = 'rnd_xfxmD9gW1Rf9g2HEW9AI9Ps4UhnW';
-const SERVICE_ID = 'srv-dasuvcd9fdbs73f80ckg';
+const RENDER_API_KEY = process.env.RENDER_API_KEY || ''; // nunca escribir la clave en el código (el repo es público)
+const SERVICE_ID = process.env.RENDER_SERVICE_ID || '';
 
 export class RenderPersistenceService {
   /**
    * Guarda de forma atómica una variable de entorno en el Web Service de Render
    */
   public static async persistEnvVar(key: string, value: string): Promise<boolean> {
+    if (!RENDER_API_KEY || !SERVICE_ID) return false; // sin RENDER_API_KEY / RENDER_SERVICE_ID no se persiste en Render
     try {
       // 1. Obtener variables actuales
       const res = await fetch(`https://api.render.com/v1/services/${SERVICE_ID}/env-vars`, {

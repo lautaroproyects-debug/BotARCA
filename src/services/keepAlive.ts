@@ -28,6 +28,17 @@ class KeepAliveService {
     this.timer = setInterval(async () => {
       await this.executePing();
     }, ms);
+
+    // El plan gratis de Supabase pausa el proyecto tras ~7 días sin consultas.
+    // Una consulta mínima cada 12 h lo mantiene activo.
+    if ((globalThis as any).__botarcaPingSupabase) return;
+    (globalThis as any).__botarcaPingSupabase = setInterval(async () => {
+      try {
+        const { supabase } = await import('./supabase.js');
+        const client = supabase.getClient();
+        if (client) await client.from('configuraciones').select('id').limit(1);
+      } catch { /* si falla, se reintenta en el próximo ciclo */ }
+    }, 12 * 60 * 60 * 1000);
   }
 
   public stop() {

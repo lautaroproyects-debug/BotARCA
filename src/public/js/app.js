@@ -302,7 +302,9 @@ async function fetchWithAuth(url, options = {}) {
   };
 
   const response = await fetch(url, { ...options, headers });
-  if (response.status === 401 || response.status === 403) {
+  // 401 = sesión vencida -> cerrar sesión. 403 = sin permiso (ej. usuario de solo lectura):
+  // NO cerrar sesión, se muestra el mensaje del servidor.
+  if (response.status === 401) {
     handleUserLogout(false);
     throw new Error('Sesión expirada o token inválido');
   }
@@ -437,7 +439,8 @@ async function loadAccounts() {
               <span class="text-slate-400">Email:</span> 
               <span class="text-slate-700 font-medium">${escapeHtml(a.emailNotificaciones || 'Sin email de avisos')}</span>
             </div>
-            <div class="text-xs text-slate-500">Punto de Venta: <strong>${a.puntoVentaDefault || 1}</strong></div>
+            <div class="text-xs text-slate-500">Punto de Venta: <strong>${a.puntoVentaDefault || 1}</strong>${a.ws && a.ws.puntoVentaWs ? ` · Web service: <strong>${a.ws.puntoVentaWs}</strong>` : ''}</div>
+            ${renderWsResumenCuenta(a)}
             <div class="pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
               <div class="flex items-center space-x-2">
                 <button onclick="openEditAccountModal('${a.cuit}')" class="text-slate-500 hover:text-indigo-600 font-semibold p-1" title="Editar empresa">
@@ -457,6 +460,236 @@ async function loadAccounts() {
       }
     }
   } catch (e) {}
+}
+
+// ---------------------------------------------------------------------------
+// CONEXIÓN CON ARCA POR WEB SERVICE (modo por cuenta, certificado, prueba)
+// ---------------------------------------------------------------------------
+const WS_MODOS = {
+  auto: { nombre: 'Automático', ayuda: 'Usa el certificado propio de la empresa si está cargado; si no, el de la plataforma (requiere que la empresa haya delegado el servicio). Nunca usa el navegador.' },
+  propio: { nombre: 'Certificado propio', ayuda: 'Todo queda a nombre de la empresa: el certificado es de su CUIT y no hace falta delegar nada.' },
+  delegado: { nombre: 'Delegado', ayuda: 'Se usa el certificado de la plataforma. La empresa tiene que delegar "Facturación Electrónica" al CUIT de la plataforma en el Administrador de Relaciones de ARCA.' },
+  navegador: { nombre: 'Navegador', ayuda: 'Flujo anterior: entra a "Comprobantes en línea" con la Clave Fiscal y completa las pantallas. Es lento y puede trabarse si ARCA cambia algo.' },
+};
+let wsCuentaActual = null;
+let wsEstadoPlataforma = null;
+
+function renderWsResumenCuenta(a) {
+  const ws = a.ws || {};
+  const modo = WS_MODOS[ws.modo || 'auto'] || WS_MODOS.auto;
+  const prueba = ws.ultimaPrueba;
+  const estado = prueba
+    ? (prueba.ok
+      ? '<span class="text-emerald-700 font-semibold"><i class="fa-solid fa-circle-check mr-1"></i>Conexión OK</span>'
+      : '<span class="text-rose-700 font-semibold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Revisar conexión</span>')
+    : '<span class="text-slate-400">Sin probar</span>';
+  return `
+    <div class="flex items-center justify-between gap-2 text-[11px] bg-slate-50 rounded-lg px-2.5 py-1.5">
+      <span class="text-slate-600 truncate"><i class="fa-solid fa-plug mr-1 text-slate-400"></i>${escapeHtml(modo.nombre)}${ws.tieneCertificadoPropio ? ' · cert. propio' : ''} · ${estado}</span>
+      <button onclick="openWsModal('${a.cuit}')" class="text-indigo-600 hover:text-indigo-800 font-bold flex-shrink-0">Conexión ARCA</button>
+    </div>`;
+}
+
+async function cargarEstadoPlataformaWs() {
+  try {
+    const res = await fetchWithAuth('/api/accounts/ws/estado');
+    const data = await res.json();
+    if (data.success) wsEstadoPlataforma = data;
+  } catch (e) {}
+  return wsEstadoPlataforma;
+}
+
+async function openWsModal(cuit) {
+  const acc = allAccounts.find(a => a.cuit === cuit);
+  if (!acc) return;
+  wsCuentaActual = acc;
+  const ws = acc.ws || {};
+  document.getElementById('wsModalCuenta').innerText = `${acc.razonSocial || 'Empresa'} · CUIT ${formatCuit(acc.cuit)}`;
+  document.getElementById('wsModo').value = ws.modo || 'auto';
+  document.getElementById('wsPuntoVenta').value = ws.puntoVentaWs || '';
+  document.getElementById('wsCondIvaEmisor').value = ws.condicionIvaEmisor || '';
+  document.getElementById('wsDomicilio').value = ws.domicilioComercial || '';
+  document.getElementById('wsIibb').value = ws.iibb || '';
+  document.getElementById('wsInicioAct').value = ws.inicioActividades || '';
+  document.getElementById('wsCertTexto').value = '';
+  document.getElementById('wsKeyTexto').value = '';
+  document.getElementById('wsCsrBox').classList.add('hidden');
+  document.getElementById('wsPruebaResultado').innerHTML = ws.ultimaPrueba
+    ? `<li class="text-slate-500">Última prueba (${new Date(ws.ultimaPrueba.fecha).toLocaleString('es-AR')}): ${ws.ultimaPrueba.ok ? 'OK' : 'con problemas'} — ${escapeHtml(ws.ultimaPrueba.mensaje)}</li>`
+    : '';
+  renderWsModoAyuda();
+  renderWsCertEstado();
+  document.getElementById('wsModal').classList.remove('hidden');
+
+  const est = await cargarEstadoPlataformaWs();
+  const badge = document.getElementById('wsAmbienteBadge');
+  const prod = est && est.ambiente === 'produccion';
+  badge.className = `px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${prod ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-800'}`;
+  badge.innerText = prod ? 'Producción (real)' : 'Homologación (prueba)';
+  const p = est && est.plataforma;
+  document.getElementById('wsPlataformaInfo').innerHTML = p && p.configurado
+    ? `Certificado de la plataforma: CUIT <strong class="font-mono">${formatCuit(p.cuit)}</strong> (alias "${escapeHtml(p.alias)}", vence ${String(p.vence || '').slice(0, 10)}${p.vencido ? ' — <strong class="text-rose-700">VENCIDO</strong>' : ''}).<br>
+       Para usar el modo delegado, la empresa entra a ARCA con su Clave Fiscal → <em>Administrador de Relaciones</em> → <em>Nueva Relación</em> → WebServices → <em>Facturación Electrónica</em>, y pone como representante <strong class="font-mono">${formatCuit(p.cuit)}</strong>.`
+    : `El certificado de la plataforma todavía no está configurado (variables <code>WSFE_PLATFORM_CERT</code> y <code>WSFE_PLATFORM_KEY</code> en Render)${p && p.error ? `: ${escapeHtml(p.error)}` : ''}. Mientras tanto, usá el certificado propio.`;
+}
+
+function closeWsModal() {
+  document.getElementById('wsModal')?.classList.add('hidden');
+  wsCuentaActual = null;
+}
+
+function renderWsModoAyuda() {
+  const modo = document.getElementById('wsModo').value;
+  document.getElementById('wsModoAyuda').innerText = (WS_MODOS[modo] || WS_MODOS.auto).ayuda;
+}
+
+function renderWsCertEstado() {
+  const tiene = !!(wsCuentaActual && wsCuentaActual.ws && wsCuentaActual.ws.tieneCertificadoPropio);
+  const el = document.getElementById('wsCertEstado');
+  el.className = `text-[11px] font-semibold ${tiene ? 'text-emerald-700' : 'text-slate-400'}`;
+  el.innerText = tiene ? 'Cargado' : 'No cargado';
+  document.getElementById('btnQuitarCert').classList.toggle('hidden', !tiene);
+}
+
+async function refrescarCuentaWs() {
+  const cuit = wsCuentaActual && wsCuentaActual.cuit;
+  await loadAccounts();
+  if (cuit) wsCuentaActual = allAccounts.find(a => a.cuit === cuit) || wsCuentaActual;
+  renderWsCertEstado();
+}
+
+async function handleSaveWs(e) {
+  e.preventDefault();
+  if (!wsCuentaActual) return;
+  const btn = document.getElementById('btnSaveWs');
+  btn.disabled = true;
+  try {
+    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        modo: document.getElementById('wsModo').value,
+        puntoVentaWs: document.getElementById('wsPuntoVenta').value,
+        condicionIvaEmisor: document.getElementById('wsCondIvaEmisor').value,
+        domicilioComercial: document.getElementById('wsDomicilio').value,
+        iibb: document.getElementById('wsIibb').value,
+        inicioActividades: document.getElementById('wsInicioAct').value,
+      }),
+    });
+    const data = await res.json();
+    showToast(data.message || (data.success ? 'Guardado.' : 'No se pudo guardar.'), data.success ? 'success' : 'error');
+    if (data.success) await refrescarCuentaWs();
+  } catch (err) {
+    showToast('Error al guardar la configuración.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function generarCsrWs() {
+  if (!wsCuentaActual) return;
+  const btn = document.getElementById('btnGenerarCsr');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Generando...';
+  try {
+    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws/csr`, { method: 'POST', body: '{}' });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('wsCsrTexto').value = data.csrPem;
+      document.getElementById('wsCsrBox').classList.remove('hidden');
+      showToast(data.message, 'success');
+    } else {
+      showToast(data.message || 'No se pudo generar el pedido.', 'error');
+    }
+  } catch (err) {
+    showToast('Error al generar el pedido de certificado.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-file-signature mr-1"></i> Generar pedido (CSR)';
+  }
+}
+
+function copiarCsrWs() {
+  const t = document.getElementById('wsCsrTexto').value;
+  navigator.clipboard?.writeText(t).then(() => showToast('Pedido copiado.', 'success')).catch(() => showToast('No se pudo copiar: seleccioná el texto a mano.', 'error'));
+}
+
+function descargarCsrWs() {
+  const t = document.getElementById('wsCsrTexto').value;
+  if (!t || !wsCuentaActual) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([t], { type: 'application/pkcs10' }));
+  a.download = `pedido_${wsCuentaActual.cuit}.csr`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+async function cargarCertificadoWs() {
+  if (!wsCuentaActual) return;
+  const certPem = document.getElementById('wsCertTexto').value.trim();
+  const keyPem = document.getElementById('wsKeyTexto').value.trim();
+  if (!certPem) { showToast('Pegá el certificado (.crt) que te dio ARCA.', 'error'); return; }
+  const btn = document.getElementById('btnCargarCert');
+  btn.disabled = true;
+  try {
+    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws/certificado`, {
+      method: 'POST',
+      body: JSON.stringify({ certPem, keyPem: keyPem || undefined }),
+    });
+    const data = await res.json();
+    showToast(data.message, data.success ? 'success' : 'error');
+    if (data.success) {
+      document.getElementById('wsCertTexto').value = '';
+      document.getElementById('wsKeyTexto').value = '';
+      document.getElementById('wsCsrBox').classList.add('hidden');
+      await refrescarCuentaWs();
+    }
+  } catch (err) {
+    showToast('Error al cargar el certificado.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function quitarCertificadoWs() {
+  if (!wsCuentaActual) return;
+  if (!confirm('¿Quitar el certificado propio de esta cuenta? Vas a necesitar cargarlo de nuevo para usar el modo propio.')) return;
+  try {
+    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws/certificado`, { method: 'DELETE' });
+    const data = await res.json();
+    showToast(data.message, data.success ? 'success' : 'error');
+    if (data.success) await refrescarCuentaWs();
+  } catch (err) {
+    showToast('Error al quitar el certificado.', 'error');
+  }
+}
+
+async function probarConexionWs() {
+  if (!wsCuentaActual) return;
+  const btn = document.getElementById('btnProbarWs');
+  const lista = document.getElementById('wsPruebaResultado');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Probando...';
+  lista.innerHTML = '<li class="text-slate-500">Consultando a ARCA...</li>';
+  try {
+    const res = await fetchWithAuth(`/api/accounts/${wsCuentaActual.cuit}/ws/probar`, { method: 'POST', body: '{}' });
+    const data = await res.json();
+    if (!data.success) {
+      lista.innerHTML = `<li class="text-rose-700">${escapeHtml(data.message || 'No se pudo probar la conexión.')}</li>`;
+      return;
+    }
+    lista.innerHTML = data.pasos.map(p => `
+      <li class="flex items-start gap-2">
+        <i class="fa-solid ${p.ok ? 'fa-circle-check text-emerald-600' : 'fa-circle-xmark text-rose-600'} mt-0.5 flex-shrink-0"></i>
+        <span><strong class="text-slate-800">${escapeHtml(p.paso)}:</strong> <span class="text-slate-600">${escapeHtml(p.detalle)}</span></span>
+      </li>`).join('') +
+      `<li class="pt-1 font-bold ${data.ok ? 'text-emerald-700' : 'text-rose-700'}">${data.ok ? 'Lista para facturar por web service.' : 'Todavía no se puede facturar por web service con esta cuenta.'}</li>`;
+    await refrescarCuentaWs();
+  } catch (err) {
+    lista.innerHTML = '<li class="text-rose-700">Error al probar la conexión.</li>';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-plug-circle-check mr-1"></i> Probar';
+  }
 }
 
 async function switchActiveCuitAccount(cuit) {
@@ -1459,7 +1692,8 @@ async function checkCloudHealthStatus() {
 function connectLogsSSE() {
   if (sseSource) sseSource.close();
   try {
-    sseSource = new EventSource('/api/logs/stream');
+    // EventSource no puede mandar el header Authorization: el token va en la URL
+    sseSource = new EventSource(`/api/logs/stream?token=${encodeURIComponent(authToken || '')}`);
     sseSource.onmessage = (event) => {
       try {
         const log = JSON.parse(event.data);

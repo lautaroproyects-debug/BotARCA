@@ -1,6 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { db } from '../database.js';
+import { db, ModoConexionArca } from '../database.js';
 import { supabase } from '../services/supabase.js';
+import { encrypt, decrypt } from '../crypto.js';
+import { requireAdmin } from '../middleware/auth.middleware.js';
+import { generarCsr, leerCertificado, normalizarPem, verificarParClave } from '../engine/ws/certificados.js';
+import { estadoPlataforma, probarConexion } from '../engine/ws/wsfeEmisor.js';
 
 const router = Router();
 
@@ -71,6 +75,141 @@ router.post('/switch', (req: Request, res: Response) => {
     res.json({ success: true, message: `Cuenta activa cambiada a CUIT ${cuit}.`, activeCuit: cuit });
   } else {
     res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+  }
+});
+
+// ------------------------------------------------------------------
+// WEB SERVICE DE ARCA (WSFEv1): modo de conexión, certificados y prueba
+// ------------------------------------------------------------------
+
+const MODOS: ModoConexionArca[] = ['auto', 'propio', 'delegado', 'navegador'];
+
+// Estado general: ambiente (homologación/producción) y certificado de la plataforma
+router.get('/ws/estado', (req: Request, res: Response) => {
+  const e = estadoPlataforma();
+  res.json({
+    success: true,
+    ambiente: e.ambiente,
+    plataforma: {
+      configurado: e.configurado,
+      error: e.error || undefined,
+      cuit: e.certificado?.cuit,
+      alias: e.certificado?.alias,
+      vence: e.certificado?.validoHasta,
+      vencido: e.certificado?.vencido,
+    },
+  });
+});
+
+// Configuración de la cuenta (modo, punto de venta de web service, datos del emisor para el PDF)
+router.put('/:cuit/ws', requireAdmin, (req: Request, res: Response) => {
+  const acc = db.getAccountRecord(String(req.params.cuit));
+  if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+
+  const { modo, puntoVentaWs, condicionIvaEmisor, domicilioComercial, iibb, inicioActividades } = req.body || {};
+  if (modo !== undefined && !MODOS.includes(modo)) {
+    return res.status(400).json({ success: false, message: `Modo inválido. Opciones: ${MODOS.join(', ')}.` });
+  }
+  const pv = puntoVentaWs === undefined || puntoVentaWs === '' ? undefined : parseInt(String(puntoVentaWs), 10);
+  if (pv !== undefined && (!Number.isInteger(pv) || pv < 1 || pv > 99998)) {
+    return res.status(400).json({ success: false, message: 'El punto de venta debe ser un número entre 1 y 99998.' });
+  }
+
+  db.updateAccountWs(acc.cuit, {
+    ...(modo !== undefined ? { modo } : {}),
+    ...(puntoVentaWs !== undefined ? { puntoVentaWs: pv } : {}),
+    ...(condicionIvaEmisor !== undefined ? { condicionIvaEmisor: String(condicionIvaEmisor).trim() || undefined } : {}),
+    ...(domicilioComercial !== undefined ? { domicilioComercial: String(domicilioComercial).trim() || undefined } : {}),
+    ...(iibb !== undefined ? { iibb: String(iibb).trim() || undefined } : {}),
+    ...(inicioActividades !== undefined ? { inicioActividades: String(inicioActividades).trim() || undefined } : {}),
+  });
+  res.json({ success: true, message: 'Configuración de web service guardada.', accounts: db.getAccounts() });
+});
+
+// Genera la clave privada (queda cifrada en el servidor) y el pedido de certificado (CSR) para subir a ARCA
+router.post('/:cuit/ws/csr', requireAdmin, (req: Request, res: Response) => {
+  const acc = db.getAccountRecord(String(req.params.cuit));
+  if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+  try {
+    const alias = String(req.body?.alias || `botarca${acc.cuit.slice(-4)}`);
+    const { keyPem, csrPem } = generarCsr({ cuit: acc.cuit, organizacion: acc.razonSocial || acc.cuit, alias });
+    db.updateAccountWs(acc.cuit, { csrPendientePem: csrPem, encryptedKeyPendiente: encrypt(keyPem) });
+    res.json({ success: true, csrPem, alias, message: 'Pedido de certificado generado. Subilo a ARCA y después cargá acá el certificado (.crt) que te devuelve.' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// Carga el certificado propio. La clave privada puede venir en el pedido o ser la del CSR generado en el panel.
+router.post('/:cuit/ws/certificado', requireAdmin, (req: Request, res: Response) => {
+  const acc = db.getAccountRecord(String(req.params.cuit));
+  if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+
+  const certPem = normalizarPem(req.body?.certPem);
+  if (!certPem) return res.status(400).json({ success: false, message: 'Pegá el contenido del certificado (.crt).' });
+
+  let info;
+  try {
+    info = leerCertificado(certPem);
+  } catch (err: any) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+  if (info.cuit !== acc.cuit) {
+    return res.status(400).json({
+      success: false,
+      message: `El certificado es del CUIT ${info.cuit || '(desconocido)'} y la cuenta es ${acc.cuit}. Para facturar por ${acc.cuit} con un certificado de otro CUIT, usá el modo "Delegado".`,
+    });
+  }
+  if (info.vencido) return res.status(400).json({ success: false, message: `El certificado venció el ${info.validoHasta.slice(0, 10)}.` });
+
+  const keyEnviada = normalizarPem(req.body?.keyPem);
+  const keyPendiente = acc.ws?.encryptedKeyPendiente ? normalizarPem(decrypt(acc.ws.encryptedKeyPendiente)) : '';
+  const keyPem = keyEnviada || keyPendiente;
+  if (!keyPem) {
+    return res.status(400).json({ success: false, message: 'Falta la clave privada: generá el pedido (CSR) desde el panel o pegá la clave (.key) junto con el certificado.' });
+  }
+  if (!verificarParClave(certPem, keyPem)) {
+    return res.status(400).json({
+      success: false,
+      message: keyEnviada
+        ? 'La clave privada no corresponde a este certificado.'
+        : 'Este certificado no corresponde al último pedido (CSR) generado en el panel. Pegá también su clave privada.',
+    });
+  }
+
+  db.updateAccountWs(acc.cuit, {
+    certPropioPem: certPem,
+    encryptedKeyPropio: encrypt(keyPem),
+    csrPendientePem: undefined,
+    encryptedKeyPendiente: undefined,
+  });
+  res.json({
+    success: true,
+    message: `Certificado cargado: alias "${info.alias}", vence el ${info.validoHasta.slice(0, 10)}.`,
+    accounts: db.getAccounts(),
+  });
+});
+
+router.delete('/:cuit/ws/certificado', requireAdmin, (req: Request, res: Response) => {
+  const acc = db.getAccountRecord(String(req.params.cuit));
+  if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+  db.updateAccountWs(acc.cuit, { certPropioPem: undefined, encryptedKeyPropio: undefined });
+  res.json({ success: true, message: 'Certificado propio eliminado.', accounts: db.getAccounts() });
+});
+
+// Prueba la conexión completa SIN emitir nada (servidores, certificado, ticket, delegación, punto de venta)
+router.post('/:cuit/ws/probar', async (req: Request, res: Response) => {
+  const acc = db.getAccountRecord(String(req.params.cuit));
+  if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+  try {
+    const r = await probarConexion(acc);
+    const ultimo = r.pasos[r.pasos.length - 1];
+    db.updateAccountWs(acc.cuit, {
+      ultimaPrueba: { fecha: new Date().toISOString(), ok: r.ok, modo: r.modo, mensaje: ultimo ? `${ultimo.paso}: ${ultimo.detalle}` : '' },
+    });
+    res.json({ success: true, ...r });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

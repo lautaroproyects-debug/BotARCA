@@ -1,6 +1,6 @@
 import { db, InvoicingQueueItem } from '../database.js';
-import { facturacionModule } from '../engine/modules/facturacion.js';
-import { arcaSession } from '../engine/arcaSession.js';
+import { arcaSession, ArcaSessionResult } from '../engine/arcaSession.js';
+import { emitirComprobante, credencialesNavegador } from './emisionService.js';
 import { supabase } from './supabase.js';
 import { logger } from './logger.js';
 import { aiParserService } from './aiParserService.js';
@@ -76,25 +76,26 @@ class QueueService {
     logger.info('COLA', `Iniciando procesamiento de lote en ARCA: ${queue.length} pendientes...`);
 
     const creds = db.getCredentials();
-    if (!creds.cuit || !creds.claveFiscal) {
-      logger.error('COLA', 'No hay CUIT y Clave Fiscal configurados para procesar la cola.');
+    if (!creds.cuit) {
+      logger.error('COLA', 'No hay un CUIT emisor configurado para procesar la cola.');
       this.isProcessing = false;
       return { total: queue.length, exitosos: 0, fallidos: queue.length };
     }
 
-    try {
-      // 1. Iniciar sesión única en ARCA con Playwright
-      const session = await arcaSession.login(creds.cuit, creds.claveFiscal);
-      if (!session.success) {
-        logger.error('COLA', `Error de login en ARCA: ${session.message}`);
-        for (const item of queue) {
-          db.updateQueueItem(item.id, { estado: 'error', errorMensaje: `Fallo login ARCA: ${session.message}` });
-        }
-        this.isProcessing = false;
-        return { total: queue.length, exitosos: 0, fallidos: queue.length };
+    // Solo las cuentas en modo navegador necesitan sesión con Clave Fiscal: se abre una por CUIT
+    // y se reutiliza en todo el lote. Las cuentas por web service no la usan.
+    const sesionesNavegador = new Map<string, Promise<ArcaSessionResult>>();
+    const obtenerSesionNavegador = (acc: any, cuit: string): Promise<ArcaSessionResult> => {
+      if (!sesionesNavegador.has(cuit)) {
+        const cred = credencialesNavegador(acc, cuit);
+        sesionesNavegador.set(cuit, cred
+          ? arcaSession.login(cred.cuit, cred.claveFiscal)
+          : Promise.resolve({ success: false, message: `La cuenta ${cuit} no tiene Clave Fiscal cargada.` }));
       }
+      return sesionesNavegador.get(cuit)!;
+    };
 
-      // 2. Iterar sobre cada comprobante de la cola
+    try {
       for (let i = 0; i < queue.length; i++) {
         const item = queue[i];
         logger.info('COLA', `[${i + 1}/${queue.length}] Procesando ${item.tipoComprobante} para ${item.razonSocial} (CUIT: ${item.docNro}) - $${item.importeTotal}...`);
@@ -102,7 +103,7 @@ class QueueService {
         db.updateQueueItem(item.id, { estado: 'procesando' });
 
         try {
-          const res = await facturacionModule.emitirFactura(session, {
+          const res = await emitirComprobante({
             puntoVenta: item.puntoVenta,
             tipoComprobante: item.tipoComprobante as any,
             concepto: item.concepto as any,
@@ -122,7 +123,7 @@ class QueueService {
               precioUnitario: item.precioUnitario,
               subtotal: item.importeTotal,
             }],
-          });
+          }, { obtenerSesionNavegador });
 
           if (res.success && res.cae) {
             exitosos++;
@@ -169,7 +170,7 @@ class QueueService {
       id: 'comp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
       tipoOperacion: 'Emitido',
       tipoComprobante: item.tipoComprobante,
-      puntoVenta: item.puntoVenta,
+      puntoVenta: res.puntoVenta || item.puntoVenta,
       numero: parseInt(res.comprobanteNro?.split('-')[1] || '1', 10),
       comprobanteFormato: res.comprobanteNro || '0001-00000001',
       fechaEmision: new Date().toISOString().split('T')[0],

@@ -494,6 +494,7 @@
                 <div>
                   <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Punto de Venta</label>
                   <input type="number" id="facPuntoVenta" value="1" min="1" max="9999" class="input-field font-bold" required>
+                  <p class="text-[11px] text-slate-500 mt-1 leading-snug">Por web service se usa el punto de venta configurado en "Conexión ARCA" de la cuenta. En Factura A/B el precio se carga <strong>sin IVA</strong> (se suma 21%).</p>
                 </div>
 
                 <div>
@@ -1039,6 +1040,120 @@
           <button type="submit" id="btnSubmitAccount" class="btn-primary text-xs font-bold">Guardar Empresa</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- MODAL: CONEXIÓN CON ARCA POR WEB SERVICE (por cuenta emisora) -->
+  <div id="wsModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white max-w-2xl w-full min-w-0 p-4 sm:p-6 rounded-2xl shadow-2xl space-y-4 border border-slate-100 my-4">
+      <div class="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
+        <div class="min-w-0">
+          <h3 class="text-base font-bold text-slate-900">Conexión con ARCA</h3>
+          <p id="wsModalCuenta" class="text-xs text-slate-500 truncate"></p>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span id="wsAmbienteBadge" class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"></span>
+          <button onclick="closeWsModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center" aria-label="Cerrar"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </div>
+
+      <form onsubmit="handleSaveWs(event)" class="space-y-3.5">
+        <div>
+          <label for="wsModo" class="block text-xs font-semibold text-slate-700 mb-1">Cómo se conecta esta cuenta</label>
+          <select id="wsModo" class="input-field w-full max-w-full" onchange="renderWsModoAyuda()">
+            <option value="auto">Automático (recomendado)</option>
+            <option value="propio">Certificado propio</option>
+            <option value="delegado">Delegado a la plataforma</option>
+            <option value="navegador">Navegador con Clave Fiscal (no recomendado)</option>
+          </select>
+          <p id="wsModoAyuda" class="text-[11px] text-slate-500 mt-1 leading-snug"></p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label for="wsPuntoVenta" class="block text-xs font-semibold text-slate-700 mb-1">Punto de venta de web service</label>
+            <input type="number" id="wsPuntoVenta" class="input-field font-bold" min="1" max="99998" placeholder="ej: 2" inputmode="numeric">
+            <p class="text-[11px] text-slate-500 mt-1">Distinto al de Comprobantes en línea. Se usa en todas las facturas por web service.</p>
+          </div>
+          <div>
+            <label for="wsCondIvaEmisor" class="block text-xs font-semibold text-slate-700 mb-1">Condición frente al IVA (emisor)</label>
+            <select id="wsCondIvaEmisor" class="input-field">
+              <option value="">Según el tipo de comprobante</option>
+              <option value="Responsable Monotributo">Responsable Monotributo</option>
+              <option value="IVA Responsable Inscripto">IVA Responsable Inscripto</option>
+              <option value="IVA Sujeto Exento">IVA Sujeto Exento</option>
+            </select>
+          </div>
+          <div class="sm:col-span-2">
+            <label for="wsDomicilio" class="block text-xs font-semibold text-slate-700 mb-1">Domicilio comercial (para el PDF)</label>
+            <input type="text" id="wsDomicilio" class="input-field" placeholder="ej: Av. Siempre Viva 742 - Santa Fe">
+          </div>
+          <div>
+            <label for="wsIibb" class="block text-xs font-semibold text-slate-700 mb-1">Ingresos Brutos</label>
+            <input type="text" id="wsIibb" class="input-field" placeholder="ej: 921-123456-7 o Exento">
+          </div>
+          <div>
+            <label for="wsInicioAct" class="block text-xs font-semibold text-slate-700 mb-1">Inicio de actividades</label>
+            <input type="text" id="wsInicioAct" class="input-field" placeholder="dd/mm/aaaa">
+          </div>
+        </div>
+
+        <div class="flex justify-end">
+          <button type="submit" id="btnSaveWs" class="btn-primary text-xs font-bold">Guardar configuración</button>
+        </div>
+      </form>
+
+      <!-- Certificado propio -->
+      <div class="p-3.5 rounded-xl border border-slate-200 space-y-2.5">
+        <div class="flex items-center justify-between gap-2">
+          <strong class="text-sm text-slate-900">Certificado propio</strong>
+          <span id="wsCertEstado" class="text-[11px] font-semibold"></span>
+        </div>
+        <ol class="text-[11px] text-slate-600 list-decimal pl-4 space-y-0.5 leading-snug">
+          <li>Generá el pedido acá. La clave privada queda guardada cifrada en el servidor.</li>
+          <li>Subilo a ARCA con la Clave Fiscal de la empresa: <em>WSASS</em> en homologación, o <em>Administración de Certificados Digitales</em> en producción.</li>
+          <li>Asociá el certificado a "Facturación Electrónica" y pegá abajo el .crt que te devuelve ARCA.</li>
+        </ol>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" onclick="generarCsrWs()" id="btnGenerarCsr" class="btn-secondary text-xs"><i class="fa-solid fa-file-signature mr-1"></i> Generar pedido (CSR)</button>
+          <button type="button" onclick="quitarCertificadoWs()" id="btnQuitarCert" class="btn-secondary text-xs hidden"><i class="fa-solid fa-trash-can mr-1"></i> Quitar certificado</button>
+        </div>
+        <div id="wsCsrBox" class="hidden space-y-1.5">
+          <label for="wsCsrTexto" class="block text-xs font-semibold text-slate-700">Pedido de certificado (copiá esto en ARCA)</label>
+          <textarea id="wsCsrTexto" class="input-field font-mono text-[10px] h-28" readonly></textarea>
+          <div class="flex gap-2">
+            <button type="button" onclick="copiarCsrWs()" class="btn-secondary text-xs"><i class="fa-regular fa-copy mr-1"></i> Copiar</button>
+            <button type="button" onclick="descargarCsrWs()" class="btn-secondary text-xs"><i class="fa-solid fa-download mr-1"></i> Descargar .csr</button>
+          </div>
+        </div>
+        <div>
+          <label for="wsCertTexto" class="block text-xs font-semibold text-slate-700 mb-1">Certificado que te dio ARCA (.crt)</label>
+          <textarea id="wsCertTexto" class="input-field font-mono text-[10px] h-24" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+        </div>
+        <details class="text-xs">
+          <summary class="cursor-pointer text-slate-500">¿Generaste la clave por tu cuenta? Pegala acá</summary>
+          <textarea id="wsKeyTexto" class="input-field font-mono text-[10px] h-24 mt-1.5" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+        </details>
+        <button type="button" onclick="cargarCertificadoWs()" id="btnCargarCert" class="btn-primary text-xs font-bold">Cargar certificado</button>
+      </div>
+
+      <!-- Delegación -->
+      <div class="p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+        <strong class="text-sm text-slate-900">Delegación a la plataforma</strong>
+        <p id="wsPlataformaInfo" class="text-[11px] text-slate-600 leading-snug"></p>
+      </div>
+
+      <!-- Prueba -->
+      <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <strong class="text-sm text-slate-900">Probar conexión</strong>
+            <p class="text-[11px] text-slate-500">Revisa certificado, delegación y punto de venta. No emite ningún comprobante.</p>
+          </div>
+          <button type="button" onclick="probarConexionWs()" id="btnProbarWs" class="btn-primary text-xs font-bold flex-shrink-0"><i class="fa-solid fa-plug-circle-check mr-1"></i> Probar</button>
+        </div>
+        <ul id="wsPruebaResultado" class="space-y-1.5 text-xs" aria-live="polite"></ul>
+      </div>
     </div>
   </div>
 

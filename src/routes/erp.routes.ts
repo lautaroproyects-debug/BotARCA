@@ -3,9 +3,9 @@ import { clientesService } from '../services/erp/clientes.js';
 import { productosService } from '../services/erp/productos.js';
 import { supabase } from '../services/supabase.js';
 import { db } from '../database.js';
-import { facturacionModule, FacturaRequest } from '../engine/modules/facturacion.js';
-import { arcaSession } from '../engine/arcaSession.js';
+import { FacturaRequest } from '../engine/modules/facturacion.js';
 import { logger } from '../services/logger.js';
+import { emitirComprobante } from '../services/emisionService.js';
 
 const router = Router();
 
@@ -85,28 +85,17 @@ router.post('/facturacion/emitir', async (req: Request, res: Response) => {
   }
 
   const creds = db.getCredentials();
-  if (!creds.cuit || !creds.claveFiscal) {
+  if (!datos.cuitEmisor && !creds.cuit) {
     return res.status(400).json({
       success: false,
-      message: 'No hay CUIT ni Clave Fiscal configurados para operar en ARCA. Ingresalos en "Cuentas y CUITs".',
+      message: 'No hay un CUIT emisor configurado. Cargalo en "Cuentas y CUITs".',
     });
   }
 
   try {
-    logger.info('ERP-FACTURACION', `Iniciando sesión en ARCA para emisión directa de ${datos.tipoComprobante}...`);
-    const session = await arcaSession.login(creds.cuit, creds.claveFiscal);
-    if (!session.success) {
-      return res.status(401).json({
-        success: false,
-        message: `Fallo al iniciar sesión en ARCA: ${session.message}`,
-      });
-    }
-
-    const resultado = await facturacionModule.emitirFactura(session, {
-      ...datos,
-      cuitEmisor: datos.cuitEmisor || creds.cuit,
-      razonSocialEmisor: datos.razonSocialEmisor || creds.razonSocial,
-    });
+    logger.info('ERP-FACTURACION', `Emisión directa de ${datos.tipoComprobante} para CUIT ${datos.cuitEmisor || creds.cuit}...`);
+    // Web service o navegador según la configuración de la cuenta emisora
+    const resultado = await emitirComprobante(datos);
 
     if (resultado.success) {
       // Guardar en la base de comprobantes
@@ -114,7 +103,7 @@ router.post('/facturacion/emitir', async (req: Request, res: Response) => {
         id: 'comp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
         tipoOperacion: 'Emitido',
         tipoComprobante: datos.tipoComprobante,
-        puntoVenta: datos.puntoVenta,
+        puntoVenta: resultado.puntoVenta || datos.puntoVenta,
         numero: parseInt(resultado.comprobanteNro?.split('-')[1] || '1', 10),
         comprobanteFormato: resultado.comprobanteNro || `0000${datos.puntoVenta}-00000001`,
         fechaEmision: resultado.fechaEmision || new Date().toISOString().split('T')[0],

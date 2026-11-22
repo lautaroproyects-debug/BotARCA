@@ -306,7 +306,9 @@ class UserService {
       email: cleanEmail,
       name: cleanName,
       passwordHash: hash,
-      role: 'operator',
+      // El auto-registro entra como SOLO LECTURA: emitir comprobantes o tocar cuentas requiere
+      // que un administrador lo pase a operador desde "Usuarios".
+      role: 'viewer',
       active: true,
       lastLoginAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),

@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticateToken, requireOperator, AuthenticatedRequest } from './middleware/auth.middleware.js';
+import { obtenerArchivo } from './services/enlacesTemporales.js';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -99,6 +100,21 @@ app.use('/api/storage', storageRoutes);
 
 // Endpoint rápido /healthz y /ping para Render y UptimeRobot
 app.get('/healthz', (req, res) => res.status(200).send('OK'));
+
+// PDFs por enlace temporal. Sin la política de seguridad del panel: con "object-src 'none'"
+// el visor de PDF del navegador queda bloqueado y la pestaña sale en blanco.
+app.get('/archivo/:ticket', (req, res) => {
+  const a = obtenerArchivo(String(req.params.ticket));
+  res.removeHeader('Content-Security-Policy');
+  if (!a) {
+    res.status(404).type('html').send('<!doctype html><meta charset="utf-8"><title>Enlace vencido</title><p style="font-family:sans-serif;padding:24px">Este enlace venció (duran 10 minutos). Volvé al panel y abrí el PDF de nuevo.</p>');
+    return;
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(a.nombre)}"`);
+  res.setHeader('Cache-Control', 'private, max-age=600');
+  res.send(a.buffer);
+});
 app.get('/api/ping', (req, res) => {
   res.json({ status: 'pong', service: 'BotArca', timestamp: new Date().toISOString() });
 });

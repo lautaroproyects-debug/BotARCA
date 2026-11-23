@@ -24,8 +24,9 @@ class SupabaseService {
   }
 
   public init(customUrl?: string, customKey?: string) {
-    const url = customUrl || this.config.url;
-    const key = customKey || this.config.key;
+    // Al pegar en Render suelen colarse espacios o saltos de línea: se limpian siempre
+    const url = String(customUrl || this.config.url || '').trim().replace(/\/+$/, '');
+    const key = String(customKey || this.config.key || '').replace(/\s+/g, '');
 
     if (url && key) {
       try {

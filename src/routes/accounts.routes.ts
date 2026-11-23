@@ -7,6 +7,7 @@ import { generarCsr, leerCertificado, normalizarPem, verificarParClave } from '.
 import { estadoPlataforma, probarConexion } from '../engine/ws/wsfeEmisor.js';
 import { sanearDiseno, DISENO_GENERICO, ASUNTO_MAIL_DEFAULT, CUERPO_MAIL_DEFAULT } from '../engine/ws/diseno.js';
 import { generarPdfComprobante, datosEjemplo } from '../engine/ws/pdfComprobante.js';
+import { crearEnlace } from '../services/enlacesTemporales.js';
 
 const router = Router();
 
@@ -250,8 +251,8 @@ router.post('/:cuit/diseno/vista-previa', async (req: Request, res: Response) =>
       iibb: acc.ws?.iibb,
       inicioActividades: acc.ws?.inicioActividades,
     }), diseno);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.send(pdf);
+    // Se devuelve un enlace temporal: el panel lo abre en una pestaña nueva con el visor de PDF del navegador
+    res.json({ success: true, url: crearEnlace(pdf, 'Vista previa de factura.pdf') });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
   }

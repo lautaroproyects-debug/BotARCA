@@ -300,7 +300,8 @@ No inventes CUIT, nombres ni importes. Si un pedido no tiene importe, no lo incl
    * (o con punto de venta y tipo adelante: PV · Tipo · CUIT/DNI · Razón social · Descripción · Importe)
    */
   public parseTabular(rawText: string): ParsedInvoiceDraft[] {
-    const lineas = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    // Solo se recorta el final: las celdas vacías del principio (ej. sin CUIT) son tabuladores que no hay que perder
+    const lineas = rawText.split(/\r?\n/).map(l => l.replace(/[\r\s]+$/, '')).filter(l => l.trim());
     const borradores: ParsedInvoiceDraft[] = [];
 
     lineas.forEach((linea, i) => {

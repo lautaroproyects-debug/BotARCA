@@ -129,16 +129,37 @@
             <p id="facBajada">Una factura, una lista pegada de Excel o un mensaje de WhatsApp.</p>
           </div>
           <div class="segmentos" role="tablist" aria-label="Modo de carga">
-            <button role="tab" data-modo="una" aria-selected="true">Una factura</button>
-            <button role="tab" data-modo="varias" aria-selected="false">Varias</button>
+            <button role="tab" data-modo="paso" aria-selected="true">Paso a paso</button>
+            <button role="tab" data-modo="una" aria-selected="false">Formulario</button>
+            <button role="tab" data-modo="varias" aria-selected="false">Pegar lista</button>
             <button role="tab" data-modo="cola" aria-selected="false">Cola <span id="segCola"></span></button>
           </div>
         </div>
 
         <div id="avisoSinPermiso" class="aviso atencion oculto" style="margin-bottom:16px"><svg class="ic"><use href="#i-alerta"/></svg><span>Tu usuario es de solo lectura: podés ver todo, pero para facturar un administrador tiene que habilitarte.</span></div>
 
-        <!-- Una factura -->
-        <form id="formFactura" data-modo-panel="una" novalidate>
+        <!-- Paso a paso: una pregunta por pantalla, Enter para avanzar -->
+        <div data-modo-panel="paso">
+          <form id="asistente" class="hoja asistente" novalidate autocomplete="off">
+            <div class="asis-barra" aria-hidden="true"><span id="asisBarra"></span></div>
+            <div class="asis-cuerpo">
+              <p class="asis-num" id="asisNum"></p>
+              <h2 id="asisPregunta" class="asis-pregunta"></h2>
+              <p class="ayuda" id="asisAyuda"></p>
+              <div id="asisCampo" class="asis-campo"></div>
+              <p id="asisError" class="asis-error" role="alert"></p>
+            </div>
+            <div class="asis-pie">
+              <button type="button" class="boton" id="asisAtras">Atrás</button>
+              <span class="asis-tecla"><kbd>Enter</kbd> para seguir</span>
+              <button type="submit" class="boton principal" id="asisSiguiente">Aceptar</button>
+            </div>
+          </form>
+          <ol id="asisRespuestas" class="asis-respuestas" aria-label="Respuestas hasta ahora"></ol>
+        </div>
+
+        <!-- Formulario completo -->
+        <form id="formFactura" data-modo-panel="una" class="oculto" novalidate>
           <div class="hoja">
             <div class="seccion">
               <h2>Cliente</h2>
@@ -255,12 +276,14 @@
         <div data-modo-panel="varias" class="oculto">
           <div class="hoja">
             <div class="seccion">
-              <h2>Pegá la lista o el mensaje</h2>
-              <p class="bajada">Filas de Excel (CUIT · nombre · descripción · importe · email · condición IVA) o texto libre como un WhatsApp. Se arman borradores: nada se emite sin que lo revises.</p>
+              <h2>Pegá una o varias facturas</h2>
+              <p class="bajada">Filas copiadas de Excel o Google Sheets, un CSV, o texto libre como un WhatsApp. Las que estén completas van directo a la cola como pendientes; las que tengan algo dudoso quedan abajo para que las corrijas. Nada se emite hasta que lo decidas en la cola.</p>
               <label for="txtLote" class="sr">Texto a interpretar</label>
               <textarea id="txtLote" rows="7" placeholder="Facturale a Juan Pérez, CUIT 20-12345678-6, monotributista, $150.000 por honorarios de octubre"></textarea>
               <div class="fila-acciones" style="margin-top:12px">
-                <button id="btnInterpretar" class="boton principal"><svg class="ic"><use href="#i-chispa"/></svg>Armar borradores</button>
+                <button id="btnInterpretar" class="boton principal"><svg class="ic"><use href="#i-cola"/></svg>Agregar a la cola</button>
+                <label class="boton" for="archivoLote" style="margin:0"><svg class="ic"><use href="#i-archivo"/></svg>Subir CSV o TXT</label>
+                <input type="file" id="archivoLote" accept=".csv,.txt,.tsv,text/csv,text/plain" class="sr">
                 <label style="display:flex;gap:8px;align-items:center;margin:0;font-weight:400"><input type="checkbox" id="chkIa" checked> Usar IA (Groq) si está configurada</label>
               </div>
               <div id="loteMensaje" class="aviso info oculto" style="margin-top:12px"></div>

@@ -69,19 +69,6 @@ async function api(url, opciones = {}) {
   return { ok: res.ok && data.success !== false, status: res.status, data };
 }
 
-function abrirBlob(blob, nombre) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.target = '_blank';
-  a.rel = 'noopener';
-  if (nombre && /iPhone|iPad|Android/i.test(navigator.userAgent) === false) a.title = nombre;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-}
-
 /* ---------------- Diálogos ---------------- */
 document.addEventListener('click', (e) => {
   const cerrar = e.target.closest('[data-cerrar]');
@@ -187,6 +174,7 @@ async function iniciarApp() {
   if (!$('#items').children.length) agregarItem();
   await Promise.all([cargarCuentas(), cargarClientes(), cargarPlataforma()]);
   cargarCola();
+  cambiarModo(estado.modo || 'paso');
   ir(location.hash.replace('#', '') || 'facturar');
 }
 
@@ -247,10 +235,12 @@ function actualizarBadgeAmbiente() {
    ====================================================================== */
 $$('[data-modo]').forEach(b => b.addEventListener('click', () => cambiarModo(b.dataset.modo)));
 function cambiarModo(modo) {
+  estado.modo = modo;
   $$('[data-modo]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.modo === modo)));
   $$('[data-modo-panel]').forEach(p => p.classList.toggle('oculto', p.dataset.modoPanel !== modo));
   $('#resultadoEmision').classList.add('oculto');
   if (modo === 'cola') cargarCola();
+  if (modo === 'paso') asisMostrar();
 }
 
 const discriminaIva = () => /\b(A|B)$/.test($('#facTipo').value);
@@ -399,13 +389,30 @@ $('#formFactura').addEventListener('submit', (e) => {
     items: leerItems(),
     comprobanteAsociado: /Nota de Crédito/.test($('#facTipo').value) ? { tipo: $('#asoTipo').value, puntoVenta: Number($('#asoPv').value), numero: $('#asoNro').value } : undefined,
   };
+  mostrarConfirmacion(facturaPendiente);
+});
+
+const NOMBRE_CONCEPTO = { 1: 'Productos', 2: 'Servicios', 3: 'Productos y servicios' };
+
+function totalesDe(items, conIva) {
+  let neto = 0, iva = 0;
+  for (const it of items) {
+    neto += it.subtotal;
+    if (conIva && it.alicuotaIva && it.alicuotaIva !== 'exento') iva += Math.round(it.subtotal * parseFloat(it.alicuotaIva)) / 100;
+  }
+  return { neto, iva, total: Math.round((neto + iva) * 100) / 100 };
+}
+
+/** Muestra el resumen y pide confirmar. Lo usan el formulario y el paso a paso. */
+function mostrarConfirmacion(f) {
+  const c = cuentaActiva();
+  const t = totalesDe(f.items, /\b(A|B)$/.test(f.tipoComprobante));
   const real = $('#badgeAmbiente').classList.contains('real');
-  const f = facturaPendiente;
   $('#confirmarCuerpo').innerHTML = `
     <div class="aviso ${real ? 'atencion' : 'info'}">${ic(real ? 'alerta' : 'info')}<span>${real ? 'Esto emite una factura <strong>real</strong> en ARCA. No se puede borrar: solo se anula con una nota de crédito.' : 'Modo prueba: se autoriza en el entorno de prueba de ARCA, sin validez fiscal.'}</span></div>
     <dl class="ficha">
       <dt>Emite</dt><dd>${esc(c.razonSocial)} · <span class="dato">${fmtCuit(c.cuit)}</span></dd>
-      <dt>Comprobante</dt><dd>${esc(f.tipoComprobante)} · ${esc($('#facConcepto').selectedOptions[0].text)}</dd>
+      <dt>Comprobante</dt><dd>${esc(f.tipoComprobante)} · ${esc(NOMBRE_CONCEPTO[f.concepto] || '')}${f.fechaEmision ? ` · ${fmtFecha(f.fechaEmision)}` : ''}</dd>
       <dt>Cliente</dt><dd>${esc(f.receptor.razonSocial || 'Consumidor Final')}${f.receptor.nroDoc ? ` · <span class="dato">${fmtCuit(f.receptor.nroDoc)}</span>` : ''}<br><span class="tenue">${esc(f.receptor.condicionIva)}</span></dd>
       <dt>Ítems</dt><dd>${f.items.map(i => `${esc(i.descripcion)} × ${i.cantidad}`).join('<br>')}</dd>
       <dt>Total</dt><dd class="monto" style="font-size:22px">${fmtPesos(t.total)}</dd>
@@ -413,7 +420,8 @@ $('#formFactura').addEventListener('submit', (e) => {
     </dl>`;
   $('#btnConfirmarEmision').textContent = real ? `Emitir ${fmtPesos(t.total)}` : 'Emitir de prueba';
   $('#dlgConfirmar').showModal();
-});
+  $('#btnConfirmarEmision').focus(); // Enter confirma
+}
 
 $('#btnConfirmarEmision').addEventListener('click', async () => {
   const btn = $('#btnConfirmarEmision');
@@ -456,7 +464,7 @@ function mostrarResultado(r, datos) {
         ${d.comprobanteId ? `<button class="boton" data-accion="pdf" data-id="${d.comprobanteId}">${ic('pdf')}Ver PDF</button><button class="boton" data-accion="enviar" data-id="${d.comprobanteId}">${ic('mail')}Enviar por mail</button>` : ''}
         <button class="boton principal" data-accion="nueva">${ic('mas')}Nueva factura</button>
       </div></div>`;
-    $('#formFactura').classList.add('oculto');
+    $$('[data-modo-panel]').forEach(p => p.classList.add('oculto'));
   }
   caja.focus();
   caja.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -479,9 +487,309 @@ function limpiarFactura() {
   actualizarFormTipo();
   $('#facDocTipo').dispatchEvent(new Event('change'));
   $$('#formFactura [aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
-  $('#resultadoEmision').classList.add('oculto');
-  $('#formFactura').classList.remove('oculto');
+  asisReiniciar();
+  cambiarModo(estado.modo === 'una' ? 'una' : 'paso');
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* ======================================================================
+   FACTURAR · PASO A PASO (una pregunta por pantalla, Enter para avanzar)
+   ====================================================================== */
+const hoyIso = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const CONDICIONES = ['Consumidor Final', 'Responsable Inscripto', 'Monotributo', 'Exento'];
+const ALICUOTAS = [['21', '21 %'], ['10.5', '10,5 %'], ['27', '27 %'], ['5', '5 %'], ['2.5', '2,5 %'], ['0', '0 %'], ['exento', 'Exento']];
+
+function asisNuevo() {
+  return { fecha: hoyIso(), tipo: 'Factura C', concepto: 2, doc: '', clienteConocido: false, nombre: '', condIva: '', email: '', items: [], item: { descripcion: '', importe: '', alicuota: '21' } };
+}
+let asis = asisNuevo();
+let asisPaso = 0;
+
+function cuitOk(c) {
+  if (!/^\d{11}$/.test(c)) return false;
+  const p = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  let dv = 11 - (p.reduce((a, x, i) => a + x * Number(c[i]), 0) % 11);
+  if (dv === 11) dv = 0; if (dv === 10) dv = 9;
+  return dv === Number(c[10]);
+}
+const conIva = () => /\b(A|B)$/.test(asis.tipo);
+const docLimpio = () => asis.doc.replace(/\D/g, '');
+
+/* Definición de cada paso. "saltar" oculta pasos que no aplican; "resumen" muestra lo cargado. */
+const PASOS = [
+  { id: 'fecha', pregunta: 'Fecha de la factura', ayuda: 'Ya está la de hoy: si es esa, apretá Enter.', tipo: 'fecha',
+    valor: () => asis.fecha, validar: (v) => (!v ? 'Elegí una fecha.' : null), guardar: (v) => { asis.fecha = v; },
+    chip: () => fmtFecha(asis.fecha) },
+  { id: 'tipo', pregunta: '¿Qué comprobante?', ayuda: 'Tocá una opción o apretá su número. Las notas de crédito se cargan desde "Formulario".', tipo: 'opciones',
+    opciones: () => [['Factura C', 'Monotributo'], ['Factura B', 'Responsable Inscripto a consumidor final o monotributista'], ['Factura A', 'Responsable Inscripto a otro Responsable Inscripto'], ['Recibo C', 'Monotributo']],
+    valor: () => asis.tipo, guardar: (v) => { asis.tipo = v; }, chip: () => asis.tipo },
+  { id: 'concepto', pregunta: '¿Qué se factura?', tipo: 'opciones',
+    opciones: () => [['2', 'Servicios'], ['1', 'Productos'], ['3', 'Productos y servicios']],
+    valor: () => String(asis.concepto), guardar: (v) => { asis.concepto = Number(v); }, chip: () => NOMBRE_CONCEPTO[asis.concepto] },
+  { id: 'doc', pregunta: '¿A quién? CUIT o DNI del cliente', ayuda: 'Podés escribir el nombre de un cliente guardado. Vacío = Consumidor Final sin identificar.', tipo: 'cliente',
+    valor: () => asis.doc,
+    validar: (v) => {
+      const d = String(v).replace(/\D/g, '');
+      if (!d) return /^A$/.test(asis.tipo.slice(-1)) ? 'Una Factura A necesita el CUIT del cliente.' : null;
+      if (d.length === 11) return cuitOk(d) ? null : 'Ese CUIT no es válido (revisá los números).';
+      if (d.length >= 7 && d.length <= 8) return asis.tipo === 'Factura A' ? 'Una Factura A necesita CUIT, no DNI.' : null;
+      return 'Un CUIT tiene 11 números y un DNI 7 u 8.';
+    },
+    guardar: (v) => {
+      const d = String(v).replace(/\D/g, '');
+      asis.doc = d;
+      const c = d && estado.clientes.find(x => String(x.cuit).replace(/\D/g, '') === d);
+      asis.clienteConocido = !!c;
+      if (c) { asis.nombre = c.razonSocial || ''; asis.condIva = c.condicionIva || ''; asis.email = c.email || ''; }
+      else if (!d) { asis.nombre = ''; asis.condIva = 'Consumidor Final'; }
+    },
+    chip: () => (docLimpio() ? fmtCuit(docLimpio()) : 'Consumidor Final') },
+  { id: 'nombre', pregunta: 'Nombre o razón social', tipo: 'texto', placeholder: 'Acme SA',
+    saltar: () => !docLimpio(),
+    ayuda: () => (asis.clienteConocido ? 'Cliente guardado: si está bien, Enter.' : docLimpio().length === 11 ? '' : 'Opcional para DNI.'),
+    valor: () => asis.nombre,
+    validar: (v) => (docLimpio().length === 11 && !String(v).trim() ? 'Falta el nombre o razón social.' : null),
+    guardar: (v) => { asis.nombre = String(v).trim(); }, chip: () => asis.nombre },
+  { id: 'condIva', pregunta: 'Condición frente al IVA del cliente', tipo: 'opciones',
+    saltar: () => !docLimpio(),
+    opciones: () => CONDICIONES.filter(c => asis.tipo !== 'Factura A' || ['Responsable Inscripto', 'Monotributo'].includes(c)).map(c => [c, '']),
+    valor: () => asis.condIva, validar: (v) => (!v ? 'Elegí una opción.' : null), guardar: (v) => { asis.condIva = v; }, chip: () => asis.condIva },
+  { id: 'descripcion', pregunta: () => (asis.items.length ? `Ítem ${asis.items.length + 1}: ¿qué se factura?` : 'Descripción'), tipo: 'texto', placeholder: 'Honorarios de octubre',
+    valor: () => asis.item.descripcion, validar: (v) => (!String(v).trim() ? 'Escribí qué se factura.' : null),
+    guardar: (v) => { asis.item.descripcion = String(v).trim(); }, chip: () => asis.item.descripcion },
+  { id: 'importe', pregunta: () => (conIva() ? 'Importe sin IVA' : 'Importe'), tipo: 'importe',
+    ayuda: () => (conIva() ? 'Sin IVA: el IVA lo sumás en el paso siguiente.' : 'El total final de este ítem.'),
+    valor: () => asis.item.importe, validar: (v) => (numero(v) > 0 ? null : 'Escribí un importe mayor a cero.'),
+    guardar: (v) => { asis.item.importe = String(v); }, chip: () => fmtPesos(numero(asis.item.importe)) },
+  { id: 'alicuota', pregunta: 'Alícuota de IVA', tipo: 'opciones', saltar: () => !conIva(),
+    opciones: () => ALICUOTAS.map(([v, n]) => [v, '', n]),
+    valor: () => asis.item.alicuota, guardar: (v) => { asis.item.alicuota = v; }, chip: () => `IVA ${(ALICUOTAS.find(a => a[0] === asis.item.alicuota) || [, ''])[1]}` },
+  { id: 'email', pregunta: 'Email para mandarle la factura', ayuda: 'Opcional: si no querés mandarla, dejalo vacío y Enter.', tipo: 'email', placeholder: 'cliente@empresa.com',
+    valor: () => asis.email, validar: (v) => (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v).trim()) ? 'Ese email no es válido.' : null),
+    guardar: (v) => { asis.email = String(v).trim(); }, chip: () => asis.email || 'sin email' },
+  { id: 'resumen', pregunta: 'Revisá y emití', tipo: 'resumen' },
+];
+
+const pasosVisibles = () => PASOS.filter(p => !(p.saltar && p.saltar()));
+const textoDe = (x) => (typeof x === 'function' ? x() : x || '');
+
+function asisReiniciar() {
+  asis = asisNuevo();
+  asisPaso = 0;
+  asisMostrar();
+}
+
+function itemsDelAsistente() {
+  const todos = [...asis.items];
+  if (asis.item.descripcion && numero(asis.item.importe) > 0) todos.push(asis.item);
+  return todos.map(it => {
+    const p = numero(it.importe);
+    return { descripcion: it.descripcion, cantidad: 1, precioUnitario: p, subtotal: p, alicuotaIva: conIva() ? it.alicuota : undefined };
+  });
+}
+
+function asisMostrar() {
+  if (!$('#asistente')) return;
+  const visibles = pasosVisibles();
+  asisPaso = Math.min(asisPaso, visibles.length - 1);
+  const p = visibles[asisPaso];
+  $('#asisBarra').style.width = `${Math.round((asisPaso / (visibles.length - 1)) * 100)}%`;
+  $('#asisNum').textContent = p.tipo === 'resumen' ? 'Último paso' : `Paso ${asisPaso + 1} de ${visibles.length - 1}`;
+  $('#asisPregunta').textContent = textoDe(p.pregunta);
+  $('#asisAyuda').textContent = textoDe(p.ayuda);
+  $('#asisError').textContent = '';
+  $('#asisAtras').style.visibility = asisPaso === 0 ? 'hidden' : 'visible';
+  $('#asisSiguiente').classList.toggle('oculto', p.tipo === 'resumen');
+  $('.asis-tecla').classList.toggle('oculto', p.tipo === 'resumen');
+  const campo = $('#asisCampo');
+
+  if (p.tipo === 'opciones') {
+    const ops = p.opciones();
+    const actual = p.valor();
+    campo.innerHTML = `<div class="opciones" role="radiogroup" aria-labelledby="asisPregunta">${ops.map(([v, sub, nombre], i) =>
+      `<button type="button" class="opcion" role="radio" data-valor="${esc(v)}" aria-checked="${String(v === actual)}"><kbd>${i + 1}</kbd><span>${esc(nombre || v)}${sub ? `<small>${esc(sub)}</small>` : ''}</span></button>`).join('')}</div>`;
+    (campo.querySelector('[aria-checked="true"]') || campo.querySelector('.opcion')).focus();
+  } else if (p.tipo === 'resumen') {
+    campo.innerHTML = asisResumenHtml();
+    campo.querySelector('[data-asis="emitir"]')?.focus();
+  } else {
+    const tipoInput = { fecha: 'date', email: 'email' }[p.tipo] || 'text';
+    const modo = p.tipo === 'importe' ? 'decimal' : p.tipo === 'cliente' ? 'search' : '';
+    campo.innerHTML = `<input id="asisEntrada" type="${tipoInput}" ${modo ? `inputmode="${modo === 'search' ? 'text' : modo}"` : ''} class="${p.tipo === 'importe' ? 'monto-entrada' : ''}" placeholder="${esc(p.placeholder || (p.tipo === 'importe' ? '0,00' : p.tipo === 'cliente' ? '20123456786 o nombre del cliente' : ''))}" value="${esc(p.valor())}" aria-labelledby="asisPregunta" autocomplete="off" enterkeyhint="next">
+      ${p.tipo === 'cliente' ? '<div id="asisSugerencias" class="asis-sugerencias" role="listbox" aria-label="Clientes guardados"></div>' : ''}`;
+    const entrada = $('#asisEntrada');
+    entrada.focus();
+    if (entrada.type !== 'date' && entrada.type !== 'email') entrada.select?.();
+    if (p.tipo === 'cliente') { entrada.addEventListener('input', asisSugerir); asisSugerir(); }
+  }
+  asisRespuestas();
+}
+
+function asisSugerir() {
+  const caja = $('#asisSugerencias');
+  if (!caja) return;
+  const q = $('#asisEntrada').value.trim().toLowerCase();
+  const soloNumeros = q.replace(/\D/g, '');
+  const lista = !q ? [] : estado.clientes.filter(c =>
+    String(c.razonSocial || '').toLowerCase().includes(q) || (soloNumeros.length >= 3 && String(c.cuit).includes(soloNumeros))).slice(0, 5);
+  // Si escribe un nombre, la primera coincidencia queda marcada: Enter la elige, las flechas cambian
+  const marcarPrimera = /[a-záéíóúñ]/i.test(q);
+  caja.innerHTML = lista.map((c, i) => `<button type="button" role="option" aria-selected="${String(marcarPrimera && i === 0)}" data-doc="${esc(c.cuit)}">${esc(c.razonSocial)} · ${fmtCuit(c.cuit)}</button>`).join('');
+}
+
+function asisRespuestas() {
+  const visibles = pasosVisibles();
+  $('#asisRespuestas').innerHTML = visibles.slice(0, asisPaso).filter(p => p.chip).map(p => {
+    const i = visibles.indexOf(p);
+    return `<li><button type="button" data-ir-paso="${i}" title="Cambiar">${esc(textoDe(p.pregunta).replace(/\?$/, '').replace(/^¿/, ''))}: <b>${esc(p.chip())}</b></button></li>`;
+  }).join('');
+}
+
+function asisResumenHtml() {
+  const items = itemsDelAsistente();
+  const t = totalesDe(items, conIva());
+  const c = cuentaActiva();
+  return `<div class="asis-resumen">
+    <div class="monto-grande">${fmtPesos(t.total)}</div>
+    ${conIva() ? `<p class="tenue">Neto ${fmtPesos(t.neto)} + IVA ${fmtPesos(t.iva)}</p>` : ''}
+    <dl class="ficha" style="margin-top:16px">
+      <dt>Emite</dt><dd>${esc(c?.razonSocial || '—')}</dd>
+      <dt>Comprobante</dt><dd>${esc(asis.tipo)} · ${esc(NOMBRE_CONCEPTO[asis.concepto])} · ${fmtFecha(asis.fecha)}</dd>
+      <dt>Cliente</dt><dd>${esc(asis.nombre || 'Consumidor Final')}${docLimpio() ? ` · <span class="dato">${fmtCuit(docLimpio())}</span>` : ''}<br><span class="tenue">${esc(asis.condIva || 'Consumidor Final')}</span></dd>
+      <dt>Detalle</dt><dd>${items.map(i => `${esc(i.descripcion)} · ${fmtPesos(i.precioUnitario)}${i.alicuotaIva ? ` + IVA ${esc(i.alicuotaIva === 'exento' ? 'exento' : i.alicuotaIva + ' %')}` : ''}`).join('<br>')}</dd>
+      ${asis.email ? `<dt>Se envía a</dt><dd>${esc(asis.email)}</dd>` : ''}
+    </dl>
+    <div class="asis-acciones">
+      <button type="button" class="boton principal" data-asis="emitir">${ic('factura')}Emitir ahora</button>
+      <button type="button" class="boton" data-asis="cola">${ic('cola')}Mandar a la cola</button>
+      <button type="button" class="boton" data-asis="otro-item">${ic('mas')}Agregar otro ítem</button>
+    </div>
+    <p class="ayuda" style="text-align:center"><button type="button" class="boton texto" data-asis="reiniciar">Empezar de nuevo</button></p>
+  </div>`;
+}
+
+function asisDatosFactura() {
+  const c = cuentaActiva();
+  const d = docLimpio();
+  return {
+    cuitEmisor: c?.cuit,
+    razonSocialEmisor: c?.razonSocial,
+    tipoComprobante: asis.tipo,
+    puntoVenta: c?.ws?.puntoVentaWs || c?.puntoVentaDefault || 1,
+    concepto: asis.concepto,
+    condicionVenta: 'Contado',
+    fechaEmision: asis.fecha !== hoyIso() ? asis.fecha : undefined,
+    receptor: {
+      tipoDoc: !d ? 'Consumidor Final' : d.length === 11 ? 'CUIT' : 'DNI',
+      nroDoc: d,
+      razonSocial: asis.nombre || (d ? '' : 'Consumidor Final'),
+      condicionIva: d ? asis.condIva : 'Consumidor Final',
+      email: asis.email || undefined,
+    },
+    items: itemsDelAsistente(),
+  };
+}
+
+function asisAvanzar() {
+  const visibles = pasosVisibles();
+  const p = visibles[asisPaso];
+  if (p.tipo === 'resumen') return;
+  let valor;
+  if (p.tipo === 'opciones') valor = $('#asisCampo .opcion[aria-checked="true"]')?.dataset.valor || '';
+  else valor = $('#asisEntrada').value;
+  if (p.tipo === 'cliente') {
+    // Si escribió un nombre y hay un único cliente que coincide, se toma ese
+    const elegido = $('#asisSugerencias [aria-selected="true"]');
+    if (elegido) valor = elegido.dataset.doc;
+    else if (/[a-záéíóúñ]/i.test(valor)) { $('#asisError').textContent = 'No hay ningún cliente guardado con ese nombre: escribí el CUIT o DNI.'; return; }
+  }
+  const error = p.validar ? p.validar(valor) : null;
+  if (error) {
+    $('#asisError').textContent = error;
+    ($('#asisEntrada') || $('#asisCampo .opcion'))?.focus();
+    return;
+  }
+  p.guardar(valor);
+  asisPaso = Math.min(asisPaso + 1, pasosVisibles().length - 1);
+  asisMostrar();
+}
+
+$('#asistente').addEventListener('submit', (e) => { e.preventDefault(); asisAvanzar(); });
+$('#asisAtras').addEventListener('click', () => { if (asisPaso > 0) { asisPaso--; asisMostrar(); } });
+
+$('#asisCampo').addEventListener('click', (e) => {
+  const op = e.target.closest('.opcion');
+  if (op) {
+    $$('#asisCampo .opcion').forEach(o => o.setAttribute('aria-checked', String(o === op)));
+    asisAvanzar(); // tocar una opción ya avanza
+    return;
+  }
+  const sug = e.target.closest('#asisSugerencias button');
+  if (sug) { $('#asisEntrada').value = sug.dataset.doc; $('#asisSugerencias').innerHTML = ''; asisAvanzar(); return; }
+  const accion = e.target.closest('[data-asis]')?.dataset.asis;
+  if (!accion) return;
+  if (accion === 'reiniciar') { asisReiniciar(); return; }
+  if (accion === 'otro-item') {
+    asis.items.push(asis.item);
+    asis.item = { descripcion: '', importe: '', alicuota: asis.item.alicuota };
+    asisPaso = pasosVisibles().findIndex(p => p.id === 'descripcion');
+    asisMostrar();
+    return;
+  }
+  if (!puedeOperar()) return aviso('Tu usuario es de solo lectura.', 'error');
+  if (!cuentaActiva()) return aviso('Primero cargá la empresa que factura en Ajustes.', 'error');
+  if (accion === 'emitir') { facturaPendiente = asisDatosFactura(); mostrarConfirmacion(facturaPendiente); }
+  if (accion === 'cola') asisACola(e.target.closest('button'));
+});
+
+// Teclado en las opciones: números para elegir, flechas para moverse, Enter para aceptar
+$('#asisCampo').addEventListener('keydown', (e) => {
+  const ops = $$('#asisCampo .opcion');
+  if (ops.length) {
+    const n = Number(e.key);
+    if (n >= 1 && n <= ops.length) { e.preventDefault(); ops[n - 1].click(); return; }
+    const i = ops.indexOf(document.activeElement);
+    if (['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(e.key)) {
+      e.preventDefault();
+      const sig = ops[(Math.max(i, 0) + (e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : ops.length - 1)) % ops.length];
+      ops.forEach(o => o.setAttribute('aria-checked', String(o === sig)));
+      sig.focus();
+    }
+    if (e.key === 'Enter' && i >= 0) { e.preventDefault(); ops[i].click(); }
+    return;
+  }
+  const sugs = $$('#asisSugerencias button');
+  if (sugs.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    const i = sugs.findIndex(s => s.getAttribute('aria-selected') === 'true');
+    const j = e.key === 'ArrowDown' ? Math.min(i + 1, sugs.length - 1) : Math.max(i - 1, -1);
+    sugs.forEach((s, k) => s.setAttribute('aria-selected', String(k === j)));
+  }
+});
+
+$('#asisRespuestas').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ir-paso]');
+  if (b) { asisPaso = Number(b.dataset.irPaso); asisMostrar(); }
+});
+
+async function asisACola(btn) {
+  const f = asisDatosFactura();
+  if (f.items.length > 1) return aviso('La cola carga un ítem por factura. Emitila ahora o dejá un solo ítem.', 'error');
+  const it = f.items[0];
+  const total = totalesDe(f.items, conIva()).total;
+  ocupado(btn, true);
+  const r = await api('/api/queue/add', { method: 'POST', body: { items: [{
+    cuitEmisor: f.cuitEmisor, puntoVenta: f.puntoVenta, tipoComprobante: f.tipoComprobante, concepto: f.concepto,
+    docTipo: f.receptor.tipoDoc === 'CUIT' ? 'CUIT' : f.receptor.tipoDoc === 'DNI' ? 'DNI' : 'Consumidor Final',
+    docNro: f.receptor.nroDoc, razonSocial: f.receptor.razonSocial, condicionIva: f.receptor.condicionIva,
+    condicionVenta: f.condicionVenta, descripcion: it.descripcion, cantidad: 1, precioUnitario: total, importeTotal: total, email: f.receptor.email || '',
+  }] } });
+  ocupado(btn, false);
+  if (!r.ok) return aviso((r.data.problemas || [])[0] || r.data.message, 'error');
+  aviso('Quedó en la cola como pendiente.');
+  guardarClienteSiEsNuevo(f.receptor);
+  asisReiniciar();
+  cargarCola();
 }
 
 async function guardarClienteSiEsNuevo(rec) {
@@ -502,13 +810,50 @@ $('#btnInterpretar').addEventListener('click', async () => {
   ocupado(btn, false);
   const msg = $('#loteMensaje');
   if (!r.ok) { msg.className = 'aviso error'; msg.textContent = r.data.message || 'No se pudo leer el texto.'; return; }
-  estado.borradores = r.data.items || [];
+  const leidos = r.data.items || [];
   const lector = { groq_ai: 'Leído con IA (Groq).', heuristic_nlp: 'Leído sin IA.', tabular: 'Leído como tabla.' }[r.data.parserUsed] || '';
-  msg.className = 'aviso info';
-  msg.textContent = estado.borradores.length
-    ? `${lector} ${estado.borradores.length} borrador(es). Revisalos antes de pasarlos a la cola.${r.data.message ? ' ' + r.data.message : ''}`
-    : `No se encontraron facturas en el texto. ${r.data.message || 'Revisá que cada línea tenga un importe.'}`;
+  if (!leidos.length) {
+    msg.className = 'aviso atencion';
+    msg.textContent = `No se encontraron facturas en el texto. ${r.data.message || 'Revisá que cada línea tenga un importe.'}`;
+    estado.borradores = []; renderBorradores();
+    return;
+  }
+  // Las completas van directo a la cola; las dudosas quedan para revisar
+  const completos = leidos.filter(b => !problemasBorrador(b).length && !(b.advertencias || []).some(a => /no es válido/.test(a)));
+  const aRevisar = leidos.filter(b => !completos.includes(b));
+  let agregados = 0;
+  if (completos.length) {
+    if (!puedeOperar()) { aviso('Tu usuario es de solo lectura.', 'error'); estado.borradores = leidos; renderBorradores(); return; }
+    ocupado(btn, true);
+    const rc = await api('/api/queue/add', { method: 'POST', body: { items: completos.map(prepararParaCola) } });
+    ocupado(btn, false);
+    if (rc.ok) agregados = rc.data.count;
+    else aRevisar.unshift(...completos);
+  }
+  estado.borradores = aRevisar;
+  msg.className = aRevisar.length ? 'aviso atencion' : 'aviso ok';
+  msg.textContent = `${lector} ${agregados ? `${agregados} quedaron en la cola como pendientes.` : ''} ${aRevisar.length ? `${aRevisar.length} necesitan revisión: corregilas abajo y pasalas a la cola.` : ''}${r.data.message ? ' ' + r.data.message : ''}`.trim();
   renderBorradores();
+  if (agregados) {
+    cargarCola();
+    if (!aRevisar.length) { $('#txtLote').value = ''; aviso(`${agregados} factura(s) pendiente(s) en la cola.`); cambiarModo('cola'); }
+  }
+});
+
+function prepararParaCola(b) {
+  const c = cuentaActiva();
+  const doc = String(b.docNro || '').replace(/\D/g, '');
+  const imp = numero(b.importeTotal);
+  return { ...b, docNro: doc, docTipo: doc.length === 11 ? 'CUIT' : doc ? 'DNI' : 'Consumidor Final', condicionIva: b.condicionIva || (doc.length === 11 ? '' : 'Consumidor Final'), importeTotal: imp, precioUnitario: imp, cantidad: 1, cuitEmisor: c?.cuit, puntoVenta: c?.ws?.puntoVentaWs || c?.puntoVentaDefault || 1 };
+}
+
+$('#archivoLote').addEventListener('change', () => {
+  const f = $('#archivoLote').files[0];
+  if (!f) return;
+  if (f.size > 2 * 1024 * 1024) return aviso('El archivo pesa más de 2 MB.', 'error');
+  const lector = new FileReader();
+  lector.onload = () => { $('#txtLote').value = String(lector.result || ''); $('#archivoLote').value = ''; aviso(`Cargado "${f.name}". Revisalo y tocá "Agregar a la cola".`); };
+  lector.readAsText(f, 'utf-8');
 });
 
 const CONDS = ['', 'Consumidor Final', 'Responsable Inscripto', 'Monotributo', 'Exento'];
@@ -574,11 +919,7 @@ $('#borradores').addEventListener('click', async (e) => {
     const malos = estado.borradores.map((b, i) => problemasBorrador(b).length ? i + 1 : 0).filter(Boolean);
     if (malos.length) return aviso(`Revisá ${malos.length === 1 ? 'el borrador' : 'los borradores'} ${malos.join(', ')} antes de pasarlos a la cola.`, 'error');
     const c = cuentaActiva();
-    const items = estado.borradores.map(b => {
-      const doc = String(b.docNro || '').replace(/\D/g, '');
-      const imp = numero(b.importeTotal);
-      return { ...b, docNro: doc, docTipo: doc.length === 11 ? 'CUIT' : doc ? 'DNI' : 'Consumidor Final', condicionIva: b.condicionIva || (doc.length === 11 ? '' : 'Consumidor Final'), importeTotal: imp, precioUnitario: imp, cantidad: 1, cuitEmisor: c?.cuit, puntoVenta: c?.ws?.puntoVentaWs || c?.puntoVentaDefault || 1 };
-    });
+    const items = estado.borradores.map(prepararParaCola);
     const btn = e.target.closest('#btnACola');
     ocupado(btn, true);
     const r = await api('/api/queue/add', { method: 'POST', body: { items } });
@@ -738,12 +1079,29 @@ async function abrirComprobante(id, enfocarMail = false) {
   });
 }
 
-async function verPdf(id, btn) {
+/**
+ * Abre un PDF en una pestaña nueva. La pestaña se abre EN EL MISMO CLIC (si se abre después de
+ * esperar al servidor, el navegador la bloquea como ventana emergente) y después se le carga el
+ * enlace temporal que arma el servidor.
+ */
+async function abrirPdfEnPestana(btn, pedirEnlace) {
+  const ventana = window.open('', '_blank');
+  if (ventana) {
+    try { ventana.document.write('<!doctype html><meta charset="utf-8"><title>Generando PDF…</title><p style="font-family:sans-serif;padding:24px;color:#45464a">Generando el PDF…</p>'); } catch {}
+  }
   ocupado(btn, true);
-  const r = await api(`/api/erp/comprobantes/${id}/pdf`, { blob: true });
+  const r = await pedirEnlace();
   ocupado(btn, false);
-  if (!r.ok) return aviso(r.data.message || 'No se pudo generar el PDF.', 'error');
-  abrirBlob(r.blob);
+  if (!r.ok || !r.data.url) {
+    ventana?.close();
+    return aviso(r.data.message || 'No se pudo generar el PDF.', 'error');
+  }
+  if (ventana && !ventana.closed) ventana.location.href = r.data.url;
+  else window.location.href = r.data.url; // el navegador bloqueó la pestaña: se abre en esta
+}
+
+function verPdf(id, btn) {
+  return abrirPdfEnPestana(btn, () => api(`/api/erp/comprobantes/${id}/enlace`, { method: 'POST', body: {} }));
 }
 
 /* ======================================================================
@@ -956,12 +1314,8 @@ function leerDiseno() {
     mail: { asunto: $('#disAsunto').value, cuerpo: $('#disCuerpo').value, responderA: $('#disResponder').value },
   };
 }
-$('#btnVistaPrevia').addEventListener('click', async (e) => {
-  ocupado(e.currentTarget, true);
-  const r = await api(`/api/accounts/${disCuit}/diseno/vista-previa`, { method: 'POST', body: { diseno: leerDiseno() }, blob: true });
-  ocupado(e.currentTarget, false);
-  if (!r.ok) return aviso(r.data.message || 'No se pudo armar la vista previa.', 'error');
-  abrirBlob(r.blob);
+$('#btnVistaPrevia').addEventListener('click', (e) => {
+  abrirPdfEnPestana(e.currentTarget, () => api(`/api/accounts/${disCuit}/diseno/vista-previa`, { method: 'POST', body: { diseno: leerDiseno() } }));
 });
 $('#btnGuardarDiseno').addEventListener('click', async (e) => {
   ocupado(e.currentTarget, true);

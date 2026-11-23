@@ -7,6 +7,7 @@ import { FacturaRequest } from '../engine/modules/facturacion.js';
 import { logger } from '../services/logger.js';
 import { emitirComprobante } from '../services/emisionService.js';
 import { comprobantesService } from '../services/comprobantesService.js';
+import { crearEnlace } from '../services/enlacesTemporales.js';
 
 const router = Router();
 
@@ -127,6 +128,13 @@ router.get('/comprobantes/:id/pdf', async (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(r.nombre)}"`);
   res.send(r.buffer);
+});
+
+// Enlace temporal para abrir el PDF en una pestaña nueva (sin la sesión en la URL)
+router.post('/comprobantes/:id/enlace', async (req: Request, res: Response) => {
+  const r = await comprobantesService.pdf(String(req.params.id));
+  if (!r.ok) return res.status(404).json({ success: false, message: r.mensaje });
+  res.json({ success: true, url: crearEnlace(r.buffer, r.nombre) });
 });
 
 // Enviar o reenviar el comprobante por mail

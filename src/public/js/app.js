@@ -178,6 +178,7 @@ async function iniciarApp() {
   actualizarAvisoSinCuit();
   const nombre = String(estado.usuario?.name || '').trim().split(/\s+/)[0];
   $('#saludo').textContent = nombre ? `Hola, ${nombre}` : 'Inicio';
+  $('#btnSalirBarra').title = `Cerrar sesión de @${estado.usuario?.username || ''} para entrar con otro usuario`;
   ir(location.hash.replace('#', '') || 'inicio');
 }
 
@@ -1798,6 +1799,7 @@ $('#aj-cuenta').addEventListener('submit', async (e) => {
   if (r.ok) { aviso('Ingresá de nuevo con la contraseña nueva.'); setTimeout(() => cerrarSesion(false), 1200); }
 });
 $('#btnSalir').addEventListener('click', () => cerrarSesion());
+$('#btnSalirBarra').addEventListener('click', () => cerrarSesion());
 
 function conectarLogs() {
   if (estado.sse) return;

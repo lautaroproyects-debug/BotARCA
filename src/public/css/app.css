@@ -473,3 +473,10 @@ dialog .d-pie { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: 
 }
 .boton.principal.peligro-fondo { background: var(--error); border-color: var(--error); }
 .boton.principal.peligro-fondo:hover { filter: brightness(.92); background: var(--error); border-color: var(--error); }
+
+/* Salir, siempre a mano en la barra de arriba */
+.barra .salir-barra { min-height: 38px; padding: 0 12px; font-size: 14px; flex: 0 0 auto; }
+@media (max-width: 640px) {
+  .barra .salir-barra { padding: 0; width: 40px; justify-content: center; }
+  .barra .salir-barra span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+}

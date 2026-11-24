@@ -19,6 +19,8 @@ export interface ArcaAccountRecord {
   ws?: WsConfigCuenta;
   /** Diseño del PDF y del mail (genérico o personalizado) */
   diseno?: DisenoComprobante;
+  /** Usuarios que pueden usar este CUIT (el admin los ve todos) */
+  usuarios?: string[];
 }
 
 /**
@@ -169,6 +171,10 @@ export interface AppDatabase {
   tasks: TaskRecord[];
   sessionCookies: any[];
   lastKeepAliveAt?: string;
+  /** CUIT con el que factura cada usuario por defecto */
+  cuitActivoPorUsuario?: Record<string, string>;
+  /** Clientes de cada usuario (agenda) */
+  clientesV2?: any[];
   /** Tickets de acceso WSAA vigentes (token/sign cifrados), por ambiente + certificado + servicio */
   wsaaTickets?: Record<string, { token: string; sign: string; expiracion: string }>;
 }
@@ -473,6 +479,113 @@ class DatabaseManager {
     } catch (e) {}
   }
 
+  // --- CUENTAS POR USUARIO ---
+
+  /**
+   * Crea o actualiza una cuenta (CUIT) a nombre de un usuario. Nunca toma la Clave Fiscal de otra
+   * cuenta: si no se manda una, queda la que la cuenta ya tenía (o ninguna).
+   */
+  public guardarCuenta(datos: {
+    cuit: string; razonSocial?: string; cuitRepresentante?: string; nombreRepresentante?: string;
+    emailNotificaciones?: string; claveFiscal?: string; puntoVentaDefault?: number;
+  }, usuarioId: string): ArcaAccountRecord {
+    const cuit = datos.cuit.replace(/\D/g, '');
+    if (!this.data.accounts) this.data.accounts = [];
+    let acc = this.data.accounts.find(a => a.cuit === cuit);
+    if (!acc) {
+      acc = {
+        id: 'acc_' + Date.now(),
+        cuit,
+        razonSocial: datos.razonSocial || `CUIT ${cuit}`,
+        encryptedClaveFiscal: '',
+        puntoVentaDefault: 1,
+        activa: true,
+        createdAt: new Date().toISOString(),
+        usuarios: [],
+      };
+      this.data.accounts.push(acc);
+    }
+    if (datos.razonSocial) acc.razonSocial = datos.razonSocial.trim();
+    if (datos.cuitRepresentante !== undefined) acc.cuitRepresentante = datos.cuitRepresentante.replace(/\D/g, '') || undefined;
+    if (datos.nombreRepresentante !== undefined) acc.nombreRepresentante = datos.nombreRepresentante.trim() || undefined;
+    if (datos.emailNotificaciones !== undefined) acc.emailNotificaciones = datos.emailNotificaciones.trim() || undefined;
+    if (datos.puntoVentaDefault) acc.puntoVentaDefault = Number(datos.puntoVentaDefault) || 1;
+    if (datos.claveFiscal) acc.encryptedClaveFiscal = encrypt(datos.claveFiscal);
+    acc.usuarios = Array.from(new Set([...(acc.usuarios || []), usuarioId]));
+    this.save();
+    this.persistirCuenta(acc);
+    return acc;
+  }
+
+  /** Define qué usuarios (además del admin) pueden usar un CUIT. */
+  public definirUsuariosCuenta(cuit: string, usuarios: string[]) {
+    const acc = this.getAccountRecord(cuit);
+    if (!acc) return false;
+    acc.usuarios = Array.from(new Set(usuarios));
+    this.save();
+    this.persistirAccesos();
+    return true;
+  }
+
+  /** Quita el acceso de un usuario; si no queda nadie, la cuenta se borra. */
+  public quitarAccesoCuenta(cuit: string, usuarioId: string): 'quitado' | 'borrada' | 'no-existe' {
+    const acc = this.getAccountRecord(cuit);
+    if (!acc) return 'no-existe';
+    acc.usuarios = (acc.usuarios || []).filter(u => u !== usuarioId);
+    if (acc.usuarios.length === 0) {
+      this.deleteAccount(acc.cuit);
+      this.persistirAccesos();
+      return 'borrada';
+    }
+    this.save();
+    this.persistirAccesos();
+    return 'quitado';
+  }
+
+  public getCuitActivoUsuario(usuarioId: string): string {
+    return (this.data.cuitActivoPorUsuario || {})[usuarioId] || '';
+  }
+
+  public setCuitActivoUsuario(usuarioId: string, cuit: string) {
+    if (!this.data.cuitActivoPorUsuario) this.data.cuitActivoPorUsuario = {};
+    this.data.cuitActivoPorUsuario[usuarioId] = cuit;
+    this.save();
+    const mapa = this.data.cuitActivoPorUsuario;
+    import('./services/supabase.js').then(async ({ supabase }) => {
+      const client = supabase.getClient();
+      if (client) await client.from('configuraciones').upsert({ id: 'cuit_activo_usuarios', valor: mapa, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    }).catch(() => {});
+  }
+
+  /** Guarda la cuenta y quién tiene acceso en Supabase (sobrevive reinicios de Render). */
+  private persistirCuenta(acc: ArcaAccountRecord) {
+    import('./services/supabase.js').then(async ({ supabase }) => {
+      const client = supabase.getClient();
+      if (!client) return;
+      await client.from('cuentas_arca').upsert({
+        cuit: acc.cuit,
+        razon_social: acc.razonSocial,
+        encrypted_clave_fiscal: acc.encryptedClaveFiscal || '',
+        punto_venta_default: acc.puntoVentaDefault,
+        activa: acc.activa !== false,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'cuit' });
+    }).catch(() => {});
+    this.persistirAccesos();
+  }
+
+  private persistirAccesos() {
+    const mapa: Record<string, any> = {};
+    for (const a of this.data.accounts || []) {
+      mapa[a.cuit] = { usuarios: a.usuarios || [], cuitRepresentante: a.cuitRepresentante, nombreRepresentante: a.nombreRepresentante, emailNotificaciones: a.emailNotificaciones };
+    }
+    import('./services/supabase.js').then(async ({ supabase }) => {
+      const client = supabase.getClient();
+      if (!client) return;
+      await client.from('configuraciones').upsert({ id: 'acceso_cuentas', valor: mapa, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    }).catch(() => {});
+  }
+
   public getAccounts(): Array<Omit<ArcaAccountRecord, 'encryptedClaveFiscal'>> {
     return (this.data.accounts || []).map(a => ({
       id: a.id,
@@ -496,6 +609,7 @@ class DatabaseManager {
         ultimaPrueba: a.ws?.ultimaPrueba,
       } as any,
       disenoModo: a.diseno?.modo || 'generico',
+      usuarios: a.usuarios || [],
     }));
   }
 
@@ -539,6 +653,19 @@ class DatabaseManager {
       for (const row of data as Array<{ id: string; valor: any }>) {
         if (row.id === 'wsaa_tickets' && row.valor && typeof row.valor === 'object') {
           this.data.wsaaTickets = { ...(row.valor || {}), ...(this.data.wsaaTickets || {}) };
+        } else if (row.id === 'acceso_cuentas' && row.valor && typeof row.valor === 'object') {
+          for (const [cuit, info] of Object.entries(row.valor as Record<string, any>)) {
+            const acc = this.getAccountRecord(cuit);
+            if (!acc) continue;
+            acc.usuarios = Array.from(new Set([...(acc.usuarios || []), ...((info && info.usuarios) || [])]));
+            if (info?.cuitRepresentante && !acc.cuitRepresentante) acc.cuitRepresentante = info.cuitRepresentante;
+            if (info?.nombreRepresentante && !acc.nombreRepresentante) acc.nombreRepresentante = info.nombreRepresentante;
+            if (info?.emailNotificaciones && !acc.emailNotificaciones) acc.emailNotificaciones = info.emailNotificaciones;
+          }
+        } else if (row.id === 'clientes' && Array.isArray(row.valor)) {
+          if (!this.data.clientesV2?.length) this.data.clientesV2 = row.valor;
+        } else if (row.id === 'cuit_activo_usuarios' && row.valor && typeof row.valor === 'object') {
+          this.data.cuitActivoPorUsuario = { ...(row.valor || {}), ...(this.data.cuitActivoPorUsuario || {}) };
         } else if (row.id.startsWith('diseno_')) {
           const acc = this.getAccountRecord(row.id.replace('diseno_', ''));
           if (acc && row.valor && !acc.diseno) acc.diseno = row.valor as DisenoComprobante;

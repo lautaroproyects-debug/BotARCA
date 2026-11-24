@@ -20,7 +20,8 @@ export interface OpcionesEmision {
 export type ResultadoEmision = ResultadoWs & { via: 'webservice' | 'navegador'; comprobanteId?: string };
 
 export function cuentaEmisora(datos: FacturaRequest): { cuit: string; acc?: ArcaAccountRecord } {
-  const cuit = String(datos.cuitEmisor || db.getCredentials().cuit || '').replace(/\D/g, '');
+  // El CUIT siempre lo decide la ruta (según el usuario); no hay un "CUIT global"
+  const cuit = String(datos.cuitEmisor || '').replace(/\D/g, '');
   return { cuit, acc: cuit ? db.getAccountRecord(cuit) : undefined };
 }
 

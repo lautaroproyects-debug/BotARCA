@@ -419,7 +419,7 @@ class FacturacionInternalApiModule {
             base64: pdfBase64,
             contentType: 'application/pdf',
             cuit: targetCuit,
-            isPublic: true,
+            isPublic: false, // los PDF no se publican: se ven desde BotArca con sesión
           });
           if (uploadRes.success && uploadRes.publicUrl) {
             publicPdfUrl = uploadRes.publicUrl;

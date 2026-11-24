@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { authenticateToken, requireOperator, AuthenticatedRequest } from './middleware/auth.middleware.js';
+import { authenticateToken, requireOperator, requireAdmin, AuthenticatedRequest } from './middleware/auth.middleware.js';
 import { obtenerArchivo } from './services/enlacesTemporales.js';
 import cors from 'cors';
 import path from 'path';
@@ -46,8 +46,8 @@ app.use(securityHeaders);
 app.use(secureCors);
 
 // 3. Parsers con límites de carga seguros (50MB para adjuntos y planillas)
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: '3mb' })); // alcanza para un logo de 400 KB y listas largas
+app.use(express.urlencoded({ extended: true, limit: '3mb' }));
 
 // 4. Sanitización global de entradas contra XSS y Prototype Pollution
 app.use(inputSanitizer);
@@ -69,6 +69,10 @@ app.use('/api/tasks', heavyOperationRateLimiter);
 app.use('/api/queue/process', heavyOperationRateLimiter);
 app.use('/api/queue/parse-smart', heavyOperationRateLimiter);
 app.use('/api/storage/upload', heavyOperationRateLimiter);
+// Operaciones que llaman a ARCA o consumen CPU (emitir, probar conexión, generar clave RSA, armar PDF)
+app.use('/api/erp/facturacion/emitir', heavyOperationRateLimiter);
+app.use(/^\/api\/accounts\/\d{11}\/(ws\/probar|ws\/csr|diseno\/vista-previa)$/, heavyOperationRateLimiter);
+app.use(/^\/api\/erp\/comprobantes\/[^/]+\/(enviar|enlace)$/, heavyOperationRateLimiter);
 
 // 9. Autenticación obligatoria. Antes estas rutas respondían SIN login: cualquiera con la URL
 //    podía listar cuentas, emitir comprobantes o procesar la cola.
@@ -77,12 +81,16 @@ app.use('/api/storage/upload', heavyOperationRateLimiter);
 const soloOperadorParaEscrituras = (req: Request, res: Response, next: NextFunction) =>
   req.method === 'GET' ? next() : requireOperator(req as AuthenticatedRequest, res, next);
 
-for (const ruta of ['/api/tasks', '/api/logs', '/api/erp', '/api/queue', '/api/accounts', '/api/storage']) {
+for (const ruta of ['/api/erp', '/api/queue', '/api/accounts']) {
   app.use(ruta, authenticateToken, soloOperadorParaEscrituras);
+}
+// Sistema y funciones viejas que operan sobre todos los usuarios: solo el administrador
+for (const ruta of ['/api/tasks', '/api/logs', '/api/storage']) {
+  app.use(ruta, authenticateToken, requireAdmin);
 }
 app.use('/api/keepalive', (req: Request, res: Response, next: NextFunction) => {
   if (req.method === 'GET' && (req.path === '/ping' || req.path === '/health')) return next();
-  return authenticateToken(req as AuthenticatedRequest, res, () => soloOperadorParaEscrituras(req, res, next));
+  return authenticateToken(req as AuthenticatedRequest, res, () => requireAdmin(req as AuthenticatedRequest, res, next));
 });
 
 // Rutas de la API

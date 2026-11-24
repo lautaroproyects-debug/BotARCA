@@ -30,8 +30,16 @@ router.get('/mail', authenticateToken, requireAdmin, (req: AuthenticatedRequest,
 
 // Guardar configuración de correo y Groq AI (Solo Admin)
 router.post('/mail', authenticateToken, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  const { provider, resendApiKey, brevoApiKey, senderEmail, senderName, adminNotifyEmail, groqApiKey } = req.body;
+  const { provider, resendApiKey, brevoApiKey, senderEmail, senderName, adminNotifyEmail, groqApiKey } = req.body || {};
   const current = db.getSettings();
+
+  // Validación del lado del servidor (el panel también valida, pero no se confía en él)
+  const esEmail = (v: any) => v === undefined || v === '' || (typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) && v.length <= 200);
+  const esClave = (v: any) => v === undefined || v === '' || (typeof v === 'string' && v.trim().length <= 300 && !/\s/.test(v.trim()));
+  if (provider !== undefined && !['auto', 'resend', 'brevo', 'simulation'].includes(provider)) return res.status(400).json({ success: false, message: 'Proveedor de correo inválido.' });
+  if (!esEmail(senderEmail) || !esEmail(adminNotifyEmail)) return res.status(400).json({ success: false, message: 'Hay un email inválido.' });
+  if (!esClave(resendApiKey) || !esClave(brevoApiKey) || !esClave(groqApiKey)) return res.status(400).json({ success: false, message: 'Una de las claves tiene un formato inválido.' });
+  if (senderName !== undefined && (typeof senderName !== 'string' || senderName.length > 80)) return res.status(400).json({ success: false, message: 'El nombre del remitente es demasiado largo.' });
 
   const update: any = {};
   if (provider !== undefined) update.mailProvider = provider;

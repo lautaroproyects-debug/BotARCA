@@ -71,7 +71,7 @@ router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) 
 });
 
 // Estado actual de credenciales y sesión en ARCA
-router.get('/status', authenticateToken, (req: Request, res: Response) => {
+router.get('/status', authenticateToken, requireAdmin, (req: Request, res: Response) => {
   const creds = db.getCredentials();
   res.json({
     cuit: creds.cuit,
@@ -115,7 +115,7 @@ router.post('/credentials', authenticateToken, requireAdmin, (req: Request, res:
 });
 
 // Probar login en vivo contra ARCA
-router.post('/test-login', authenticateToken, requireOperator, async (req: Request, res: Response) => {
+router.post('/test-login', authenticateToken, requireAdmin, async (req: Request, res: Response) => {
   const { cuit, claveFiscal } = req.body;
   const creds = db.getCredentials();
 
@@ -174,7 +174,7 @@ router.post('/test-login', authenticateToken, requireOperator, async (req: Reque
 });
 
 // Cerrar sesión
-router.post('/logout', authenticateToken, requireOperator, async (req: Request, res: Response) => {
+router.post('/logout', authenticateToken, requireAdmin, async (req: Request, res: Response) => {
   await arcaSession.closeAll();
   db.updateSessionStatus(false);
   logger.info('AUTH', 'Sesión cerrada manualmente.');

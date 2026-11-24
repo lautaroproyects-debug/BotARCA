@@ -2,19 +2,20 @@ import { Router, Request, Response } from 'express';
 import { queueService } from '../services/queueService.js';
 import { db } from '../database.js';
 import { aiParserService } from '../services/aiParserService.js';
+import { usuarioDe, cuitsVisibles, puedeUsarCuit, cuitActivoDe } from '../services/acceso.js';
 
 const router = Router();
 
 // Obtener estado y lista de la cola
 router.get('/', (req: Request, res: Response) => {
-  const status = queueService.getStatus();
+  const status = queueService.getStatus(cuitsVisibles(usuarioDe(req)));
   res.json({ success: true, ...status });
 });
 
 // Parsear texto copiado de Excel / CSV o WhatsApp con IA (Groq / Heurístico)
 router.post('/parse-excel', async (req: Request, res: Response) => {
-  const { text, forceAi } = req.body;
-  if (!text || typeof text !== 'string') {
+  const { text, forceAi } = req.body || {};
+  if (!text || typeof text !== 'string' || text.length > 200000) {
     return res.status(400).json({ success: false, message: 'No se envió texto para parsear.' });
   }
 
@@ -30,8 +31,8 @@ router.post('/parse-excel', async (req: Request, res: Response) => {
 
 // Endpoint explícito para parseo con IA
 router.post('/parse-smart', async (req: Request, res: Response) => {
-  const { text, forceAi } = req.body;
-  if (!text || typeof text !== 'string') {
+  const { text, forceAi } = req.body || {};
+  if (!text || typeof text !== 'string' || text.length > 200000) {
     return res.status(400).json({ success: false, message: 'No se envió texto para parsear.' });
   }
 
@@ -47,8 +48,9 @@ router.post('/parse-smart', async (req: Request, res: Response) => {
 
 // Agregar lote de comprobantes a la cola
 router.post('/add', async (req: Request, res: Response) => {
-  const { items } = req.body;
-  if (!Array.isArray(items) || items.length === 0) {
+  const { items } = req.body || {};
+  const usuario = usuarioDe(req);
+  if (!Array.isArray(items) || items.length === 0 || items.length > 500) {
     return res.status(400).json({ success: false, message: 'La lista de comprobantes está vacía.' });
   }
 
@@ -58,7 +60,12 @@ router.post('/add', async (req: Request, res: Response) => {
     const b = aiParserService.normalizarBorrador(raw);
     if (b.advertencias.length) problemas.push(`Fila ${i + 1}: ${b.advertencias.join(' ')}`);
     const { advertencias, ...item } = b;
-    return { ...item, docNro: item.docNro || '', cuitEmisor: raw.cuitEmisor || item.cuitEmisor, email: item.email || '' };
+    // Solo con CUITs propios: si no viene o no es suyo, se usa el CUIT con el que factura
+    const pedido = String(raw.cuitEmisor || '').replace(/\D/g, '');
+    const cuitEmisor = puedeUsarCuit(usuario, pedido) ? pedido : cuitActivoDe(usuario);
+    if (!cuitEmisor) problemas.push(`Fila ${i + 1}: todavía no cargaste ningún CUIT.`);
+    const acc = db.getAccountRecord(cuitEmisor);
+    return { ...item, docNro: item.docNro || '', cuitEmisor, razonSocialEmisor: acc?.razonSocial, puntoVenta: acc?.ws?.puntoVentaWs || item.puntoVenta, email: item.email || '' };
   });
   if (problemas.length) {
     return res.status(400).json({ success: false, message: 'Hay borradores para revisar antes de pasarlos a la cola.', problemas });
@@ -71,20 +78,25 @@ router.post('/add', async (req: Request, res: Response) => {
 // Iniciar procesamiento de la cola en ARCA
 router.post('/process', (req: Request, res: Response) => {
   // Iniciar en background
-  queueService.processQueue().catch(() => {});
+  queueService.processQueue(cuitsVisibles(usuarioDe(req))).catch(() => {});
   res.json({ success: true, message: 'Procesamiento de la cola de facturación iniciado en ARCA.' });
 });
 
 // Eliminar un item de la cola
 router.delete('/:id', (req: Request, res: Response) => {
-  const success = db.deleteQueueItem(req.params.id as string);
-  res.json({ success });
+  const item = db.getQueue().find(q => q.id === req.params.id);
+  if (!item || !puedeUsarCuit(usuarioDe(req), item.cuitEmisor || '')) return res.status(404).json({ success: false, message: 'No encontrado.' });
+  if (item.estado === 'procesando') return res.status(409).json({ success: false, message: 'Se está emitiendo ahora: esperá a que termine.' });
+  res.json({ success: db.deleteQueueItem(item.id) });
 });
 
 // Limpiar la cola
 router.post('/clear', (req: Request, res: Response) => {
-  const { status } = req.body;
-  db.clearQueue(status);
+  const status = String(req.body?.status || '');
+  if (!['emitida', 'error', 'pendiente'].includes(status)) return res.status(400).json({ success: false, message: 'Estado inválido.' });
+  const visibles = new Set(cuitsVisibles(usuarioDe(req)));
+  db.data.queue = (db.data.queue || []).filter(q => !(q.estado === status && visibles.has(String(q.cuitEmisor || ''))));
+  db.save();
   res.json({ success: true, message: 'Cola limpiada correctamente.' });
 });
 

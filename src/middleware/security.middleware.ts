@@ -115,6 +115,12 @@ setInterval(() => {
  * esquivar los límites.
  */
 function getClientIp(req: Request): string {
+  // En Render todo pasa por Cloudflare, que escribe CF-Connecting-IP con la IP real y
+  // pisa cualquier valor que mande el cliente. X-Forwarded-For, en cambio, se puede inventar.
+  if (process.env.NODE_ENV === 'production') {
+    const cf = String(req.headers['cf-connecting-ip'] || '').trim();
+    if (/^[0-9a-fA-F:.]{3,45}$/.test(cf)) return cf;
+  }
   return req.ip || req.socket.remoteAddress || '127.0.0.1';
 }
 

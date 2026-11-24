@@ -62,25 +62,21 @@ class QueueService {
   /**
    * Procesa en segundo plano todos los comprobantes pendientes de la cola
    */
-  public async processQueue(): Promise<{ total: number; exitosos: number; fallidos: number }> {
+  /** Procesa los pendientes. Con "cuits", solo los de esos CUITs (los del usuario que la pide). */
+  public async processQueue(cuits?: string[]): Promise<{ total: number; exitosos: number; fallidos: number }> {
     if (this.isProcessing) {
       logger.warn('COLA', 'La cola de facturación ya se encuentra en ejecución.');
       return { total: 0, exitosos: 0, fallidos: 0 };
     }
 
     this.isProcessing = true;
-    const queue = db.getQueue().filter(q => q.estado === 'pendiente');
+    const queue = db.getQueue().filter(q => q.estado === 'pendiente' && (!cuits || cuits.includes(String(q.cuitEmisor || ''))));
     let exitosos = 0;
     let fallidos = 0;
 
     logger.info('COLA', `Iniciando procesamiento de lote en ARCA: ${queue.length} pendientes...`);
 
-    const creds = db.getCredentials();
-    if (!creds.cuit) {
-      logger.error('COLA', 'No hay un CUIT emisor configurado para procesar la cola.');
-      this.isProcessing = false;
-      return { total: queue.length, exitosos: 0, fallidos: queue.length };
-    }
+    // Cada comprobante de la cola lleva su propio CUIT emisor (el del usuario que lo cargó)
 
     // Solo las cuentas en modo navegador necesitan sesión con Clave Fiscal: se abre una por CUIT
     // y se reutiliza en todo el lote. Las cuentas por web service no la usan.
@@ -108,8 +104,8 @@ class QueueService {
             tipoComprobante: item.tipoComprobante as any,
             concepto: item.concepto as any,
             condicionVenta: item.condicionVenta as any,
-            cuitEmisor: item.cuitEmisor || creds.cuit,
-            razonSocialEmisor: item.razonSocialEmisor || creds.razonSocial,
+            cuitEmisor: item.cuitEmisor,
+            razonSocialEmisor: item.razonSocialEmisor,
             receptor: {
               tipoDoc: item.docTipo as any,
               nroDoc: item.docNro,
@@ -165,8 +161,8 @@ class QueueService {
     return { total: queue.length, exitosos, fallidos };
   }
 
-  public getStatus() {
-    const queue = db.getQueue();
+  public getStatus(cuits?: string[]) {
+    const queue = db.getQueue().filter(q => !cuits || cuits.includes(String(q.cuitEmisor || '')));
     return {
       isProcessing: this.isProcessing,
       total: queue.length,

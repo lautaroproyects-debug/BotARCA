@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { userService } from '../services/auth/userService.js';
 import { authenticateToken, requireAdmin, AuthenticatedRequest } from '../middleware/auth.middleware.js';
 import { validateLogin, validateRegister } from '../middleware/validation.middleware.js';
+import { db } from '../database.js';
 
 const router = Router();
 
@@ -76,7 +77,11 @@ router.put('/me/password', authenticateToken, async (req: AuthenticatedRequest, 
 
 // Listar todos los usuarios
 router.get('/', authenticateToken, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  const users = userService.getAllUsers();
+  const cuentas = db.data.accounts || [];
+  const users = userService.getAllUsers().map(u => ({
+    ...u,
+    cuits: cuentas.filter(a => (a.usuarios || []).includes(u.id)).map(a => a.cuit),
+  }));
   res.json({ success: true, users });
 });
 
@@ -107,6 +112,22 @@ router.post('/', authenticateToken, requireAdmin, async (req: AuthenticatedReque
 });
 
 // Actualizar usuario
+// CUITs que puede usar un usuario (el admin los asigna o quita)
+router.put('/:id/cuits', authenticateToken, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  const id = String(req.params.id);
+  if (!userService.getUserById(id)) return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });
+  const pedidos = Array.isArray(req.body?.cuits) ? req.body.cuits.map((c: any) => String(c).replace(/\D/g, '')) : null;
+  if (!pedidos) return res.status(400).json({ success: false, message: 'Mandá la lista de CUITs.' });
+  for (const acc of db.data.accounts || []) {
+    const tiene = (acc.usuarios || []).includes(id);
+    const debe = pedidos.includes(acc.cuit);
+    if (tiene !== debe) {
+      db.definirUsuariosCuenta(acc.cuit, debe ? [...(acc.usuarios || []), id] : (acc.usuarios || []).filter(u => u !== id));
+    }
+  }
+  res.json({ success: true, message: 'CUITs del usuario actualizados.' });
+});
+
 router.put('/:id', authenticateToken, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const { name, email, role, active } = req.body;
   const result = await userService.updateUser(req.params.id as string, { name, email, role, active }, req.user!.id);

@@ -3,102 +3,68 @@ import { config } from '../config.js';
 import { logger } from '../services/logger.js';
 
 // ============================================================================
-// 1. CORS STRICTO Y CONFIGURABLE
+// 1. CORS: solo el dominio propio de BotArca (y localhost para desarrollo)
 // ============================================================================
 
 /**
- * Obtiene la lista de orígenes permitidos
+ * Orígenes permitidos: RENDER_EXTERNAL_URL (el dominio de la app), lo que se agregue en
+ * CORS_ORIGIN (separado por comas) y localhost solo fuera de producción.
+ * Antes se aceptaba CUALQUIER origen (incluso los no listados) y con credenciales.
  */
 function getAllowedOrigins(): string[] {
-  const custom = config.cors.allowedOrigins;
-  const defaults = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5173',
-    'https://botarca.onrender.com',
-    'http://botarca.onrender.com'
-  ];
-  if (config.keepAlive.externalUrl && !defaults.includes(config.keepAlive.externalUrl)) {
-    defaults.push(config.keepAlive.externalUrl.replace(/\/$/, ''));
+  const lista = new Set<string>(['https://botarca.onrender.com']);
+  const externa = (process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/+$/, '');
+  if (externa) lista.add(externa);
+  for (const o of config.cors.allowedOrigins) if (o && o !== '*') lista.add(o.replace(/\/+$/, ''));
+  if (process.env.NODE_ENV !== 'production') {
+    ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3999', 'http://localhost:5173'].forEach(o => lista.add(o));
   }
-  return Array.from(new Set([...defaults, ...custom]));
+  return [...lista];
 }
 
-/**
- * Middleware de CORS con validación de origen y soporte total para subdominios Render y desarrollo
- */
 export function secureCors(req: Request, res: Response, next: NextFunction) {
   const origin = req.headers.origin;
-  const allowedOrigins = getAllowedOrigins();
+  res.setHeader('Vary', 'Origin');
 
-  // Peticiones sin Origin (Same-Origin, direct navigation, Postman, curl, Keep-Alive local, SSE)
-  if (!origin) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+  // Sin cabecera Origin = mismo sitio, navegación directa, monitores (UptimeRobot) o curl:
+  // no es un pedido de otro sitio, no hace falta CORS.
+  if (!origin) return next();
+
+  // Mismo dominio desde el que se sirve el panel
+  const host = req.headers.host || '';
+  let mismoSitio = false;
+  try { mismoSitio = new URL(origin).host === host; } catch { /* origen inválido */ }
+
+  if (mismoSitio || getAllowedOrigins().includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') return res.status(204).end();
     return next();
   }
 
-  // Comprobar si el origen está permitido
-  let isAllowed = false;
-
-  if (
-    allowedOrigins.includes('*') ||
-    allowedOrigins.includes(origin) ||
-    origin.endsWith('.onrender.com') ||
-    origin.includes('localhost') ||
-    origin.includes('127.0.0.1')
-  ) {
-    isAllowed = true;
-  } else {
-    try {
-      const allowedUrl = new URL(origin);
-      const host = req.headers.host || '';
-      if (allowedUrl.host === host || origin.includes(host)) {
-        isAllowed = true;
-      }
-    } catch {
-      isAllowed = false;
-    }
-  }
-
-  if (isAllowed) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Max-Age', '86400'); // Cache preflight por 24h
-
-    if (req.method === 'OPTIONS') {
-      return res.status(204).end();
-    }
-    next();
-  } else {
-    logger.warn('SECURITY-CORS', `Aviso CORS para origen ${origin} en ${req.path} (permitiendo acceso seguro)`);
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-    if (req.method === 'OPTIONS') {
-      return res.status(204).end();
-    }
-    next();
-  }
+  logger.warn('SECURITY-CORS', `Pedido bloqueado desde un origen no permitido: ${String(origin).slice(0, 100)} → ${req.path}`);
+  if (req.method === 'OPTIONS') return res.status(403).end();
+  return res.status(403).json({ success: false, message: 'Origen no permitido.' });
 }
 
 // ============================================================================
-// 2. CONTENT SECURITY POLICY (CSP) & CABECERAS DE SEGURIDAD HTTP
+// 2. CONTENT SECURITY POLICY (CSP) Y CABECERAS DE SEGURIDAD
 // ============================================================================
 
 /**
- * Middleware para inyectar Content-Security-Policy y cabeceras de blindaje HTTP
+ * El panel solo usa: sus propios archivos, Google Fonts (CSS + fuentes) y estilos en línea
+ * (atributos style). Nada más puede cargar ni ejecutar código.
  */
 export function securityHeaders(req: Request, res: Response, next: NextFunction) {
-  // Directivas CSP compatibles con Tailwind CDN, FontAwesome, Google Fonts y conexiones API
   const cspDirectives = [
-    "default-src 'self' https://*.onrender.com http://localhost:*",
+    "default-src 'self'",
     "script-src 'self'",
-    "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com",
-    "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:",
-    "img-src 'self' data: https: blob:",
-    "connect-src 'self' https://*.onrender.com http://localhost:* https://*.supabase.co https://api.argentinadatos.com https://api.groq.com https://api.resend.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: blob:",
+    "connect-src 'self'",
     "frame-ancestors 'none'",
     "object-src 'none'",
     "base-uri 'self'",
@@ -106,6 +72,9 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
   ].join('; ');
 
   res.setHeader('Content-Security-Policy', cspDirectives);
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
@@ -140,15 +109,13 @@ setInterval(() => {
 /**
  * Obtiene la dirección IP real del cliente considerando proxies (Render, Cloudflare)
  */
+/**
+ * IP real del cliente. Con app.set('trust proxy', 1), Express toma la que agrega el proxy de
+ * Render. Antes se usaba la primera de X-Forwarded-For, que el cliente puede inventar para
+ * esquivar los límites.
+ */
 function getClientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
-  }
-  if (Array.isArray(forwarded) && forwarded.length > 0) {
-    return forwarded[0].trim();
-  }
-  return req.socket.remoteAddress || '127.0.0.1';
+  return req.ip || req.socket.remoteAddress || '127.0.0.1';
 }
 
 /**

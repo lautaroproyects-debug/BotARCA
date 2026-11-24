@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { db, ModoConexionArca } from '../database.js';
-import { supabase } from '../services/supabase.js';
 import { encrypt, decrypt } from '../crypto.js';
 import { requireAdmin } from '../middleware/auth.middleware.js';
 import { generarCsr, leerCertificado, normalizarPem, verificarParClave } from '../engine/ws/certificados.js';
@@ -8,77 +7,67 @@ import { estadoPlataforma, probarConexion } from '../engine/ws/wsfeEmisor.js';
 import { sanearDiseno, DISENO_GENERICO, ASUNTO_MAIL_DEFAULT, CUERPO_MAIL_DEFAULT } from '../engine/ws/diseno.js';
 import { generarPdfComprobante, datosEjemplo } from '../engine/ws/pdfComprobante.js';
 import { crearEnlace } from '../services/enlacesTemporales.js';
+import { usuarioDe, esAdmin, cuitsVisibles, puedeUsarCuit, cuitActivoDe, exigirAccesoCuit } from '../services/acceso.js';
+import { cuitValido } from '../services/aiParserService.js';
 
 const router = Router();
 
-// Listar todas las cuentas CUIT
+// Toda ruta con :cuit exige que el usuario tenga ese CUIT (el admin los tiene todos)
+router.param('cuit', (req, res, next, cuit) => exigirAccesoCuit(req, res, next, String(cuit)));
+
+/** Las cuentas que ve el usuario, con quién más las comparte solo si es admin. */
+function cuentasDe(req: Request) {
+  const usuario = usuarioDe(req);
+  const visibles = new Set(cuitsVisibles(usuario));
+  return db.getAccounts()
+    .filter(a => visibles.has(a.cuit))
+    .map(a => (esAdmin(usuario) ? a : { ...a, usuarios: undefined }));
+}
+
+// Mis CUITs
 router.get('/', (req: Request, res: Response) => {
-  const accounts = db.getAccounts();
-  const currentCreds = db.getCredentials();
-  res.json({
-    success: true,
-    activeCuit: currentCreds.cuit,
-    accounts,
-  });
+  res.json({ success: true, activeCuit: cuitActivoDe(usuarioDe(req)), accounts: cuentasDe(req) });
 });
 
-// Agregar o actualizar cuenta CUIT
-router.post('/', async (req: Request, res: Response) => {
-  const { cuit, claveFiscal, puntoVentaDefault, razonSocial, cuitRepresentante, nombreRepresentante, emailNotificaciones } = req.body;
+// Agregar o actualizar un CUIT propio
+router.post('/', (req: Request, res: Response) => {
+  const usuario = usuarioDe(req)!;
+  const { cuit, claveFiscal, puntoVentaDefault, razonSocial, cuitRepresentante, nombreRepresentante, emailNotificaciones } = req.body || {};
+  const limpio = String(cuit || '').replace(/\D/g, '');
+  if (limpio.length !== 11) return res.status(400).json({ success: false, message: 'El CUIT tiene que tener 11 números.' });
+  if (!cuitValido(limpio)) return res.status(400).json({ success: false, message: 'Ese CUIT no es válido: revisá los números.' });
+  if (!String(razonSocial || '').trim() || String(razonSocial).length > 150) return res.status(400).json({ success: false, message: 'Falta la razón social (hasta 150 caracteres).' });
+  const rep = String(cuitRepresentante || '').replace(/\D/g, '');
+  if (rep && (rep.length !== 11 || !cuitValido(rep))) return res.status(400).json({ success: false, message: 'El CUIT de quien representa no es válido.' });
+  if (emailNotificaciones && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(emailNotificaciones).trim())) return res.status(400).json({ success: false, message: 'El email no es válido.' });
+  const pv = Number(puntoVentaDefault) || 1;
+  if (!Number.isInteger(pv) || pv < 1 || pv > 99998) return res.status(400).json({ success: false, message: 'El punto de venta tiene que ser un número entre 1 y 99998.' });
 
-  if (!cuit) {
-    return res.status(400).json({ success: false, message: 'El CUIT de la empresa o cliente es obligatorio.' });
+  // Un CUIT que ya cargó otro usuario no se puede tomar: lo comparte el administrador
+  const existente = db.getAccountRecord(limpio);
+  if (existente && !esAdmin(usuario) && !(existente.usuarios || []).includes(usuario.id)) {
+    return res.status(409).json({ success: false, message: 'Ese CUIT ya lo administra otro usuario. Pedile al administrador que te lo comparta.' });
   }
-
-  const cleanCuit = cuit.replace(/\D/g, '');
-  if (cleanCuit.length !== 11) {
-    return res.status(400).json({ success: false, message: 'El CUIT debe tener 11 dígitos numéricos.' });
-  }
-
-  db.saveAccount({
-    cuit: cleanCuit,
-    razonSocial,
-    cuitRepresentante,
-    nombreRepresentante,
-    emailNotificaciones,
-    claveFiscal,
-    puntoVentaDefault: Number(puntoVentaDefault) || 1,
-  });
-
-  // Sincronizar en Supabase cuentas_arca
-  const supa = supabase.getClient();
-  if (supa) {
-    try {
-      const encrypted = db.data.credentials.encryptedClaveFiscal;
-      await supa.from('cuentas_arca').upsert({
-        cuit: cleanCuit,
-        razon_social: razonSocial || `Cuenta ${cleanCuit}`,
-        encrypted_clave_fiscal: encrypted,
-        punto_venta_default: Number(puntoVentaDefault) || 1,
-        activa: true,
-      }, { onConflict: 'cuit' });
-    } catch (e) {}
-  }
-
-  res.json({
-    success: true,
-    message: 'Cuenta fiscal guardada y activada correctamente.',
-    cuit: cleanCuit,
-    accounts: db.getAccounts(),
-  });
+  db.guardarCuenta({ cuit: limpio, razonSocial, cuitRepresentante: rep, nombreRepresentante, emailNotificaciones, claveFiscal: claveFiscal || undefined, puntoVentaDefault: pv }, usuario.id);
+  if (!db.getCuitActivoUsuario(usuario.id)) db.setCuitActivoUsuario(usuario.id, limpio);
+  res.json({ success: true, message: existente ? 'CUIT actualizado.' : 'CUIT agregado. Ahora configurá su conexión con ARCA.', cuit: limpio, accounts: cuentasDe(req) });
 });
 
-// Cambiar cuenta CUIT activa
+// Elegir con qué CUIT facturo (solo para mi usuario)
 router.post('/switch', (req: Request, res: Response) => {
-  const { cuit } = req.body;
-  if (!cuit) return res.status(400).json({ success: false, message: 'Falta especificar el CUIT.' });
+  const usuario = usuarioDe(req)!;
+  const cuit = String(req.body?.cuit || '').replace(/\D/g, '');
+  if (!puedeUsarCuit(usuario, cuit)) return res.status(404).json({ success: false, message: 'No tenés ese CUIT en tu cuenta.' });
+  db.setCuitActivoUsuario(usuario.id, cuit);
+  res.json({ success: true, activeCuit: cuit });
+});
 
-  const switched = db.switchActiveAccount(cuit.replace(/\D/g, ''));
-  if (switched) {
-    res.json({ success: true, message: `Cuenta activa cambiada a CUIT ${cuit}.`, activeCuit: cuit });
-  } else {
-    res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
-  }
+// Compartir un CUIT con usuarios (solo administrador)
+router.put('/:cuit/usuarios', requireAdmin, (req: Request, res: Response) => {
+  const ids = Array.isArray(req.body?.usuarios) ? req.body.usuarios.map(String).slice(0, 100) : null;
+  if (!ids) return res.status(400).json({ success: false, message: 'Mandá la lista de usuarios.' });
+  db.definirUsuariosCuenta(String(req.params.cuit), ids);
+  res.json({ success: true, message: 'Accesos actualizados.', accounts: cuentasDe(req) });
 });
 
 // ------------------------------------------------------------------
@@ -105,7 +94,7 @@ router.get('/ws/estado', (req: Request, res: Response) => {
 });
 
 // Configuración de la cuenta (modo, punto de venta de web service, datos del emisor para el PDF)
-router.put('/:cuit/ws', requireAdmin, (req: Request, res: Response) => {
+router.put('/:cuit/ws', (req: Request, res: Response) => {
   const acc = db.getAccountRecord(String(req.params.cuit));
   if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
 
@@ -130,7 +119,7 @@ router.put('/:cuit/ws', requireAdmin, (req: Request, res: Response) => {
 });
 
 // Genera la clave privada (queda cifrada en el servidor) y el pedido de certificado (CSR) para subir a ARCA
-router.post('/:cuit/ws/csr', requireAdmin, (req: Request, res: Response) => {
+router.post('/:cuit/ws/csr', (req: Request, res: Response) => {
   const acc = db.getAccountRecord(String(req.params.cuit));
   if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
   try {
@@ -144,7 +133,7 @@ router.post('/:cuit/ws/csr', requireAdmin, (req: Request, res: Response) => {
 });
 
 // Carga el certificado propio. La clave privada puede venir en el pedido o ser la del CSR generado en el panel.
-router.post('/:cuit/ws/certificado', requireAdmin, (req: Request, res: Response) => {
+router.post('/:cuit/ws/certificado', (req: Request, res: Response) => {
   const acc = db.getAccountRecord(String(req.params.cuit));
   if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
 
@@ -193,7 +182,7 @@ router.post('/:cuit/ws/certificado', requireAdmin, (req: Request, res: Response)
   });
 });
 
-router.delete('/:cuit/ws/certificado', requireAdmin, (req: Request, res: Response) => {
+router.delete('/:cuit/ws/certificado', (req: Request, res: Response) => {
   const acc = db.getAccountRecord(String(req.params.cuit));
   if (!acc) return res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
   db.updateAccountWs(acc.cuit, { certPropioPem: undefined, encryptedKeyPropio: undefined });
@@ -258,17 +247,17 @@ router.post('/:cuit/diseno/vista-previa', async (req: Request, res: Response) =>
   }
 });
 
-// Eliminar cuenta CUIT
+// Quitar un CUIT: el admin lo borra para todos; un usuario solo se lo quita a sí mismo
 router.delete('/:cuit', (req: Request, res: Response) => {
-  const { cuit } = req.params;
-  if (!cuit) return res.status(400).json({ success: false, message: 'Falta especificar el CUIT.' });
-
-  const deleted = db.deleteAccount(String(cuit));
-  if (deleted) {
-    res.json({ success: true, message: `Cuenta CUIT ${cuit} eliminada.`, accounts: db.getAccounts() });
-  } else {
-    res.status(404).json({ success: false, message: 'Cuenta CUIT no encontrada.' });
+  const usuario = usuarioDe(req)!;
+  const cuit = String(req.params.cuit);
+  if (esAdmin(usuario)) {
+    return db.deleteAccount(cuit)
+      ? res.json({ success: true, message: 'CUIT eliminado del sistema.', accounts: cuentasDe(req) })
+      : res.status(404).json({ success: false, message: 'CUIT no encontrado.' });
   }
+  const r = db.quitarAccesoCuenta(cuit, usuario.id);
+  res.json({ success: true, message: r === 'borrada' ? 'CUIT eliminado.' : 'Quitaste ese CUIT de tu cuenta.', accounts: cuentasDe(req) });
 });
 
 export default router;

@@ -36,8 +36,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Confianza en proxies (Render, Cloudflare, Load Balancers)
-app.set('trust proxy', 1);
+// En Render el pedido pasa por Cloudflare y por el balanceador de Render: dos saltos.
+// Con 2, req.ip es la IP que anotó Cloudflare (la real del usuario); lo que el cliente
+// mande en X-Forwarded-For queda a la izquierda y se ignora. Ajustable con TRUST_PROXY_HOPS.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || (process.env.NODE_ENV === 'production' ? 2 : 1));
 
 // 1. Blindaje de cabeceras HTTP y Content-Security-Policy (CSP)
 app.use(securityHeaders);

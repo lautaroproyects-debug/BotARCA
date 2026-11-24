@@ -136,6 +136,7 @@
           </div>
         </div>
 
+        <div id="avisoSinCuit" class="hoja oculto" style="margin-bottom:16px"><div class="seccion"><h2>Primero, tu CUIT</h2><p class="bajada">Para facturar necesitás cargar el CUIT con el que emitís y conectarlo con ARCA. Lleva unos minutos y se hace una sola vez.</p><div class="fila-acciones"><button class="boton principal" data-ir-ajustes="agregar">Agregar mi CUIT</button><button class="boton" data-ir-ajustes="guia">Ver la guía de ARCA</button></div></div></div>
         <div id="avisoSinPermiso" class="aviso atencion oculto" style="margin-bottom:16px"><svg class="ic"><use href="#i-alerta"/></svg><span>Tu usuario es de solo lectura: podés ver todo, pero para facturar un administrador tiene que habilitarte.</span></div>
 
         <!-- Paso a paso: una pregunta por pantalla, Enter para avanzar -->
@@ -332,15 +333,15 @@
       <section id="pantalla-ajustes" data-pantalla class="oculto">
         <div class="encabezado"><div><h1>Ajustes</h1><p id="ajustesUsuario"></p></div></div>
         <nav class="indice" aria-label="Secciones de ajustes">
-          <a href="#aj-empresas">Empresas</a><a href="#aj-clientes">Clientes</a><a href="#aj-usuarios" data-solo-admin>Usuarios</a>
-          <a href="#aj-correo" data-solo-admin>Correo e IA</a><a href="#aj-cuenta">Mi cuenta</a><a href="#aj-sistema">Sistema</a>
+          <a href="#aj-empresas">Mis CUITs</a><a href="#aj-clientes">Clientes</a><a href="#aj-usuarios" data-solo-admin>Usuarios</a>
+          <a href="#aj-correo" data-solo-admin>Correo e IA</a><a href="#aj-cuenta">Mi cuenta</a><a href="#aj-sistema" data-solo-admin>Sistema</a>
         </nav>
         <div class="pila">
           <div id="aj-empresas" class="hoja">
             <div class="seccion">
               <div class="encabezado" style="margin:0">
-                <div><h2>Empresas que facturan</h2><p class="bajada" style="margin:4px 0 0">Conexión con ARCA y diseño de la factura de cada una.</p></div>
-                <button class="boton chico" id="btnNuevaEmpresa"><svg class="ic"><use href="#i-mas"/></svg>Agregar</button>
+                <div><h2>Mis CUITs</h2><p class="bajada" style="margin:4px 0 0">Los CUITs con los que facturás: el tuyo, los de empresas que representás o los de clientes que te autorizaron. Cada uno tiene su conexión con ARCA y su diseño de factura.</p></div>
+                <div class="fila-acciones"><button class="boton chico" id="btnGuia"><svg class="ic"><use href="#i-info"/></svg>Guía de ARCA</button><button class="boton chico" id="btnNuevaEmpresa"><svg class="ic"><use href="#i-mas"/></svg>Agregar CUIT</button></div>
               </div>
             </div>
             <div id="listaEmpresas"></div>
@@ -404,7 +405,7 @@
             </div>
           </form>
 
-          <div id="aj-sistema" class="hoja">
+          <div id="aj-sistema" class="hoja" data-solo-admin>
             <div class="seccion">
               <h2>Sistema</h2>
               <p class="bajada" id="sisResumen">Registro en vivo de lo que hace el servidor.</p>
@@ -432,20 +433,25 @@
 
   <dialog id="dlgEmpresa" aria-labelledby="dlgEmpresaTitulo">
     <form method="dialog" id="formEmpresa" novalidate>
-      <div class="d-cab"><h2 id="dlgEmpresaTitulo">Empresa</h2><button type="button" class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
+      <div class="d-cab"><h2 id="dlgEmpresaTitulo">CUIT</h2><button type="button" class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
       <div class="d-cuerpo">
         <div class="campos dos">
-          <div><label for="empCuit">CUIT</label><input id="empCuit" inputmode="numeric" required></div>
-          <div><label for="empRazon">Razón social</label><input id="empRazon" required></div>
-          <div><label for="empEmail">Email de la empresa</label><input id="empEmail" type="email"><p class="ayuda">Los clientes que respondan el mail le escriben acá.</p></div>
-          <div><label for="empPv">Punto de venta (Comprobantes en línea)</label><input id="empPv" inputmode="numeric" value="1"></div>
+          <div><label for="empCuit">CUIT que factura</label><input id="empCuit" inputmode="numeric" placeholder="30712345678" required><p class="ayuda">El de la persona o empresa que emite las facturas.</p></div>
+          <div><label for="empRazon">Razón social o nombre</label><input id="empRazon" placeholder="Grupo Mit SRL" required></div>
+          <div><label for="empEmail">Email del emisor</label><input id="empEmail" type="email" placeholder="facturas@empresa.com"><p class="ayuda">Si un cliente responde el mail de la factura, le llega acá.</p></div>
+          <div><label for="empPv">Punto de venta de Comprobantes en línea</label><input id="empPv" inputmode="numeric" value="1"><p class="ayuda">El que ya usás en ARCA. El de web service se carga en "Conexión ARCA".</p></div>
         </div>
-        <details>
-          <summary class="tenue" style="cursor:pointer">Clave Fiscal (solo para el modo navegador)</summary>
-          <div class="campos dos" style="margin-top:12px">
-            <div><label for="empCuitRep">CUIT de quien ingresa</label><input id="empCuitRep" inputmode="numeric"></div>
-            <div><label for="empClave">Clave Fiscal</label><input id="empClave" type="password" autocomplete="off"><p class="ayuda">Se guarda cifrada. Con web service no hace falta.</p></div>
+        <fieldset class="representa">
+          <legend>¿Quién entra a ARCA por este CUIT?</legend>
+          <p class="ayuda" style="margin:0 0 10px">Si es una empresa o un cliente que representás, poné tu CUIT personal: con tu Clave Fiscal elegís "Representar a" este CUIT en ARCA. Si es tu propio CUIT, dejalo vacío.</p>
+          <div class="campos dos">
+            <div><label for="empCuitRep">CUIT de quien representa (opcional)</label><input id="empCuitRep" inputmode="numeric" placeholder="20123456786"></div>
+            <div><label for="empNombreRep">Nombre de quien representa (opcional)</label><input id="empNombreRep" placeholder="Juan Cruz"></div>
           </div>
+        </fieldset>
+        <details>
+          <summary class="tenue" style="cursor:pointer">Clave Fiscal (solo para el modo navegador, no recomendado)</summary>
+          <div style="margin-top:12px"><label for="empClave">Clave Fiscal de quien entra a ARCA</label><input id="empClave" type="password" autocomplete="off"><p class="ayuda">Se guarda cifrada. Con web service (lo recomendado) no hace falta y conviene dejarla vacía.</p></div>
         </details>
       </div>
       <div class="d-pie"><button type="button" class="boton" data-cerrar>Cancelar</button><button class="boton principal" type="submit">Guardar</button></div>
@@ -455,6 +461,7 @@
   <dialog id="dlgConexion" aria-labelledby="dlgConexionTitulo">
     <div class="d-cab"><div><h2 id="dlgConexionTitulo">Conexión con ARCA</h2><p class="tenue" id="conEmpresa"></p></div><button class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <div class="d-cuerpo">
+      <div class="aviso info"><svg class="ic"><use href="#i-info"/></svg><span>¿Primera vez? Seguí la <button type="button" class="boton texto" id="btnGuiaDesdeConexion" style="padding:0;min-height:0;vertical-align:baseline">guía paso a paso</button>: te dice qué hacer en ARCA y qué cargar acá.</span></div>
       <div>
         <label for="conModo">Cómo se conecta</label>
         <select id="conModo">
@@ -570,10 +577,76 @@
         <div><label for="usrEmail">Email</label><input id="usrEmail" type="email" required></div>
         <div><label for="usrRol">Rol</label><select id="usrRol"><option value="operator">Operador (factura)</option><option value="viewer">Solo lectura</option><option value="admin">Administrador</option></select></div>
         <div id="usrActivoCampo"><label for="usrActivo">Estado</label><select id="usrActivo"><option value="1">Activo</option><option value="0">Desactivado</option></select></div>
+        <fieldset class="ancho-total representa" id="usrCuitsCampo"><legend>CUITs que puede usar</legend><p class="ayuda" style="margin:0 0 8px">Además de los que cargue él mismo.</p><div id="usrCuits" class="checks"></div></fieldset>
         <div class="ancho-total" id="usrClaveCampo"><label for="usrClave">Contraseña inicial</label><input id="usrClave" type="password" autocomplete="new-password"><p class="ayuda">Mínimo 8 caracteres, con letras y números. También puede crearla con "Olvidé mi contraseña".</p></div>
       </div>
       <div class="d-pie"><button type="button" class="boton texto peligro oculto" id="btnBorrarUsuario">Eliminar</button><button type="button" class="boton oculto" id="btnResetClave">Asignar contraseña</button><button type="button" class="boton" data-cerrar>Cancelar</button><button class="boton principal" type="submit">Guardar</button></div>
     </form>
+  </dialog>
+
+  <dialog id="dlgGuia" class="guia" aria-labelledby="dlgGuiaTitulo" style="width:min(760px,calc(100vw - 24px))">
+    <div class="d-cab">
+      <div><h2 id="dlgGuiaTitulo">Conectar un CUIT con ARCA</h2><p class="tenue" id="guiaCuit">Se hace una sola vez por CUIT. Tildá cada paso a medida que lo terminás: queda guardado.</p></div>
+      <button class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="d-cuerpo">
+      <div class="guia-progreso" aria-hidden="true"><span id="guiaBarra"></span></div>
+      <p class="tenue" id="guiaAvance" style="margin:-8px 0 0;font-size:13px"></p>
+
+      <section class="guia-bloque">
+        <h3><span class="guia-num">1</span>Antes de empezar</h3>
+        <ul class="guia-pasos">
+          <li><label><input type="checkbox" data-paso="clave"><span><strong>Clave Fiscal nivel 3</strong> de quien administra el CUIT. Si no la tenés en nivel 3, se sube desde la app "Mi ARCA" (validación con DNI) o en una dependencia de ARCA.</span></label></li>
+          <li><label><input type="checkbox" data-paso="representar"><span><strong>Si es una empresa o un cliente que representás:</strong> entrás a ARCA con <em>tu</em> Clave Fiscal y, arriba a la derecha, elegís <em>"Representar a"</em> → el CUIT que vas a configurar. Hacelo <strong>antes de cada trámite</strong> de esta guía.</span></label></li>
+          <li><label><input type="checkbox" data-paso="cuit-cargado"><span><strong>Cargá el CUIT en BotArca:</strong> Ajustes → Mis CUITs → Agregar CUIT.</span></label></li>
+        </ul>
+        <a class="boton chico" href="https://auth.afip.gob.ar/contribuyente_/login.xhtml" target="_blank" rel="noopener">Abrir ARCA ↗</a>
+      </section>
+
+      <section class="guia-bloque">
+        <h3><span class="guia-num">2</span>Elegí cómo se conecta</h3>
+        <div class="segmentos" role="tablist" aria-label="Forma de conexión">
+          <button role="tab" data-guia-camino="propio" aria-selected="true">Certificado propio</button>
+          <button role="tab" data-guia-camino="delegado" aria-selected="false">Delegado</button>
+        </div>
+        <p class="ayuda" id="guiaCaminoAyuda"></p>
+
+        <ol class="guia-pasos" data-camino="propio">
+          <li><label><input type="checkbox" data-paso="p-csr"><span><strong>En BotArca:</strong> Mis CUITs → <em>Conexión ARCA</em> → <em>Generar pedido (CSR)</em> → <em>Descargar .csr</em>.</span></label></li>
+          <li><label><input type="checkbox" data-paso="p-servicio"><span><strong>En ARCA:</strong> buscá el servicio <em>"Administración de Certificados Digitales"</em>. Si no aparece: <em>"Administrador de Relaciones de Clave Fiscal"</em> → <em>Adherir servicio</em> → ARCA → <em>Administración de Certificados Digitales</em> → Confirmar, y volvé a entrar.</span></label></li>
+          <li><label><input type="checkbox" data-paso="p-alias"><span>Tocá <em>"Agregar alias"</em>, poné un nombre (por ejemplo <code>botarca</code>), elegí el archivo <code>.csr</code> que descargaste y confirmá.</span></label></li>
+          <li><label><input type="checkbox" data-paso="p-crt"><span>Entrá al alias que creaste y <strong>descargá el certificado</strong> (archivo <code>.crt</code>). Abrilo con el Bloc de notas y copiá todo el texto.</span></label></li>
+          <li><label><input type="checkbox" data-paso="p-cargar"><span><strong>En BotArca:</strong> Conexión ARCA → pegá el texto en <em>"Certificado de ARCA"</em> → <em>Cargar certificado</em>.</span></label></li>
+          <li><label><input type="checkbox" data-paso="p-relacion"><span><strong>En ARCA:</strong> <em>"Administrador de Relaciones de Clave Fiscal"</em> → <em>Nueva relación</em> → <em>Buscar</em> → ARCA → <em>WebServices</em> → <em>Facturación Electrónica</em>. En <em>Representante</em> elegí el <strong>computador fiscal</strong> con el alias del paso 3 → <em>Confirmar</em>.</span></label></li>
+        </ol>
+        <div class="aviso info" data-camino="propio" style="margin-top:12px"><svg class="ic"><use href="#i-info"/></svg><span><strong>Para probar sin validez fiscal (homologación):</strong> los pasos 2 a 4 se hacen en el servicio <em>"WSASS – Autogestión Certificados Homologación"</em> (se adhiere igual que arriba). Ahí también creás la autorización al servicio <code>wsfe</code> para tu alias, en lugar del paso 6.</span></div>
+
+        <ol class="guia-pasos oculto" data-camino="delegado">
+          <li><label><input type="checkbox" data-paso="d-relacion"><span><strong>En ARCA:</strong> <em>"Administrador de Relaciones de Clave Fiscal"</em> → <em>Nueva relación</em>.</span></label></li>
+          <li><label><input type="checkbox" data-paso="d-servicio"><span>En <em>Servicio</em> tocá <em>Buscar</em> → ARCA → <em>WebServices</em> → <em>Facturación Electrónica</em>.</span></label></li>
+          <li><label><input type="checkbox" data-paso="d-representante"><span>En <em>Representante</em> tocá <em>Buscar</em> y poné el CUIT de la plataforma: <strong class="dato" id="guiaCuitPlataforma">(lo ves cuando el administrador lo configura)</strong> → <em>Confirmar</em>.</span></label></li>
+          <li><label><input type="checkbox" data-paso="d-modo"><span><strong>En BotArca:</strong> Conexión ARCA → <em>Cómo se conecta</em> → <em>Delegado a la plataforma</em> (o Automático) → Guardar.</span></label></li>
+        </ol>
+      </section>
+
+      <section class="guia-bloque">
+        <h3><span class="guia-num">3</span>Punto de venta para web service</h3>
+        <ol class="guia-pasos">
+          <li><label><input type="checkbox" data-paso="pv-alta"><span><strong>En ARCA:</strong> <em>"Administración de puntos de venta y domicilios"</em> → <em>A/B/M de Puntos de venta</em> → <em>Agregar</em>.</span></label></li>
+          <li><label><input type="checkbox" data-paso="pv-sistema"><span>Número: uno que <strong>no uses</strong> (por ejemplo, si facturás con el 1, poné el 2). Sistema: <em>"Factura Electrónica - Monotributo - Web Services"</em> si sos monotributista, o <em>"RECE para aplicativo y web services"</em> si sos Responsable Inscripto. Elegí el domicilio y aceptá.</span></label></li>
+          <li><label><input type="checkbox" data-paso="pv-botarca"><span><strong>En BotArca:</strong> Conexión ARCA → <em>Punto de venta de web service</em> → ese número → <em>Guardar</em>. Completá también domicilio, condición frente al IVA, Ingresos Brutos e inicio de actividades: salen en el PDF.</span></label></li>
+        </ol>
+      </section>
+
+      <section class="guia-bloque">
+        <h3><span class="guia-num">4</span>Probar</h3>
+        <ol class="guia-pasos">
+          <li><label><input type="checkbox" data-paso="probar"><span><strong>En BotArca:</strong> Conexión ARCA → <em>Probar</em>. Si todo sale en verde, ya podés facturar. Si algo sale en rojo, el mensaje dice qué paso falta.</span></label></li>
+        </ol>
+        <p class="ayuda">Arriba ves si estás en <strong>Modo prueba</strong> (facturas sin validez fiscal) o en <strong>ARCA real</strong>. Lo cambia el administrador.</p>
+      </section>
+    </div>
+    <div class="d-pie"><button class="boton" data-cerrar>Cerrar</button><button class="boton principal" id="btnGuiaConexion">Ir a Conexión ARCA</button></div>
   </dialog>
 
   <div id="avisos" aria-live="polite"></div>

@@ -175,6 +175,7 @@ async function iniciarApp() {
   await Promise.all([cargarCuentas(), cargarClientes(), cargarPlataforma()]);
   cargarCola();
   cambiarModo(estado.modo || 'paso');
+  actualizarAvisoSinCuit();
   ir(location.hash.replace('#', '') || 'facturar');
 }
 
@@ -184,13 +185,22 @@ function ir(pantalla) {
   $$('.nav button').forEach(b => b.setAttribute('aria-current', b.dataset.ir === pantalla ? 'page' : 'false'));
   if (location.hash !== '#' + pantalla) history.replaceState(null, '', '#' + pantalla);
   if (pantalla === 'comprobantes') cargarComprobantes();
-  if (pantalla === 'ajustes') { renderEmpresas(); renderClientes(); if (esAdmin()) { cargarUsuarios(); cargarCorreo(); } conectarLogs(); }
+  if (pantalla === 'ajustes') { renderEmpresas(); renderClientes(); if (esAdmin()) { cargarUsuarios(); cargarCorreo(); conectarLogs(); } }
   window.scrollTo({ top: 0 });
 }
 $$('.nav button').forEach(b => b.addEventListener('click', () => ir(b.dataset.ir)));
 $$('.indice a').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); $(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
 
 /* ---------------- Cuentas / emisor ---------------- */
+function actualizarAvisoSinCuit() {
+  const sinCuit = !estado.cuentas.length;
+  $('#avisoSinCuit').classList.toggle('oculto', !sinCuit || !puedeOperar());
+}
+$$('[data-ir-ajustes]').forEach(b => b.addEventListener('click', () => {
+  ir('ajustes');
+  if (b.dataset.irAjustes === 'agregar') abrirEmpresa(); else abrirGuia('');
+}));
+
 async function cargarCuentas() {
   const r = await api('/api/accounts');
   if (!r.ok) return;
@@ -199,9 +209,10 @@ async function cargarCuentas() {
   const sel = $('#selEmisor');
   sel.innerHTML = estado.cuentas.length
     ? estado.cuentas.map(c => `<option value="${c.cuit}" ${c.cuit === estado.cuitActivo ? 'selected' : ''}>${esc(c.razonSocial || c.cuit)} · ${fmtCuit(c.cuit)}</option>`).join('')
-    : '<option value="">Sin empresa cargada</option>';
+    : '<option value="">Agregá un CUIT en Ajustes</option>';
   actualizarBadgeAmbiente();
   renderEmpresas();
+  actualizarAvisoSinCuit();
 }
 
 $('#selEmisor').addEventListener('change', async (e) => {
@@ -1120,18 +1131,23 @@ function renderEmpresas() {
   caja.innerHTML = estado.cuentas.length ? estado.cuentas.map(c => {
     const ws = c.ws || {};
     const prueba = ws.ultimaPrueba;
+    const listo = prueba?.ok;
+    const compartido = esAdmin() && Array.isArray(c.usuarios) ? c.usuarios.length : null;
     return `<div class="cuenta">
-      <div class="titulo"><div style="min-width:0"><h3>${esc(c.razonSocial || c.cuit)}</h3><span class="tenue dato">${fmtCuit(c.cuit)}</span></div>
+      <div class="titulo"><div style="min-width:0"><h3>${esc(c.razonSocial || c.cuit)}</h3><span class="tenue dato">${fmtCuit(c.cuit)}</span>${c.cuitRepresentante ? ` <span class="tenue">· representado por ${esc(c.nombreRepresentante || fmtCuit(c.cuitRepresentante))}</span>` : ''}</div>
         ${c.cuit === estado.cuitActivo ? '<span class="etiqueta-estado e-ok">Factura ahora</span>' : `<button class="boton chico" data-usar="${c.cuit}">Usar para facturar</button>`}</div>
-      <p class="tenue" style="font-size:14px">${esc(MODOS[ws.modo || 'auto'][0])}${ws.tieneCertificadoPropio ? ' · certificado propio' : ''}${ws.puntoVentaWs ? ` · punto de venta ${ws.puntoVentaWs}` : ' · sin punto de venta de web service'} · diseño ${c.disenoModo === 'personalizado' ? 'personalizado' : 'genérico'}
-        ${prueba ? `<br><span style="color:${prueba.ok ? 'var(--ok)' : 'var(--error)'}">${prueba.ok ? 'Conexión probada OK' : 'La última prueba falló'}</span> · ${new Date(prueba.fecha).toLocaleDateString('es-AR')}` : ''}</p>
+      <p style="font-size:14px;margin:0">
+        <span class="etiqueta-estado ${listo ? 'e-ok' : prueba ? 'e-error' : 'e-prueba'}">${listo ? 'Conectado con ARCA' : prueba ? 'Revisar conexión' : 'Falta conectar con ARCA'}</span>
+        <span class="tenue"> ${esc(MODOS[ws.modo || 'auto'][0])}${ws.tieneCertificadoPropio ? ' · certificado propio' : ''}${ws.puntoVentaWs ? ` · punto de venta ${ws.puntoVentaWs}` : ''} · diseño ${c.disenoModo === 'personalizado' ? 'personalizado' : 'genérico'}${compartido !== null ? ` · ${compartido} usuario(s)` : ''}</span></p>
       <div class="fila-acciones">
         <button class="boton chico" data-conexion="${c.cuit}">${ic('enchufe')}Conexión ARCA</button>
+        ${listo ? '' : `<button class="boton chico" data-guia="${c.cuit}">${ic('info')}Guía paso a paso</button>`}
         <button class="boton chico" data-diseno="${c.cuit}">${ic('factura')}Diseño de factura</button>
         <button class="boton chico texto" data-editar-emp="${c.cuit}">Editar</button>
-        <button class="boton chico texto peligro" data-borrar-emp="${c.cuit}">Eliminar</button>
+        <button class="boton chico texto peligro" data-borrar-emp="${c.cuit}">${esAdmin() ? 'Eliminar' : 'Quitar'}</button>
       </div></div>`;
-  }).join('') : '<div class="vacio"><h3>Cargá la primera empresa</h3><p>Con su CUIT y razón social; después configurás la conexión con ARCA.</p></div>';
+  }).join('') : `<div class="vacio"><h3>Agregá tu primer CUIT</h3><p>El tuyo, el de una empresa que representás o el de un cliente que te autorizó. Después lo conectás con ARCA siguiendo la guía.</p>
+      <div class="fila-acciones" style="justify-content:center;margin-top:14px"><button class="boton principal" data-agregar-emp>Agregar CUIT</button><button class="boton" data-guia="">Ver la guía</button></div></div>`;
 }
 
 $('#listaEmpresas').addEventListener('click', async (e) => {
@@ -1139,10 +1155,15 @@ $('#listaEmpresas').addEventListener('click', async (e) => {
   if (!b) return;
   if (b.dataset.usar) { $('#selEmisor').value = b.dataset.usar; $('#selEmisor').dispatchEvent(new Event('change')); setTimeout(renderEmpresas, 300); }
   if (b.dataset.conexion) abrirConexion(b.dataset.conexion);
+  if (b.dataset.guia !== undefined) abrirGuia(b.dataset.guia);
   if (b.dataset.diseno) abrirDiseno(b.dataset.diseno);
   if (b.dataset.editarEmp) abrirEmpresa(b.dataset.editarEmp);
+  if (b.dataset.agregarEmp !== undefined) abrirEmpresa();
   if (b.dataset.borrarEmp) {
-    if (!confirm('¿Eliminar esta empresa del sistema? Los comprobantes ya emitidos no se borran.')) return;
+    const pregunta = esAdmin()
+      ? '¿Eliminar este CUIT del sistema para todos los usuarios? Los comprobantes ya emitidos no se borran.'
+      : '¿Quitar este CUIT de tu cuenta? Si nadie más lo usa, se elimina. Los comprobantes ya emitidos no se borran.';
+    if (!confirm(pregunta)) return;
     const r = await api(`/api/accounts/${b.dataset.borrarEmp}`, { method: 'DELETE' });
     aviso(r.data.message, r.ok ? 'ok' : 'error');
     if (r.ok) cargarCuentas();
@@ -1150,26 +1171,87 @@ $('#listaEmpresas').addEventListener('click', async (e) => {
 });
 
 $('#btnNuevaEmpresa').addEventListener('click', () => abrirEmpresa());
+$('#btnGuia').addEventListener('click', () => abrirGuia(estado.cuitActivo));
 function abrirEmpresa(cuit) {
   const c = estado.cuentas.find(x => x.cuit === cuit);
-  $('#dlgEmpresaTitulo').textContent = c ? 'Editar empresa' : 'Agregar empresa';
+  $('#dlgEmpresaTitulo').textContent = c ? 'Editar CUIT' : 'Agregar CUIT';
   $('#empCuit').value = c?.cuit || ''; $('#empCuit').readOnly = !!c;
   $('#empRazon').value = c?.razonSocial || '';
   $('#empEmail').value = c?.emailNotificaciones || '';
   $('#empPv').value = c?.puntoVentaDefault || 1;
   $('#empCuitRep').value = c?.cuitRepresentante || '';
+  $('#empNombreRep').value = c?.nombreRepresentante || '';
   $('#empClave').value = '';
+  $$('#formEmpresa [aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
   $('#dlgEmpresa').showModal();
 }
 $('#formEmpresa').addEventListener('submit', async (e) => {
   e.preventDefault();
   const cuit = $('#empCuit').value.replace(/\D/g, '');
-  if (cuit.length !== 11) return aviso('El CUIT tiene que tener 11 números.', 'error');
+  const rep = $('#empCuitRep').value.replace(/\D/g, '');
+  const marcar = (id, mal) => $('#' + id).setAttribute('aria-invalid', String(!!mal));
+  marcar('empCuit', !cuitOk(cuit)); marcar('empRazon', !$('#empRazon').value.trim()); marcar('empCuitRep', rep && !cuitOk(rep));
+  if (!cuitOk(cuit)) return aviso(cuit.length !== 11 ? 'El CUIT tiene que tener 11 números.' : 'Ese CUIT no es válido: revisá los números.', 'error');
   if (!$('#empRazon').value.trim()) return aviso('Falta la razón social.', 'error');
-  const r = await api('/api/accounts', { method: 'POST', body: { cuit, razonSocial: $('#empRazon').value.trim(), emailNotificaciones: $('#empEmail').value.trim(), puntoVentaDefault: Number($('#empPv').value) || 1, cuitRepresentante: $('#empCuitRep').value.replace(/\D/g, '') || undefined, claveFiscal: $('#empClave').value || undefined } });
+  if (rep && !cuitOk(rep)) return aviso('El CUIT de quien representa no es válido.', 'error');
+  const nuevo = !estado.cuentas.some(c => c.cuit === cuit);
+  const r = await api('/api/accounts', { method: 'POST', body: { cuit, razonSocial: $('#empRazon').value.trim(), emailNotificaciones: $('#empEmail').value.trim(), puntoVentaDefault: Number($('#empPv').value) || 1, cuitRepresentante: rep, nombreRepresentante: $('#empNombreRep').value.trim(), claveFiscal: $('#empClave').value || undefined } });
   aviso(r.data.message, r.ok ? 'ok' : 'error');
-  if (r.ok) { $('#dlgEmpresa').close(); cargarCuentas(); }
+  if (!r.ok) return;
+  $('#dlgEmpresa').close();
+  await cargarCuentas();
+  // Recién cargado: el siguiente paso natural es conectarlo con ARCA
+  if (nuevo) abrirGuia(cuit);
 });
+
+/* ---------------- Guía de ARCA ---------------- */
+let guiaCuit = '';
+const claveGuia = () => `botarca_guia_${guiaCuit || 'general'}`;
+function leerGuia() { try { return JSON.parse(localStorage.getItem(claveGuia()) || '{}'); } catch { return {}; } }
+function guardarGuia(v) { try { localStorage.setItem(claveGuia(), JSON.stringify(v)); } catch {} }
+
+async function abrirGuia(cuit) {
+  guiaCuit = cuit || '';
+  const c = estado.cuentas.find(x => x.cuit === guiaCuit);
+  $('#guiaCuit').textContent = c
+    ? `Para ${c.razonSocial} · ${fmtCuit(c.cuit)}. Se hace una sola vez. Tildá cada paso cuando lo termines: queda guardado.`
+    : 'Se hace una sola vez por CUIT. Tildá cada paso cuando lo termines: queda guardado.';
+  if (!estado.plataforma) await cargarPlataforma();
+  const p = estado.plataforma?.plataforma;
+  $('#guiaCuitPlataforma').textContent = p?.configurado ? fmtCuit(p.cuit) : '(todavía no configurado: usá el certificado propio)';
+  const guardado = leerGuia();
+  $$('#dlgGuia [data-paso]').forEach(ch => { ch.checked = !!guardado[ch.dataset.paso]; });
+  if (c) $('#dlgGuia [data-paso="cuit-cargado"]').checked = true;
+  guiaCamino(guardado.camino || (c?.ws?.modo === 'delegado' ? 'delegado' : 'propio'));
+  $('#btnGuiaConexion').classList.toggle('oculto', !c);
+  $('#dlgGuia').showModal();
+}
+
+function guiaCamino(camino) {
+  $$('[data-guia-camino]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.guiaCamino === camino)));
+  $$('#dlgGuia [data-camino]').forEach(el => el.classList.toggle('oculto', el.dataset.camino !== camino));
+  $('#guiaCaminoAyuda').textContent = camino === 'propio'
+    ? 'Recomendado si el CUIT es tuyo o de tu empresa: todo queda a su nombre y no dependés de nadie.'
+    : 'Más rápido: no manejás certificados. El CUIT le da permiso a la plataforma para facturar en su nombre.';
+  const g = leerGuia(); g.camino = camino; guardarGuia(g);
+  guiaProgreso();
+}
+
+function guiaProgreso() {
+  const visibles = $$('#dlgGuia [data-paso]').filter(ch => !ch.closest('.oculto'));
+  const hechos = visibles.filter(ch => ch.checked).length;
+  $('#guiaBarra').style.width = `${Math.round((hechos / visibles.length) * 100)}%`;
+  $('#guiaAvance').textContent = hechos === visibles.length ? 'Listo: todos los pasos hechos.' : `${hechos} de ${visibles.length} pasos hechos`;
+}
+
+$$('[data-guia-camino]').forEach(b => b.addEventListener('click', () => guiaCamino(b.dataset.guiaCamino)));
+$('#dlgGuia').addEventListener('change', (e) => {
+  const ch = e.target.closest('[data-paso]');
+  if (!ch) return;
+  const g = leerGuia(); g[ch.dataset.paso] = ch.checked; guardarGuia(g);
+  guiaProgreso();
+});
+$('#btnGuiaConexion').addEventListener('click', () => { $('#dlgGuia').close(); abrirConexion(guiaCuit); });
 
 let conCuit = '';
 async function abrirConexion(cuit) {
@@ -1201,6 +1283,7 @@ function pintarCert(tiene) {
   el.textContent = tiene ? 'Cargado' : 'No cargado';
   $('#btnQuitarCert').classList.toggle('oculto', !tiene);
 }
+$('#btnGuiaDesdeConexion').addEventListener('click', () => { $('#dlgConexion').close(); abrirGuia(conCuit); });
 $('#conModo').addEventListener('change', () => { $('#conModoAyuda').textContent = MODOS[$('#conModo').value][1]; });
 
 async function refrescarCuentaConexion() {
@@ -1379,10 +1462,13 @@ const ROL = { admin: 'Administrador', operator: 'Operador', viewer: 'Solo lectur
 async function cargarUsuarios() {
   const r = await api('/api/users');
   usuarios = r.ok ? r.data.users || [] : [];
-  $('#listaUsuarios').innerHTML = usuarios.map(u => `<li><button class="fila" data-usr="${u.id}">
+  const nombreCuit = (c) => (estado.cuentas.find(a => a.cuit === c)?.razonSocial || fmtCuit(c));
+  $('#listaUsuarios').innerHTML = usuarios.length ? usuarios.map(u => `<li><button class="fila" data-usr="${u.id}">
     <div style="min-width:0"><div class="principal-txt">${esc(u.name)} <span class="tenue">@${esc(u.username)}</span></div>
-      <div class="secundario">${esc(u.email)} · ${u.lastLoginAt ? 'último ingreso ' + new Date(u.lastLoginAt).toLocaleDateString('es-AR') : 'nunca ingresó'}</div></div>
-    <span class="etiqueta-estado ${!u.active ? 'e-error' : u.role === 'viewer' ? 'e-espera' : 'e-ok'}">${u.active ? ROL[u.role] : 'Desactivado'}</span></button></li>`).join('');
+      <div class="secundario">${esc(u.email)} · ${u.lastLoginAt ? 'último ingreso ' + new Date(u.lastLoginAt).toLocaleDateString('es-AR') : 'nunca ingresó'}</div>
+      <div class="secundario">${u.role === 'admin' ? 'Ve todos los CUITs' : (u.cuits || []).length ? 'CUITs: ' + (u.cuits || []).map(c => esc(nombreCuit(c))).join(', ') : 'Sin CUITs todavía'}</div></div>
+    <span class="etiqueta-estado ${!u.active ? 'e-error' : u.role === 'viewer' ? 'e-espera' : 'e-ok'}">${u.active ? ROL[u.role] : 'Desactivado'}</span></button></li>`).join('')
+    : '<li class="vacio"><p>Todavía no hay otros usuarios.</p></li>';
 }
 let usrId = '';
 function abrirUsuario(id) {
@@ -1396,18 +1482,39 @@ function abrirUsuario(id) {
   $('#usrActivoCampo').classList.toggle('oculto', !u);
   $('#btnBorrarUsuario').classList.toggle('oculto', !u || u.id === estado.usuario.id);
   $('#btnResetClave').classList.toggle('oculto', !u);
+  // CUITs que puede usar (el admin los ve todos, por eso no se le asignan)
+  const suyos = new Set(u?.cuits || []);
+  $('#usrCuits').innerHTML = estado.cuentas.length
+    ? estado.cuentas.map(c => `<label><input type="checkbox" value="${c.cuit}" ${suyos.has(c.cuit) ? 'checked' : ''}> ${esc(c.razonSocial)} <span class="tenue dato">${fmtCuit(c.cuit)}</span></label>`).join('')
+    : '<p class="ayuda" style="margin:0">Todavía no hay CUITs cargados.</p>';
+  $('#usrCuitsCampo').classList.toggle('oculto', $('#usrRol').value === 'admin');
   $('#dlgUsuario').showModal();
 }
+$('#usrRol').addEventListener('change', () => $('#usrCuitsCampo').classList.toggle('oculto', $('#usrRol').value === 'admin'));
 $('#btnNuevoUsuario').addEventListener('click', () => abrirUsuario());
 $('#listaUsuarios').addEventListener('click', (e) => { const b = e.target.closest('[data-usr]'); if (b) abrirUsuario(b.dataset.usr); });
 $('#formUsuario').addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = { name: $('#usrNombre').value.trim(), email: $('#usrEmail').value.trim(), role: $('#usrRol').value };
+  if (body.name.length < 2) return aviso('Falta el nombre.', 'error');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) return aviso('El email no es válido.', 'error');
+  if (!usrId) {
+    const clave = $('#usrClave').value;
+    if (clave.length < 8 || !/[A-Za-z]/.test(clave) || !/\d/.test(clave)) return aviso('La contraseña inicial necesita 8 caracteres o más, con letras y números.', 'error');
+  }
+  const btn = e.submitter;
+  ocupado(btn, true);
   const r = usrId
     ? await api(`/api/users/${usrId}`, { method: 'PUT', body: { ...body, active: $('#usrActivo').value === '1' } })
     : await api('/api/users', { method: 'POST', body: { ...body, username: $('#usrUsuario').value.trim(), password: $('#usrClave').value } });
+  if (r.ok && body.role !== 'admin') {
+    const id = usrId || r.data.user?.id;
+    const cuits = $$('#usrCuits input:checked').map(i => i.value);
+    if (id) await api(`/api/users/${id}/cuits`, { method: 'PUT', body: { cuits } });
+  }
+  ocupado(btn, false);
   aviso(r.data.message, r.ok ? 'ok' : 'error');
-  if (r.ok) { $('#dlgUsuario').close(); cargarUsuarios(); }
+  if (r.ok) { $('#dlgUsuario').close(); await cargarCuentas(); cargarUsuarios(); }
 });
 $('#btnResetClave').addEventListener('click', async () => {
   const clave = prompt('Contraseña nueva para este usuario (mínimo 8 caracteres, con letras y números). Se le cierran las sesiones y le llega un aviso por mail.');

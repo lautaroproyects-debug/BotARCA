@@ -79,8 +79,10 @@ class ClientesService {
 
   public async save(datos: any, usuario: { id: string; role: string }): Promise<ClienteRecord> {
     const cuit = String(datos.cuit || '').replace(/\D/g, '');
+    // Editar por id: el dueño (o el admin). Por CUIT: solo dentro de la agenda del propio usuario,
+    // así nunca se pisa el cliente de otro aunque tenga el mismo CUIT.
     const propios = this.getAll(usuario);
-    let existente = (datos.id && propios.find(c => c.id === datos.id)) || propios.find(c => c.cuit === cuit && (c.usuarioId === usuario.id || usuario.role === 'admin'));
+    let existente = (datos.id && propios.find(c => c.id === datos.id)) || this.lista.find(c => c.cuit === cuit && c.usuarioId === usuario.id);
     const base = {
       cuit,
       tipoDoc: datos.tipoDoc || (cuit.length === 11 ? 'CUIT' : 'DNI'),

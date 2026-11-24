@@ -1,5 +1,5 @@
-# Imagen base oficial de Node.js en Debian Bookworm Slim
-FROM node:20-bookworm-slim
+# Imagen base oficial de Node.js 22 (la librería de Supabase ya no funciona con Node 20)
+FROM node:22-bookworm-slim
 
 # Instalar dependencias del sistema necesarias para Chromium y Playwright Headless
 RUN apt-get update && apt-get install -y --no-install-recommends \

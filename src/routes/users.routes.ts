@@ -3,6 +3,7 @@ import { userService } from '../services/auth/userService.js';
 import { authenticateToken, requireAdmin, AuthenticatedRequest } from '../middleware/auth.middleware.js';
 import { validateLogin, validateRegister } from '../middleware/validation.middleware.js';
 import { db } from '../database.js';
+import { definirLimites, limitesDe, LIMITES_POR_DEFECTO } from '../services/limites.js';
 
 const router = Router();
 
@@ -81,8 +82,10 @@ router.get('/', authenticateToken, requireAdmin, (req: AuthenticatedRequest, res
   const users = userService.getAllUsers().map(u => ({
     ...u,
     cuits: cuentas.filter(a => (a.usuarios || []).includes(u.id)).map(a => a.cuit),
+    limites: limitesDe(u.id),
+    limitesPropios: !!db.data.limitesUsuarios?.[u.id],
   }));
-  res.json({ success: true, users });
+  res.json({ success: true, users, limitesPorDefecto: LIMITES_POR_DEFECTO });
 });
 
 // Crear nuevo usuario
@@ -113,6 +116,14 @@ router.post('/', authenticateToken, requireAdmin, async (req: AuthenticatedReque
 
 // Actualizar usuario
 // CUITs que puede usar un usuario (el admin los asigna o quita)
+// Límites de uso de un usuario (vacío = valor por defecto)
+router.put('/:id/limites', authenticateToken, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  const id = String(req.params.id);
+  if (!userService.getUserById(id)) return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });
+  const r = definirLimites(id, req.body || {});
+  res.status(r.ok ? 200 : 400).json({ success: r.ok, message: r.mensaje, limites: r.limites });
+});
+
 router.put('/:id/cuits', authenticateToken, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
   const id = String(req.params.id);
   if (!userService.getUserById(id)) return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });

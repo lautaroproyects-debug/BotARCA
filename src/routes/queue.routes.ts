@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import { queueService } from '../services/queueService.js';
 import { db } from '../database.js';
 import { aiParserService } from '../services/aiParserService.js';
-import { usuarioDe, cuitsVisibles, puedeUsarCuit, cuitActivoDe } from '../services/acceso.js';
+import { usuarioDe, cuitsVisibles, puedeUsarCuit, cuitActivoDe, esAdmin } from '../services/acceso.js';
+import { excedeLimite, limitesDe, usoDe } from '../services/limites.js';
 
 const router = Router();
 
@@ -71,15 +72,33 @@ router.post('/add', async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'Hay borradores para revisar antes de pasarlos a la cola.', problemas });
   }
 
-  const added = await queueService.addBatch(limpios as any);
+  const limite = await excedeLimite(usuario, 'colaPendientes', limpios.length);
+  if (limite) return res.status(403).json({ success: false, message: limite });
+
+  const added = await queueService.addBatch(limpios.map((x: any) => ({ ...x, usuarioId: usuario?.id })) as any);
   res.json({ success: true, count: added.length, items: added });
 });
 
 // Iniciar procesamiento de la cola en ARCA
-router.post('/process', (req: Request, res: Response) => {
-  // Iniciar en background
-  queueService.processQueue(cuitsVisibles(usuarioDe(req))).catch(() => {});
-  res.json({ success: true, message: 'Procesamiento de la cola de facturación iniciado en ARCA.' });
+router.post('/process', async (req: Request, res: Response) => {
+  const usuario = usuarioDe(req);
+  const cuits = cuitsVisibles(usuario);
+  const pendientes = db.getQueue().filter(q => q.estado === 'pendiente' && cuits.includes(String(q.cuitEmisor || ''))).length;
+  // Límite mensual: se emiten solo los que entran; el resto queda pendiente
+  let maximo: number | undefined;
+  if (usuario && !esAdmin(usuario)) {
+    const disponibles = limitesDe(usuario.id).comprobantesMes - (await usoDe(usuario.id)).comprobantesMes;
+    if (disponibles <= 0) return res.status(403).json({ success: false, message: (await excedeLimite(usuario, 'comprobantesMes')) || 'Llegaste al límite mensual.' });
+    maximo = disponibles;
+  }
+  queueService.processQueue(cuits, { usuarioId: usuario?.id, maximo }).catch(() => {});
+  const recortado = maximo !== undefined && pendientes > maximo;
+  res.json({
+    success: true,
+    message: recortado
+      ? `Se emiten ${maximo} de ${pendientes}: es lo que te queda de tu límite mensual. El resto queda pendiente.`
+      : 'Procesamiento de la cola de facturación iniciado en ARCA.',
+  });
 });
 
 // Eliminar un item de la cola
@@ -97,6 +116,7 @@ router.post('/clear', (req: Request, res: Response) => {
   const visibles = new Set(cuitsVisibles(usuarioDe(req)));
   db.data.queue = (db.data.queue || []).filter(q => !(q.estado === status && visibles.has(String(q.cuitEmisor || ''))));
   db.save();
+  db.persistirCola();
   res.json({ success: true, message: 'Cola limpiada correctamente.' });
 });
 

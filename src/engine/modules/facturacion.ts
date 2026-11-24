@@ -27,6 +27,10 @@ export interface FacturaRequest {
     tipo: string;
     puntoVenta: number;
     numero: string;
+    /** Fecha del comprobante asociado (aaaa-mm-dd o dd/mm/aaaa) */
+    fecha?: string;
+    /** Id en el repositorio de BotArca (para marcarlo como anulado) */
+    id?: string;
   };
   items: Array<{
     codigo?: string;

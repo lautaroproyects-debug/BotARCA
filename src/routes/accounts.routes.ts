@@ -9,6 +9,7 @@ import { generarPdfComprobante, datosEjemplo } from '../engine/ws/pdfComprobante
 import { crearEnlace } from '../services/enlacesTemporales.js';
 import { usuarioDe, esAdmin, cuitsVisibles, puedeUsarCuit, cuitActivoDe, exigirAccesoCuit } from '../services/acceso.js';
 import { cuitValido } from '../services/aiParserService.js';
+import { excedeLimite } from '../services/limites.js';
 
 const router = Router();
 
@@ -30,7 +31,7 @@ router.get('/', (req: Request, res: Response) => {
 });
 
 // Agregar o actualizar un CUIT propio
-router.post('/', (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   const usuario = usuarioDe(req)!;
   const { cuit, claveFiscal, puntoVentaDefault, razonSocial, cuitRepresentante, nombreRepresentante, emailNotificaciones } = req.body || {};
   const limpio = String(cuit || '').replace(/\D/g, '');
@@ -47,6 +48,10 @@ router.post('/', (req: Request, res: Response) => {
   const existente = db.getAccountRecord(limpio);
   if (existente && !esAdmin(usuario) && !(existente.usuarios || []).includes(usuario.id)) {
     return res.status(409).json({ success: false, message: 'Ese CUIT ya lo administra otro usuario. Pedile al administrador que te lo comparta.' });
+  }
+  if (!existente) {
+    const limite = await excedeLimite(usuario, 'cuits');
+    if (limite) return res.status(403).json({ success: false, message: limite });
   }
   db.guardarCuenta({ cuit: limpio, razonSocial, cuitRepresentante: rep, nombreRepresentante, emailNotificaciones, claveFiscal: claveFiscal || undefined, puntoVentaDefault: pv }, usuario.id);
   if (!db.getCuitActivoUsuario(usuario.id)) db.setCuitActivoUsuario(usuario.id, limpio);

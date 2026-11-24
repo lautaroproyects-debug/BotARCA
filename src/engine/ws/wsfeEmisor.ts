@@ -259,6 +259,9 @@ export function prepararComprobante(datos: FacturaRequest, ptoVta: number): Comp
       tipo: tAsoc.codigo,
       ptoVta: Number(datos.comprobanteAsociado.puntoVenta),
       nro: parseInt(String(datos.comprobanteAsociado.numero).replace(/\D/g, ''), 10),
+      // ARCA pide el CUIT emisor y la fecha del comprobante que se anula
+      cuit: String(datos.cuitEmisor || '').replace(/\D/g, '') || undefined,
+      fecha: datos.comprobanteAsociado.fecha ? aYyyymmdd(datos.comprobanteAsociado.fecha) : undefined,
     }];
   } else if (tipo.nc) {
     throw new Error('Una Nota de Crédito necesita el comprobante asociado (tipo, punto de venta y número).');

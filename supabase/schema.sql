@@ -121,3 +121,24 @@ CREATE INDEX IF NOT EXISTS idx_usuarios_username ON usuarios(username);
 -- Detalle completo del comprobante: permite regenerar el PDF y reenviarlo después de un reinicio
 ALTER TABLE comprobantes ADD COLUMN IF NOT EXISTS detalle JSONB;
 ALTER TABLE comprobantes ADD COLUMN IF NOT EXISTS email_receptor VARCHAR(255);
+
+-- Columnas que usa el servidor al guardar un CUIT
+ALTER TABLE cuentas_arca ADD COLUMN IF NOT EXISTS cuit_representante VARCHAR(20);
+ALTER TABLE cuentas_arca ADD COLUMN IF NOT EXISTS email_notificaciones VARCHAR(255);
+ALTER TABLE cuentas_arca ALTER COLUMN encrypted_clave_fiscal SET DEFAULT '';
+
+-- 7. Catálogo de productos
+CREATE TABLE IF NOT EXISTS productos (
+  codigo VARCHAR(50) PRIMARY KEY,
+  nombre VARCHAR(255) NOT NULL,
+  descripcion TEXT,
+  categoria VARCHAR(100),
+  unidad_medida VARCHAR(30),
+  precio_ars NUMERIC(15,2) DEFAULT 0,
+  precio_usd NUMERIC(15,2),
+  auto_ajuste_dolar BOOLEAN DEFAULT FALSE,
+  alicuota_iva NUMERIC(5,2),
+  activo BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+-- Después de crear las tablas, correr supabase/seguridad_rls.sql

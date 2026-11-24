@@ -1377,10 +1377,15 @@ $('#listaEmpresas').addEventListener('click', async (e) => {
 
 $('#btnNuevaEmpresa').addEventListener('click', () => abrirEmpresa());
 $('#btnGuia').addEventListener('click', () => abrirGuia(estado.cuitActivo));
+let empCuitOriginal = '';
 function abrirEmpresa(cuit) {
   const c = estado.cuentas.find(x => x.cuit === cuit);
   $('#dlgEmpresaTitulo').textContent = c ? 'Editar CUIT' : 'Agregar CUIT';
-  $('#empCuit').value = c?.cuit || ''; $('#empCuit').readOnly = !!c;
+  $('#empCuit').value = c?.cuit || ''; $('#empCuit').readOnly = false;
+  empCuitOriginal = c?.cuit || '';
+  $('#empCuitAyuda').textContent = c
+    ? 'Si lo cambiás, después hay que volver a conectarlo con ARCA. Un CUIT que ya emitió comprobantes no se puede cambiar.'
+    : 'El de la persona o empresa que emite las facturas.';
   $('#empRazon').value = c?.razonSocial || '';
   $('#empEmail').value = c?.emailNotificaciones || '';
   $('#empPv').value = c?.puntoVentaDefault || 1;
@@ -1399,14 +1404,16 @@ $('#formEmpresa').addEventListener('submit', async (e) => {
   if (!cuitOk(cuit)) return aviso(cuit.length !== 11 ? 'El CUIT tiene que tener 11 números.' : 'Ese CUIT no es válido: revisá los números.', 'error');
   if (!$('#empRazon').value.trim()) return aviso('Falta la razón social.', 'error');
   if (rep && !cuitOk(rep)) return aviso('El CUIT de quien representa no es válido.', 'error');
-  const nuevo = !estado.cuentas.some(c => c.cuit === cuit);
-  const r = await api('/api/accounts', { method: 'POST', body: { cuit, razonSocial: $('#empRazon').value.trim(), emailNotificaciones: $('#empEmail').value.trim(), puntoVentaDefault: Number($('#empPv').value) || 1, cuitRepresentante: rep, nombreRepresentante: $('#empNombreRep').value.trim(), claveFiscal: $('#empClave').value || undefined } });
+  const cambia = empCuitOriginal && empCuitOriginal !== cuit;
+  if (cambia && !confirm(`¿Cambiar el CUIT ${fmtCuit(empCuitOriginal)} por ${fmtCuit(cuit)}? Después vas a tener que volver a conectarlo con ARCA.`)) return;
+  const nuevo = !estado.cuentas.some(c => c.cuit === cuit) && !cambia;
+  const r = await api('/api/accounts', { method: 'POST', body: { cuit, cuitAnterior: empCuitOriginal || undefined, razonSocial: $('#empRazon').value.trim(), emailNotificaciones: $('#empEmail').value.trim(), puntoVentaDefault: Number($('#empPv').value) || 1, cuitRepresentante: rep, nombreRepresentante: $('#empNombreRep').value.trim(), claveFiscal: $('#empClave').value || undefined } });
   aviso(r.data.message, r.ok ? 'ok' : 'error');
   if (!r.ok) return;
   $('#dlgEmpresa').close();
   await cargarCuentas();
-  // Recién cargado: el siguiente paso natural es conectarlo con ARCA
-  if (nuevo) abrirGuia(cuit);
+  // Recién cargado (o con CUIT nuevo): el siguiente paso natural es conectarlo con ARCA
+  if (nuevo || r.data.renombrado) abrirGuia(cuit);
 });
 
 /* ---------------- Guía de ARCA ---------------- */

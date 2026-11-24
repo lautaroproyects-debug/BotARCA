@@ -176,19 +176,23 @@ async function iniciarApp() {
   cargarCola();
   cambiarModo(estado.modo || 'paso');
   actualizarAvisoSinCuit();
-  ir(location.hash.replace('#', '') || 'facturar');
+  const nombre = String(estado.usuario?.name || '').trim().split(/\s+/)[0];
+  $('#saludo').textContent = nombre ? `Hola, ${nombre}` : 'Inicio';
+  ir(location.hash.replace('#', '') || 'inicio');
 }
 
 function ir(pantalla) {
-  if (!['facturar', 'comprobantes', 'ajustes'].includes(pantalla)) pantalla = 'facturar';
+  if (pantalla === 'comprobantes') pantalla = 'inicio';
+  if (!['inicio', 'facturar', 'ajustes'].includes(pantalla)) pantalla = 'inicio';
   $$('[data-pantalla]').forEach(s => s.classList.toggle('oculto', s.id !== 'pantalla-' + pantalla));
   $$('.nav button').forEach(b => b.setAttribute('aria-current', b.dataset.ir === pantalla ? 'page' : 'false'));
   if (location.hash !== '#' + pantalla) history.replaceState(null, '', '#' + pantalla);
-  if (pantalla === 'comprobantes') cargarComprobantes();
+  if (pantalla === 'inicio') cargarComprobantes();
   if (pantalla === 'ajustes') { renderEmpresas(); renderClientes(); if (esAdmin()) { cargarUsuarios(); cargarCorreo(); conectarLogs(); } }
   window.scrollTo({ top: 0 });
 }
 $$('.nav button').forEach(b => b.addEventListener('click', () => ir(b.dataset.ir)));
+$$('[data-ir-a]').forEach(b => b.addEventListener('click', () => ir(b.dataset.irA)));
 $$('.indice a').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); $(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
 
 /* ---------------- Cuentas / emisor ---------------- */
@@ -1020,21 +1024,137 @@ $('#btnLimpiarCola').addEventListener('click', async () => {
 /* ======================================================================
    COMPROBANTES
    ====================================================================== */
+const mesActual = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const nombreMes = (m) => { const [a, n] = m.split('-').map(Number); return new Date(a, n - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }); };
+function moverMes(m, delta) { const [a, n] = m.split('-').map(Number); const d = new Date(a, n - 1 + delta, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+const fmtNum = (n) => Number(n || 0).toLocaleString('es-AR');
+
 async function cargarComprobantes() {
+  if (!$('#mesComp').value) $('#mesComp').value = mesActual();
+  const mes = $('#mesComp').value;
+  $('#mesSiguiente').disabled = mes >= mesActual();
+  // Selector de CUIT solo si hay más de uno
+  const selCuit = $('#cuitComp');
+  const previo = selCuit.value;
+  selCuit.innerHTML = '<option value="">Todos mis CUITs</option>' + estado.cuentas.map(c => `<option value="${c.cuit}">${esc(c.razonSocial || c.cuit)} · ${fmtCuit(c.cuit)}</option>`).join('');
+  selCuit.value = estado.cuentas.some(c => c.cuit === previo) ? previo : '';
+  selCuit.classList.toggle('oculto', estado.cuentas.length < 2);
+
   $('#listaComp').innerHTML = '<li class="vacio">Cargando…</li>';
-  const r = await api('/api/erp/comprobantes');
+  const qs = new URLSearchParams({ mes, ...(selCuit.value ? { cuit: selCuit.value } : {}) });
+  const r = await api('/api/erp/comprobantes?' + qs);
+  if ($('#mesComp').value !== mes) return; // cambió de mes mientras cargaba
   estado.comprobantes = r.ok ? r.data.comprobantes || [] : [];
+  const res = r.ok ? r.data.resumen : null;
+  estado.resumenMes = res;
+  await cargarGrafico(mes, selCuit.value);
+  const mesPrevio = (estado.serie || []).find(s => s.mes === moverMes(mes, -1));
+  const delta = mesPrevio && mesPrevio.neto ? Math.round(((res?.total || 0) - mesPrevio.neto) / Math.abs(mesPrevio.neto) * 100) : null;
+  $('#resumenComp').innerHTML = `
+    <div><dt>Neto de ${esc(nombreMes(mes).split(' ')[0])}</dt><dd class="acento">${fmtPesos(res?.total || 0)}</dd>${delta !== null ? `<span class="delta">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}% vs. mes anterior</span>` : ''}</div>
+    <div><dt>Facturado</dt><dd>${fmtPesos(res?.facturado || 0)}</dd><span class="delta">${fmtNum(res?.facturas || 0)} facturas</span></div>
+    <div><dt>Notas de crédito</dt><dd class="${res?.notasCredito ? 'negativo' : ''}">${res?.notasCredito ? '−' : ''}${fmtPesos(res?.notasCredito || 0)}</dd><span class="delta">${fmtNum(res?.notas || 0)} emitidas</span></div>
+    <div><dt>De prueba</dt><dd>${fmtNum(res?.pruebas || 0)}</dd><span class="delta">sin validez fiscal</span></div>`;
+  renderTopClientes(res?.topClientes || []);
+  const hay = estado.comprobantes.length > 0;
+  $('#btnZipMes').disabled = !hay;
+  $('#btnPlanillaMes').disabled = !hay;
+  if (!r.ok) aviso(r.data.message || 'No se pudieron cargar los comprobantes.', 'error');
   renderComprobantes();
+  cargarUso();
 }
+
+async function cargarUso() {
+  const r = await api('/api/erp/uso');
+  const el = $('#usoComp');
+  if (!r.ok || r.data.sinLimites) { el.classList.add('oculto'); return; }
+  const { uso, limites } = r.data;
+  const partes = [
+    `${fmtNum(uso.comprobantesMes)} de ${fmtNum(limites.comprobantesMes)} comprobantes este mes`,
+    `${fmtNum(uso.cuits)} de ${fmtNum(limites.cuits)} CUITs`,
+    `${fmtNum(uso.clientes)} de ${fmtNum(limites.clientes)} clientes`,
+  ];
+  el.textContent = 'Tu uso: ' + partes.join(' · ') + '.';
+  el.classList.remove('oculto');
+}
+
+$('#mesComp').addEventListener('change', () => { if ($('#mesComp').value > mesActual()) $('#mesComp').value = mesActual(); cargarComprobantes(); });
+$('#mesAnterior').addEventListener('click', () => { $('#mesComp').value = moverMes($('#mesComp').value || mesActual(), -1); cargarComprobantes(); });
+$('#mesSiguiente').addEventListener('click', () => { const s = moverMes($('#mesComp').value || mesActual(), 1); if (s <= mesActual()) { $('#mesComp').value = s; cargarComprobantes(); } });
+$('#cuitComp').addEventListener('change', cargarComprobantes);
+
+/* ---------- Tablero ---------- */
+let graficoClave = '';
+async function cargarGrafico(mesSel, cuit) {
+  const clave = mesActual() + '|' + cuit;
+  if (clave !== graficoClave || !estado.serie) {
+    const qs = new URLSearchParams({ meses: '12', ...(cuit ? { cuit } : {}) });
+    const r = await api('/api/erp/estadisticas?' + qs);
+    estado.serie = r.ok ? r.data.serie || [] : [];
+    graficoClave = clave;
+  }
+  const serie = estado.serie;
+  const max = Math.max(1, ...serie.map(s => Math.max(0, s.neto)));
+  const total = serie.reduce((a, s) => a + s.neto, 0);
+  $('#graficoTotal').textContent = serie.length ? `${fmtPesos(total)} en el año` : '';
+  $('#grafico').innerHTML = serie.map(s => {
+    const alto = Math.max(1, Math.round(Math.max(0, s.neto) / max * 100));
+    const nombre = nombreMes(s.mes);
+    return `<button type="button" class="gbarra" data-mes="${s.mes}" aria-pressed="${s.mes === mesSel}" title="${esc(nombre)}: ${fmtPesos(s.neto)}" aria-label="${esc(nombre)}: ${fmtPesos(s.neto)}">
+      <span class="valor" style="height:${alto}%"></span><span class="etq">${esc(nombre.slice(0, 3))}</span></button>`;
+  }).join('');
+}
+$('#grafico').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mes]');
+  if (!b) return;
+  $('#mesComp').value = b.dataset.mes;
+  cargarComprobantes();
+});
+
+function renderTopClientes(top) {
+  $('#topClientes').innerHTML = top.length
+    ? top.map(c => `<li><span class="nombre" title="${esc(c.nombre)}">${esc(c.nombre)}</span><span class="monto">${fmtPesos(c.total)}</span></li>`).join('')
+    : '<li><span class="vacio-top">Todavía no hay ventas este mes.</span></li>';
+}
+
+estado.tipoLista = 'facturas';
+$('#segTipo').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tipo]');
+  if (!b) return;
+  estado.tipoLista = b.dataset.tipo;
+  $$('#segTipo [data-tipo]').forEach(x => x.setAttribute('aria-selected', String(x === b)));
+  renderComprobantes();
+});
+const esNC = (c) => /nota de cr[eé]dito/i.test(c.tipoComprobante || '');
+
+async function descargarMes(formato, btn) {
+  const mes = $('#mesComp').value || mesActual();
+  const qs = new URLSearchParams({ mes, ...(formato === 'csv' ? { formato: 'csv' } : {}), ...($('#cuitComp').value ? { cuit: $('#cuitComp').value } : {}) });
+  ocupado(btn, true);
+  if (formato !== 'csv') aviso('Armando el ZIP con los PDF del mes… puede tardar un poco.', 'info');
+  const r = await api('/api/erp/comprobantes/descarga?' + qs, { blob: true });
+  ocupado(btn, false);
+  if (!r.ok) return aviso(r.data?.message || 'No se pudo descargar.', 'error');
+  const url = URL.createObjectURL(r.blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `comprobantes-${mes}${$('#cuitComp').value ? '-' + $('#cuitComp').value : ''}.${formato === 'csv' ? 'csv' : 'zip'}`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  aviso(formato === 'csv' ? 'Planilla descargada.' : 'Listo: ZIP con los PDF y la planilla del mes.', 'ok');
+}
+$('#btnZipMes').addEventListener('click', (e) => descargarMes('zip', e.currentTarget));
+$('#btnPlanillaMes').addEventListener('click', (e) => descargarMes('csv', e.currentTarget));
 
 function renderComprobantes() {
   const q = $('#buscarComp').value.trim().toLowerCase();
   const filtro = $('#filtroComp').value;
-  const mes = new Date().toISOString().slice(0, 7);
   const lista = estado.comprobantes.filter(c => {
-    if (filtro === 'Autorizado' && c.estado !== 'Autorizado') return false;
+    if (estado.tipoLista === 'facturas' && esNC(c)) return false;
+    if (estado.tipoLista === 'notas' && !esNC(c)) return false;
+    if (filtro === 'Autorizado' && (c.estado !== 'Autorizado' || c.anuladoPor)) return false;
+    if (filtro === 'Anulada' && !c.anuladoPor) return false;
     if (filtro === 'Prueba' && !/Prueba/.test(c.estado)) return false;
-    if (filtro === 'mes' && !String(c.fechaEmision).startsWith(mes)) return false;
     if (!q) return true;
     return [c.razonSocialReceptor, c.cuitReceptor, c.comprobanteFormato, c.cae, c.tipoComprobante].join(' ').toLowerCase().includes(q.replace(/-/g, '')) ||
       [c.razonSocialReceptor, c.comprobanteFormato].join(' ').toLowerCase().includes(q);
@@ -1042,53 +1162,138 @@ function renderComprobantes() {
   $('#listaComp').innerHTML = lista.length ? lista.map(c => `<li><button class="fila" data-comp="${c.id}">
       <div style="min-width:0"><div class="principal-txt">${esc(c.razonSocialReceptor || 'Consumidor Final')}</div>
         <div class="secundario">${fmtFecha(c.fechaEmision)} · ${esc(c.tipoComprobante)} <span class="dato">${esc(c.comprobanteFormato)}</span></div></div>
-      <div class="derecha"><div class="monto">${fmtPesos(c.importeTotal)}</div>
-        <span class="etiqueta-estado ${/Prueba/.test(c.estado) ? 'e-prueba' : 'e-ok'}" style="margin-top:4px">${/Prueba/.test(c.estado) ? 'Prueba' : 'Autorizado'}</span></div>
+      <div class="derecha"><div class="monto ${esNC(c) ? 'negativo' : ''}">${esNC(c) ? '−' : ''}${fmtPesos(c.importeTotal)}</div>
+        ${c.anuladoPor ? '<span class="etiqueta-estado e-anulada" style="margin-top:4px">Anulada</span>'
+          : esNC(c) ? '<span class="etiqueta-estado e-nc" style="margin-top:4px">Nota de crédito</span>'
+          : `<span class="etiqueta-estado ${/Prueba/.test(c.estado) ? 'e-prueba' : 'e-ok'}" style="margin-top:4px">${/Prueba/.test(c.estado) ? 'Prueba' : 'Autorizada'}</span>`}</div>
     </button></li>`).join('')
     : estado.comprobantes.length
-      ? '<li class="vacio"><h3>Sin resultados</h3><p>Probá con otra búsqueda o filtro.</p></li>'
-      : '<li class="vacio"><h3>Todavía no emitiste comprobantes</h3><p>Las facturas que emitas aparecen acá, con su PDF y la opción de mandarlas por mail.</p></li>';
+      ? `<li class="vacio"><h3>Sin resultados</h3><p>${estado.tipoLista === 'notas' ? 'No hay notas de crédito con ese filtro en este mes.' : 'Probá con otra búsqueda o filtro.'}</p></li>`
+      : `<li class="vacio"><h3>Sin comprobantes en ${esc(nombreMes($('#mesComp').value || mesActual()))}</h3><p>Lo que emitas aparece acá, con su PDF y la opción de mandarlo por mail. Usá las flechas para ver otros meses.</p></li>`;
 }
 $('#buscarComp').addEventListener('input', renderComprobantes);
 $('#filtroComp').addEventListener('change', renderComprobantes);
 $('#listaComp').addEventListener('click', (e) => { const b = e.target.closest('[data-comp]'); if (b) abrirComprobante(b.dataset.comp); });
 
 async function abrirComprobante(id, enfocarMail = false) {
-  if (!estado.comprobantes.length) { const r = await api('/api/erp/comprobantes'); estado.comprobantes = r.ok ? r.data.comprobantes || [] : []; }
-  const c = estado.comprobantes.find(x => x.id === id);
-  if (!c) return aviso('No se encontró el comprobante.', 'error');
+  const r = await api(`/api/erp/comprobantes/${encodeURIComponent(id)}`);
+  if (!r.ok) return aviso(r.data.message || 'No se encontró el comprobante.', 'error');
+  const c = r.data.comprobante;
+  const nc = esNC(c);
   $('#dlgCompTitulo').innerHTML = `${esc(c.tipoComprobante)} <span class="dato">${esc(c.comprobanteFormato)}</span>`;
-  $('#dlgCompSub').textContent = `${fmtFecha(c.fechaEmision)} · ${c.estado}`;
+  $('#dlgCompSub').textContent = `${fmtFecha(c.fechaEmision)} · ${c.anuladoPor ? 'Anulada con nota de crédito' : c.estado}`;
   const envios = c.envios || [];
+  const items = c.items || [];
   $('#dlgCompCuerpo').innerHTML = `
+    ${c.anuladoPor ? `<div class="aviso atencion">${ic('anular')}<span>Esta factura está <strong>anulada</strong> con una nota de crédito.</span></div>` : ''}
     <dl class="ficha">
       <dt>Cliente</dt><dd>${esc(c.razonSocialReceptor)}${c.cuitReceptor ? ` · <span class="dato">${fmtCuit(c.cuitReceptor)}</span>` : ''}</dd>
       <dt>Condición IVA</dt><dd>${esc(c.condicionIvaReceptor || '-')}</dd>
-      <dt>Total</dt><dd class="monto" style="font-size:22px">${fmtPesos(c.importeTotal)}</dd>
+      ${c.periodo ? `<dt>Período</dt><dd>${esc(c.periodo.desde)} al ${esc(c.periodo.hasta)}</dd>` : ''}
+      <dt>Total</dt><dd class="monto ${nc ? 'negativo' : ''}" style="font-size:22px">${nc ? '−' : ''}${fmtPesos(c.importeTotal)}</dd>
       <dt>CAE</dt><dd class="dato">${esc(c.cae || '-')}</dd>
       <dt>Vence CAE</dt><dd>${esc(c.caeVencimiento || '-')}</dd>
       <dt>Emisor</dt><dd>${esc(c.razonSocialEmisor || '')} <span class="dato">${fmtCuit(c.cuitEmisor)}</span></dd>
     </dl>
+    ${items.length ? `<table class="tabla-items"><thead><tr><th>Detalle</th><th class="num">Cant.</th><th class="num">Subtotal</th></tr></thead><tbody>
+      ${items.map(it => `<tr><td>${esc(it.descripcion)}</td><td class="num">${fmtNum(it.cantidad)}</td><td class="num">${fmtPesos(it.subtotal)}</td></tr>`).join('')}
+    </tbody></table>` : ''}
     ${c.tienePdf ? `<form id="formEnviar" class="campos" novalidate>
       <div><label for="envEmail">Mandar por mail a</label><input id="envEmail" type="email" value="${esc(c.emailReceptor || '')}" placeholder="cliente@empresa.com"></div>
     </form>` : `<div class="aviso info">${ic('info')}<span>Se emitió por "Comprobantes en línea": el PDF original está en ARCA.</span></div>`}
+    ${c.motivo && !c.anuladoPor && !nc ? `<p class="ayuda">${esc(c.motivo)}</p>` : ''}
     ${envios.length ? `<div><span class="etiqueta">Envíos</span><ul class="lista">${envios.map(v => `<li class="paso-prueba"><span class="${v.ok ? 'ok' : 'mal'}">${ic(v.ok ? 'check' : 'x')}</span><span>${new Date(v.fecha).toLocaleString('es-AR')} · ${esc(v.email)}${v.ok ? '' : ` · ${esc(v.mensaje || 'falló')}`}</span></li>`).join('')}</ul></div>` : ''}`;
-  $('#dlgCompPie').innerHTML = c.tienePdf
-    ? `<button class="boton" data-cerrar>Cerrar</button><button class="boton" id="btnPdfComp">${ic('pdf')}Ver PDF</button><button class="boton principal" id="btnEnviarComp">${ic('mail')}Enviar</button>`
-    : '<button class="boton" data-cerrar>Cerrar</button>';
+  const opera = puedeOperar();
+  $('#dlgCompPie').className = 'd-pie acciones-comp';
+  $('#dlgCompPie').innerHTML = [
+    opera && c.puedeAnular ? `<button class="boton texto peligro separar" id="btnAnularComp">${ic('anular')}Anular</button>` : '',
+    opera && c.puedeRefacturar ? `<button class="boton" id="btnRefacturarComp">${ic('repetir')}Refacturar</button>` : '',
+    c.tienePdf ? `<button class="boton" id="btnBajarPdf">${ic('descarga')}Descargar</button><button class="boton" id="btnPdfComp">${ic('pdf')}Ver PDF</button>` : '',
+    c.tienePdf ? `<button class="boton principal" id="btnEnviarComp">${ic('mail')}Enviar</button>` : '<button class="boton" data-cerrar>Cerrar</button>',
+  ].join('');
   $('#dlgComprobante').showModal();
   if (enfocarMail) $('#envEmail')?.focus();
+
   $('#btnPdfComp')?.addEventListener('click', (e) => verPdf(c.id, e.currentTarget));
+  $('#btnBajarPdf')?.addEventListener('click', async (e) => {
+    ocupado(e.currentTarget, true);
+    const rp = await api(`/api/erp/comprobantes/${c.id}/pdf`, { blob: true });
+    ocupado(e.currentTarget, false);
+    if (!rp.ok) return aviso(rp.data?.message || 'No se pudo descargar el PDF.', 'error');
+    const url = URL.createObjectURL(rp.blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${c.tipoComprobante} ${c.comprobanteFormato}.pdf`.replace(/[\\/:*?"<>|]/g, '-');
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  });
   $('#btnEnviarComp')?.addEventListener('click', async (e) => {
     const email = $('#envEmail').value.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('#envEmail').setAttribute('aria-invalid', 'true'); return aviso('Ingresá un email válido.', 'error'); }
     ocupado(e.currentTarget, true);
-    const r = await api(`/api/erp/comprobantes/${c.id}/enviar`, { method: 'POST', body: { email } });
+    const re = await api(`/api/erp/comprobantes/${c.id}/enviar`, { method: 'POST', body: { email } });
     ocupado(e.currentTarget, false);
-    aviso(r.data.message, r.ok ? 'ok' : 'error');
-    if (r.ok) { $('#dlgComprobante').close(); cargarComprobantes(); }
+    aviso(re.data.message, re.ok ? 'ok' : 'error');
+    if (re.ok) { $('#dlgComprobante').close(); cargarComprobantes(); }
   });
+  $('#btnAnularComp')?.addEventListener('click', () => confirmarAccion('anular', c));
+  $('#btnRefacturarComp')?.addEventListener('click', () => confirmarAccion('refacturar', c));
 }
+
+/* Anular (nota de crédito) o refacturar: siempre con una confirmación explícita antes de emitir */
+let accionPendiente = null;
+function confirmarAccion(accion, c) {
+  const real = !/Prueba/.test(c.estado);
+  const letra = String(c.tipoComprobante).trim().slice(-1);
+  const email = $('#envEmail')?.value.trim() || c.emailReceptor || '';
+  accionPendiente = { accion, id: c.id, email };
+  if (accion === 'anular') {
+    $('#dlgAccionTitulo').textContent = 'Anular con nota de crédito';
+    $('#dlgAccionCuerpo').innerHTML = `
+      <div class="aviso ${real ? 'atencion' : 'info'}">${ic(real ? 'alerta' : 'info')}<span>${real
+        ? `Se va a emitir una <strong>Nota de Crédito ${esc(letra)} real</strong> en ARCA por el total de la factura. Una nota de crédito no se puede borrar.`
+        : 'Se va a emitir una nota de crédito de prueba (sin validez fiscal).'}</span></div>
+      <dl class="ficha">
+        <dt>Anula</dt><dd>${esc(c.tipoComprobante)} <span class="dato">${esc(c.comprobanteFormato)}</span> del ${fmtFecha(c.fechaEmision)}</dd>
+        <dt>Cliente</dt><dd>${esc(c.razonSocialReceptor)}</dd>
+        <dt>Importe</dt><dd class="monto negativo" style="font-size:22px">−${fmtPesos(c.importeTotal)}</dd>
+        <dt>Fecha</dt><dd>Hoy</dd>
+      </dl>`;
+    $('#btnAccionConfirmar').textContent = real ? 'Emitir nota de crédito' : 'Emitir de prueba';
+    $('#btnAccionConfirmar').classList.add('peligro-fondo');
+  } else {
+    $('#dlgAccionTitulo').textContent = 'Refacturar';
+    $('#dlgAccionCuerpo').innerHTML = `
+      <div class="aviso ${real ? 'atencion' : 'info'}">${ic(real ? 'alerta' : 'info')}<span>${real
+        ? `Se va a emitir una <strong>${esc(c.tipoComprobante)} real</strong> nueva, igual a esta, con fecha de hoy.`
+        : 'Se va a emitir una copia de prueba (sin validez fiscal), con fecha de hoy.'}</span></div>
+      <dl class="ficha">
+        <dt>Cliente</dt><dd>${esc(c.razonSocialReceptor)}${c.cuitReceptor ? ` · <span class="dato">${fmtCuit(c.cuitReceptor)}</span>` : ''}</dd>
+        <dt>Detalle</dt><dd>${(c.items || []).map(it => esc(it.descripcion)).join(', ') || '-'}</dd>
+        <dt>Total</dt><dd class="monto" style="font-size:22px">${fmtPesos(c.importeTotal)}</dd>
+        ${c.periodo ? '<dt>Período</dt><dd>El mes en curso</dd>' : ''}
+        ${email ? `<dt>Se manda a</dt><dd>${esc(email)}</dd>` : ''}
+      </dl>`;
+    $('#btnAccionConfirmar').textContent = real ? 'Emitir factura' : 'Emitir de prueba';
+    $('#btnAccionConfirmar').classList.remove('peligro-fondo');
+  }
+  $('#dlgAccion').showModal();
+}
+$('#btnAccionConfirmar').addEventListener('click', async (e) => {
+  if (!accionPendiente) return;
+  const { accion, id, email } = accionPendiente;
+  accionPendiente = null;
+  ocupado(e.currentTarget, true);
+  const r = await api(`/api/erp/comprobantes/${id}/${accion}`, { method: 'POST', body: { confirmado: true, ...(email ? { email } : {}) } });
+  ocupado(e.currentTarget, false);
+  $('#dlgAccion').close();
+  if (!r.ok) return aviso(r.data.message || 'ARCA no autorizó el comprobante.', 'error');
+  $('#dlgComprobante').close();
+  aviso(accion === 'anular' ? `Nota de crédito ${r.data.comprobanteNro || ''} emitida. La factura quedó anulada.` : `Factura ${r.data.comprobanteNro || ''} emitida.`, 'ok');
+  estado.serie = null;
+  $('#mesComp').value = mesActual();
+  await cargarComprobantes();
+  if (r.data.comprobanteId) abrirComprobante(r.data.comprobanteId);
+});
 
 /**
  * Abre un PDF en una pestaña nueva. La pestaña se abre EN EL MISMO CLIC (si se abre después de
@@ -1459,9 +1664,12 @@ $('#formCliente').addEventListener('submit', async (e) => {
    ====================================================================== */
 let usuarios = [];
 const ROL = { admin: 'Administrador', operator: 'Operador', viewer: 'Solo lectura' };
+const CAMPOS_LIMITE = { cuits: '#limCuits', comprobantesMes: '#limComprobantesMes', clientes: '#limClientes', colaPendientes: '#limColaPendientes' };
+let limitesPorDefecto = {};
 async function cargarUsuarios() {
   const r = await api('/api/users');
   usuarios = r.ok ? r.data.users || [] : [];
+  limitesPorDefecto = r.ok ? r.data.limitesPorDefecto || {} : {};
   const nombreCuit = (c) => (estado.cuentas.find(a => a.cuit === c)?.razonSocial || fmtCuit(c));
   $('#listaUsuarios').innerHTML = usuarios.length ? usuarios.map(u => `<li><button class="fila" data-usr="${u.id}">
     <div style="min-width:0"><div class="principal-txt">${esc(u.name)} <span class="tenue">@${esc(u.username)}</span></div>
@@ -1488,9 +1696,20 @@ function abrirUsuario(id) {
     ? estado.cuentas.map(c => `<label><input type="checkbox" value="${c.cuit}" ${suyos.has(c.cuit) ? 'checked' : ''}> ${esc(c.razonSocial)} <span class="tenue dato">${fmtCuit(c.cuit)}</span></label>`).join('')
     : '<p class="ayuda" style="margin:0">Todavía no hay CUITs cargados.</p>';
   $('#usrCuitsCampo').classList.toggle('oculto', $('#usrRol').value === 'admin');
+  // Límites: vacío = valor por defecto
+  const def = limitesPorDefecto || {};
+  const propios = u?.limitesPropios ? u.limites || {} : {};
+  for (const [k, id] of Object.entries(CAMPOS_LIMITE)) {
+    $(id).placeholder = def[k] ? `${fmtNum(def[k])} (por defecto)` : '';
+    $(id).value = propios[k] && propios[k] !== def[k] ? propios[k] : '';
+  }
+  $('#usrLimitesCampo').classList.toggle('oculto', $('#usrRol').value === 'admin');
   $('#dlgUsuario').showModal();
 }
-$('#usrRol').addEventListener('change', () => $('#usrCuitsCampo').classList.toggle('oculto', $('#usrRol').value === 'admin'));
+$('#usrRol').addEventListener('change', () => {
+  $('#usrCuitsCampo').classList.toggle('oculto', $('#usrRol').value === 'admin');
+  $('#usrLimitesCampo').classList.toggle('oculto', $('#usrRol').value === 'admin');
+});
 $('#btnNuevoUsuario').addEventListener('click', () => abrirUsuario());
 $('#listaUsuarios').addEventListener('click', (e) => { const b = e.target.closest('[data-usr]'); if (b) abrirUsuario(b.dataset.usr); });
 $('#formUsuario').addEventListener('submit', async (e) => {
@@ -1511,6 +1730,12 @@ $('#formUsuario').addEventListener('submit', async (e) => {
     const id = usrId || r.data.user?.id;
     const cuits = $$('#usrCuits input:checked').map(i => i.value);
     if (id) await api(`/api/users/${id}/cuits`, { method: 'PUT', body: { cuits } });
+    if (id) {
+      const limites = {};
+      for (const [k, campo] of Object.entries(CAMPOS_LIMITE)) limites[k] = $(campo).value.trim();
+      const rl = await api(`/api/users/${id}/limites`, { method: 'PUT', body: limites });
+      if (!rl.ok) { ocupado(btn, false); return aviso(rl.data.message, 'error'); }
+    }
   }
   ocupado(btn, false);
   aviso(r.data.message, r.ok ? 'ok' : 'error');
@@ -1538,13 +1763,16 @@ async function cargarCorreo() {
   const m = r.data.mail;
   $('#mailProveedor').value = m.provider || 'auto';
   $('#mailRemitente').value = m.senderEmail || ''; $('#mailNombre').value = m.senderName || ''; $('#mailAdmin').value = m.adminNotifyEmail || '';
-  $('#mailResend').value = ''; $('#mailResend').placeholder = m.hasResendKey ? `Guardada: ${m.resendKeyMasked}` : 're_…';
-  $('#mailBrevo').value = ''; $('#mailBrevo').placeholder = m.hasBrevoKey ? `Guardada: ${m.brevoKeyMasked}` : 'xkeysib-…';
-  $('#groqClave').value = ''; $('#groqClave').placeholder = m.hasGroqKey ? `Guardada: ${m.groqKeyMasked}` : 'gsk_…';
+  const servicios = [
+    ['Resend', 'manda los mails', m.hasResendKey],
+    ['Brevo', 'alternativa para mails (opcional)', m.hasBrevoKey],
+    ['Groq', 'lee listas y mensajes con IA', m.hasGroqKey],
+  ];
+  $('#estadoServicios').innerHTML = servicios.map(([n, para, ok]) => `<li><span class="etiqueta-estado ${ok ? 'e-ok' : 'e-espera'}">${ok ? 'Conectado' : 'Sin configurar'}</span> <strong>${n}</strong> <span class="tenue">· ${para}</span></li>`).join('');
 }
 $('#aj-correo').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const r = await api('/api/settings/mail', { method: 'POST', body: { provider: $('#mailProveedor').value, senderEmail: $('#mailRemitente').value, senderName: $('#mailNombre').value, adminNotifyEmail: $('#mailAdmin').value, resendApiKey: $('#mailResend').value, brevoApiKey: $('#mailBrevo').value, groqApiKey: $('#groqClave').value } });
+  const r = await api('/api/settings/mail', { method: 'POST', body: { provider: $('#mailProveedor').value, senderEmail: $('#mailRemitente').value, senderName: $('#mailNombre').value, adminNotifyEmail: $('#mailAdmin').value } });
   aviso(r.ok ? 'Configuración guardada.' : r.data.message, r.ok ? 'ok' : 'error');
   if (r.ok) cargarCorreo();
 });

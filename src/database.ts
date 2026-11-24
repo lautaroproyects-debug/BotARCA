@@ -75,6 +75,8 @@ export interface InvoicingQueueItem {
   errorMensaje?: string;
   createdAt: string;
   procesadaAt?: string;
+  /** Usuario que lo cargó en la cola (para sus límites y su repositorio) */
+  usuarioId?: string;
 }
 
 export interface ClienteRecord {
@@ -112,6 +114,12 @@ export interface ComprobanteRecord {
   emailReceptor?: string;
   ambiente?: string;
   via?: string;
+  /** Usuario que lo emitió */
+  usuarioId?: string;
+  /** Nota de crédito que anuló este comprobante */
+  anuladoPor?: string;
+  /** Para notas de crédito: comprobante que anula */
+  asociadoId?: string;
   envios?: Array<{ fecha: string; email: string; ok: boolean; mensaje?: string }>;
 }
 
@@ -177,6 +185,8 @@ export interface AppDatabase {
   clientesV2?: any[];
   /** Tickets de acceso WSAA vigentes (token/sign cifrados), por ambiente + certificado + servicio */
   wsaaTickets?: Record<string, { token: string; sign: string; expiracion: string }>;
+  /** Límites de uso por usuario que cambió el administrador (lo que no esté usa el valor por defecto) */
+  limitesUsuarios?: Record<string, Record<string, number>>;
 }
 
 const DB_FILE = path.join(config.paths.dataDir, 'botarca_db.json');
@@ -664,6 +674,15 @@ class DatabaseManager {
           }
         } else if (row.id === 'clientes' && Array.isArray(row.valor)) {
           if (!this.data.clientesV2?.length) this.data.clientesV2 = row.valor;
+        } else if (row.id === 'cola' && Array.isArray(row.valor)) {
+          if (!this.data.queue?.length) {
+            // Lo que estaba "procesando" cuando se reinició puede haber salido o no: nunca se reintenta solo
+            this.data.queue = (row.valor as InvoicingQueueItem[]).map(q => q.estado === 'procesando'
+              ? { ...q, estado: 'error' as const, errorMensaje: 'Se interrumpió por un reinicio del servidor. Fijate en Comprobantes si salió antes de volver a intentarlo.' }
+              : q);
+          }
+        } else if (row.id === 'limites_usuarios' && row.valor && typeof row.valor === 'object') {
+          this.data.limitesUsuarios = { ...(row.valor || {}), ...(this.data.limitesUsuarios || {}) };
         } else if (row.id === 'cuit_activo_usuarios' && row.valor && typeof row.valor === 'object') {
           this.data.cuitActivoPorUsuario = { ...(row.valor || {}), ...(this.data.cuitActivoPorUsuario || {}) };
         } else if (row.id.startsWith('diseno_')) {
@@ -795,7 +814,27 @@ class DatabaseManager {
     if (!this.data.queue) this.data.queue = [];
     this.data.queue.unshift(...created);
     this.save();
+    this.persistirCola();
     return created;
+  }
+
+  private colaTimer: NodeJS.Timeout | null = null;
+  /** Guarda la cola en Supabase (con una pequeña espera para agrupar cambios seguidos). */
+  public persistirCola() {
+    if (this.colaTimer) clearTimeout(this.colaTimer);
+    this.colaTimer = setTimeout(() => {
+      this.colaTimer = null;
+      const hace60dias = Date.now() - 60 * 24 * 3600 * 1000;
+      // Se guardan los pendientes, con error y en proceso; las emitidas, solo las de los últimos 60 días
+      const cola = (this.data.queue || [])
+        .filter(q => q.estado !== 'emitida' || new Date(q.procesadaAt || q.createdAt).getTime() > hace60dias)
+        .slice(0, 20000);
+      import('./services/supabase.js').then(async ({ supabase }) => {
+        const client = supabase.getClient();
+        if (!client) return;
+        await client.from('configuraciones').upsert({ id: 'cola', valor: cola, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+      }).catch(() => {});
+    }, 1500);
   }
 
   public updateQueueItem(id: string, update: Partial<InvoicingQueueItem>) {
@@ -806,6 +845,7 @@ class DatabaseManager {
         item.procesadaAt = new Date().toISOString();
       }
       this.save();
+      this.persistirCola();
       return item;
     }
     return null;
@@ -816,11 +856,7 @@ class DatabaseManager {
     if (idx !== -1) {
       this.data.queue.splice(idx, 1);
       this.save();
-      try {
-        import('./services/renderPersistence.js').then(({ RenderPersistenceService }) => {
-          RenderPersistenceService.persistAccounts(this.data.accounts).catch(() => {});
-        }).catch(() => {});
-      } catch (e) {}
+      this.persistirCola();
       return true;
     }
     return false;
@@ -833,6 +869,7 @@ class DatabaseManager {
       this.data.queue = [];
     }
     this.save();
+    this.persistirCola();
   }
 
   // --- CONFIGURACIÓN GENERAL ---

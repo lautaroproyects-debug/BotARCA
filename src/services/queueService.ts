@@ -63,14 +63,16 @@ class QueueService {
    * Procesa en segundo plano todos los comprobantes pendientes de la cola
    */
   /** Procesa los pendientes. Con "cuits", solo los de esos CUITs (los del usuario que la pide). */
-  public async processQueue(cuits?: string[]): Promise<{ total: number; exitosos: number; fallidos: number }> {
+  public async processQueue(cuits?: string[], opciones: { usuarioId?: string; maximo?: number } = {}): Promise<{ total: number; exitosos: number; fallidos: number }> {
     if (this.isProcessing) {
       logger.warn('COLA', 'La cola de facturación ya se encuentra en ejecución.');
       return { total: 0, exitosos: 0, fallidos: 0 };
     }
 
     this.isProcessing = true;
-    const queue = db.getQueue().filter(q => q.estado === 'pendiente' && (!cuits || cuits.includes(String(q.cuitEmisor || ''))));
+    const queue = db.getQueue()
+      .filter(q => q.estado === 'pendiente' && (!cuits || cuits.includes(String(q.cuitEmisor || ''))))
+      .slice(0, opciones.maximo ?? Infinity);
     let exitosos = 0;
     let fallidos = 0;
 
@@ -119,7 +121,7 @@ class QueueService {
               precioUnitario: item.precioUnitario,
               subtotal: item.importeTotal,
             }],
-          }, { obtenerSesionNavegador });
+          }, { obtenerSesionNavegador, usuarioId: item.usuarioId || opciones.usuarioId });
 
           if (res.success) { // (en modo navegador puede no leerse el CAE en pantalla, pero el comprobante igual se emitió)
             exitosos++;

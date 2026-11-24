@@ -33,6 +33,12 @@
     <symbol id="i-cola" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
     <symbol id="i-lapiz" viewBox="0 0 24 24"><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17z"/></symbol>
+    <symbol id="i-inicio" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20h-5.5v-6h-5v6H4z"/></symbol>
+    <symbol id="i-repetir" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5M20 4v4.5h-4.5M20 12a8 8 0 0 1-13.7 5.6L4 15.5M4 20v-4.5h4.5"/></symbol>
+    <symbol id="i-anular" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-descarga" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></symbol>
+    <symbol id="i-izq" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6"/></symbol>
+    <symbol id="i-der" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
     <symbol id="i-ojo" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12"/><circle cx="12" cy="12" r="2.8"/></symbol>
   </svg>
 
@@ -115,8 +121,8 @@
     </header>
 
     <nav class="nav" aria-label="Secciones">
+      <button data-ir="inicio"><svg class="ic"><use href="#i-inicio"/></svg><span>Inicio</span></button>
       <button data-ir="facturar"><svg class="ic"><use href="#i-factura"/></svg><span>Facturar</span><span id="navCola" class="contador oculto"></span></button>
-      <button data-ir="comprobantes"><svg class="ic"><use href="#i-archivo"/></svg><span>Comprobantes</span></button>
       <button data-ir="ajustes"><svg class="ic"><use href="#i-ajustes"/></svg><span>Ajustes</span></button>
     </nav>
 
@@ -304,26 +310,62 @@
         </div>
       </section>
 
-      <!-- ============ COMPROBANTES ============ -->
-      <section id="pantalla-comprobantes" data-pantalla class="oculto">
-        <div class="encabezado">
+      <!-- ============ INICIO: tablero, facturas y notas de crédito ============ -->
+      <section id="pantalla-inicio" data-pantalla class="oculto">
+        <div class="inicio-cab">
           <div>
-            <h1>Comprobantes</h1>
-            <p>Todo lo emitido. Tocá uno para ver el PDF o mandarlo por mail.</p>
+            <h1 id="saludo">Inicio</h1>
+            <p>Tus facturas y notas de crédito, mes por mes. Tocá una para verla, mandarla, repetirla o anularla.</p>
+          </div>
+          <button type="button" class="boton principal grande" data-ir-a="facturar" id="btnFacturarNueva"><svg class="ic"><use href="#i-mas"/></svg>Facturar nueva</button>
+        </div>
+
+        <div class="repo-barra">
+          <div class="mes-nav" role="group" aria-label="Mes">
+            <button type="button" class="boton icono" id="mesAnterior" aria-label="Mes anterior"><svg class="ic"><use href="#i-izq"/></svg></button>
+            <label for="mesComp" class="sr">Mes</label>
+            <input id="mesComp" type="month">
+            <button type="button" class="boton icono" id="mesSiguiente" aria-label="Mes siguiente"><svg class="ic"><use href="#i-der"/></svg></button>
+          </div>
+          <label for="cuitComp" class="sr">CUIT</label>
+          <select id="cuitComp" class="oculto" style="width:auto;min-width:200px"></select>
+          <div class="repo-descargas">
+            <button type="button" class="boton" id="btnPlanillaMes"><svg class="ic"><use href="#i-archivo"/></svg>Planilla</button>
+            <button type="button" class="boton" id="btnZipMes"><svg class="ic"><use href="#i-descarga"/></svg>Descargar mes</button>
           </div>
         </div>
-        <div class="fila-acciones" style="margin-bottom:14px">
+
+        <dl class="repo-resumen kpis" id="resumenComp" aria-live="polite"></dl>
+        <p class="ayuda oculto" id="usoComp"></p>
+
+        <div class="tablero">
+          <section class="hoja panel-grafico" aria-labelledby="tituloGrafico">
+            <div class="panel-cab"><h2 id="tituloGrafico">Facturado neto, últimos 12 meses</h2><span class="tenue" id="graficoTotal"></span></div>
+            <div class="barras" id="grafico" role="group" aria-label="Facturado por mes"></div>
+          </section>
+          <section class="hoja panel-top" aria-labelledby="tituloTop">
+            <div class="panel-cab"><h2 id="tituloTop">Mejores clientes del mes</h2></div>
+            <ol class="top-clientes" id="topClientes"></ol>
+          </section>
+        </div>
+
+        <div class="lista-cab">
+          <div class="segmentos" role="tablist" aria-label="Tipo de comprobante" id="segTipo">
+            <button type="button" role="tab" data-tipo="facturas" aria-selected="true">Facturas</button>
+            <button type="button" role="tab" data-tipo="notas" aria-selected="false">Notas de crédito</button>
+            <button type="button" role="tab" data-tipo="todo" aria-selected="false">Todo</button>
+          </div>
           <div class="buscador">
             <svg class="ic"><use href="#i-buscar"/></svg>
             <label for="buscarComp" class="sr">Buscar comprobantes</label>
             <input id="buscarComp" type="search" placeholder="Cliente, CUIT, número o CAE">
           </div>
           <label for="filtroComp" class="sr">Filtrar</label>
-          <select id="filtroComp" style="width:auto;min-width:170px">
-            <option value="">Todos</option>
+          <select id="filtroComp" style="width:auto;min-width:160px">
+            <option value="">Todos los estados</option>
             <option value="Autorizado">Autorizados</option>
+            <option value="Anulada">Anuladas</option>
             <option value="Prueba">De prueba</option>
-            <option value="mes">Este mes</option>
           </select>
         </div>
         <div class="hoja"><ul id="listaComp" class="lista"></ul></div>
@@ -334,7 +376,7 @@
         <div class="encabezado"><div><h1>Ajustes</h1><p id="ajustesUsuario"></p></div></div>
         <nav class="indice" aria-label="Secciones de ajustes">
           <a href="#aj-empresas">Mis CUITs</a><a href="#aj-clientes">Clientes</a><a href="#aj-usuarios" data-solo-admin>Usuarios</a>
-          <a href="#aj-correo" data-solo-admin>Correo e IA</a><a href="#aj-cuenta">Mi cuenta</a><a href="#aj-sistema" data-solo-admin>Sistema</a>
+          <a href="#aj-correo" data-solo-admin>Correo</a><a href="#aj-cuenta">Mi cuenta</a><a href="#aj-sistema" data-solo-admin>Sistema</a>
         </nav>
         <div class="pila">
           <div id="aj-empresas" class="hoja">
@@ -369,17 +411,17 @@
 
           <form id="aj-correo" class="hoja" data-solo-admin novalidate>
             <div class="seccion">
-              <h2>Correo e IA</h2>
-              <p class="bajada">Con qué se mandan las facturas por mail, y la clave de Groq para leer mensajes. Las claves guardadas no se muestran completas.</p>
+              <h2>Correo</h2>
+              <p class="bajada">Desde qué dirección y con qué nombre les llegan las facturas a los clientes. Vale para todos los usuarios.</p>
               <div class="campos dos">
                 <div><label for="mailProveedor">Proveedor de correo</label>
                   <select id="mailProveedor"><option value="auto">Automático</option><option value="resend">Resend</option><option value="brevo">Brevo</option><option value="simulation">Sin envío (prueba)</option></select></div>
                 <div><label for="mailRemitente">Remitente (email)</label><input id="mailRemitente" type="email" placeholder="facturas@tudominio.com"></div>
                 <div><label for="mailNombre">Nombre del remitente</label><input id="mailNombre"></div>
                 <div><label for="mailAdmin">Avisos de nuevos usuarios a</label><input id="mailAdmin" type="email"></div>
-                <div><label for="mailResend">Clave de Resend</label><input id="mailResend" autocomplete="off"></div>
-                <div><label for="mailBrevo">Clave de Brevo</label><input id="mailBrevo" autocomplete="off"></div>
-                <div class="ancho-total"><label for="groqClave">Clave de Groq</label><input id="groqClave" autocomplete="off"></div>
+                <div class="ancho-total"><span class="etiqueta-campo">Servicios conectados</span>
+                  <ul class="servicios" id="estadoServicios"></ul>
+                  <p class="ayuda">Las claves de estos servicios se cargan una sola vez en Render (Environment) y nunca se muestran en el panel.</p></div>
               </div>
               <div class="fila-acciones" style="margin-top:16px">
                 <button class="boton principal" type="submit">Guardar</button>
@@ -423,6 +465,12 @@
     <div class="d-cab"><h2 id="dlgConfirmarTitulo">Revisá antes de emitir</h2><button class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <div class="d-cuerpo" id="confirmarCuerpo"></div>
     <div class="d-pie"><button class="boton" data-cerrar>Volver</button><button class="boton principal" id="btnConfirmarEmision">Emitir</button></div>
+  </dialog>
+
+  <dialog id="dlgAccion" aria-labelledby="dlgAccionTitulo">
+    <div class="d-cab"><h2 id="dlgAccionTitulo"></h2><button class="cerrar" data-cerrar aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="d-cuerpo" id="dlgAccionCuerpo"></div>
+    <div class="d-pie"><button class="boton" data-cerrar>Volver</button><button class="boton principal" id="btnAccionConfirmar"></button></div>
   </dialog>
 
   <dialog id="dlgComprobante" aria-labelledby="dlgCompTitulo">
@@ -578,6 +626,15 @@
         <div><label for="usrRol">Rol</label><select id="usrRol"><option value="operator">Operador (factura)</option><option value="viewer">Solo lectura</option><option value="admin">Administrador</option></select></div>
         <div id="usrActivoCampo"><label for="usrActivo">Estado</label><select id="usrActivo"><option value="1">Activo</option><option value="0">Desactivado</option></select></div>
         <fieldset class="ancho-total representa" id="usrCuitsCampo"><legend>CUITs que puede usar</legend><p class="ayuda" style="margin:0 0 8px">Además de los que cargue él mismo.</p><div id="usrCuits" class="checks"></div></fieldset>
+        <fieldset class="ancho-total representa" id="usrLimitesCampo"><legend>Límites de uso</legend>
+          <p class="ayuda" style="margin:0 0 8px">Holgados por defecto. Dejá un campo vacío para usar el valor por defecto.</p>
+          <div class="limites">
+            <div><label for="limCuits">CUITs</label><input id="limCuits" type="number" min="1" inputmode="numeric"></div>
+            <div><label for="limComprobantesMes">Comprobantes por mes</label><input id="limComprobantesMes" type="number" min="1" inputmode="numeric"></div>
+            <div><label for="limClientes">Clientes</label><input id="limClientes" type="number" min="1" inputmode="numeric"></div>
+            <div><label for="limColaPendientes">Pendientes en la cola</label><input id="limColaPendientes" type="number" min="1" inputmode="numeric"></div>
+          </div>
+        </fieldset>
         <div class="ancho-total" id="usrClaveCampo"><label for="usrClave">Contraseña inicial</label><input id="usrClave" type="password" autocomplete="new-password"><p class="ayuda">Mínimo 8 caracteres, con letras y números. También puede crearla con "Olvidé mi contraseña".</p></div>
       </div>
       <div class="d-pie"><button type="button" class="boton texto peligro oculto" id="btnBorrarUsuario">Eliminar</button><button type="button" class="boton oculto" id="btnResetClave">Asignar contraseña</button><button type="button" class="boton" data-cerrar>Cancelar</button><button class="boton principal" type="submit">Guardar</button></div>

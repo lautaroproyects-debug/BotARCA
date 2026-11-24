@@ -142,3 +142,14 @@ CREATE TABLE IF NOT EXISTS productos (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 -- Después de crear las tablas, correr supabase/seguridad_rls.sql
+
+-- Repositorio por usuario: quién emitió cada comprobante y en qué ambiente; búsqueda por mes
+ALTER TABLE comprobantes ADD COLUMN IF NOT EXISTS usuario_id VARCHAR(100);
+ALTER TABLE comprobantes ADD COLUMN IF NOT EXISTS ambiente VARCHAR(20);
+CREATE INDEX IF NOT EXISTS idx_comprobantes_cuit_fecha ON comprobantes(cuit_emisor, fecha_emision);
+CREATE INDEX IF NOT EXISTS idx_comprobantes_usuario ON comprobantes(usuario_id, created_at);
+
+-- Anulaciones: la nota de crédito apunta a la factura que anula, y la factura a su nota de crédito
+ALTER TABLE comprobantes ADD COLUMN IF NOT EXISTS asociado_id VARCHAR(36);
+ALTER TABLE comprobantes ADD COLUMN IF NOT EXISTS anulado_por VARCHAR(36);
+CREATE INDEX IF NOT EXISTS idx_comprobantes_asociado ON comprobantes(asociado_id);

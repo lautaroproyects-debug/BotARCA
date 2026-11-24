@@ -56,7 +56,10 @@ app.use(inputSanitizer);
 
 // 5. Archivos estáticos de la interfaz web
 const publicPath = path.join(__dirname, 'public');
-app.use(express.static(publicPath));
+// El panel siempre se revalida: después de un deploy nadie queda con el JS viejo
+app.use(express.static(publicPath, {
+  setHeaders: (res, archivo) => { if (/\.(html|js|css)$/.test(archivo)) res.setHeader('Cache-Control', 'no-cache'); },
+}));
 
 // 6. Rate Limiting general para la API
 app.use('/api', apiRateLimiter);
@@ -74,7 +77,8 @@ app.use('/api/storage/upload', heavyOperationRateLimiter);
 // Operaciones que llaman a ARCA o consumen CPU (emitir, probar conexión, generar clave RSA, armar PDF)
 app.use('/api/erp/facturacion/emitir', heavyOperationRateLimiter);
 app.use(/^\/api\/accounts\/\d{11}\/(ws\/probar|ws\/csr|diseno\/vista-previa)$/, heavyOperationRateLimiter);
-app.use(/^\/api\/erp\/comprobantes\/[^/]+\/(enviar|enlace)$/, heavyOperationRateLimiter);
+app.use(/^\/api\/erp\/comprobantes\/[^/]+\/(enviar|enlace|anular|refacturar)$/, heavyOperationRateLimiter);
+app.use('/api/erp/comprobantes/descarga', heavyOperationRateLimiter);
 
 // 9. Autenticación obligatoria. Antes estas rutas respondían SIN login: cualquiera con la URL
 //    podía listar cuentas, emitir comprobantes o procesar la cola.
@@ -132,6 +136,18 @@ app.get('/api/ping', (req, res) => {
 // Fallback para SPA en la raíz
 app.get('*', (req, res) => {
   res.sendFile(path.join(publicPath, 'index.html'));
+});
+
+// Errores no previstos en una ruta: respuesta 500 en vez de dejar colgado el pedido
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  logger.error('SISTEMA', `Error en ${req.method} ${req.path}: ${err?.message || err}`);
+  if (res.headersSent) return;
+  res.status(err?.status === 413 ? 413 : 500).json({ success: false, message: err?.status === 413 ? 'El pedido es demasiado grande.' : 'Ocurrió un error inesperado. Probá de nuevo.' });
+});
+
+// Express 4 no atrapa los errores de las rutas async: sin esto, uno solo tiraba abajo el servidor
+process.on('unhandledRejection', (motivo: any) => {
+  logger.error('SISTEMA', `Error no atrapado: ${motivo?.stack || motivo?.message || motivo}`);
 });
 
 // Iniciar Servidor

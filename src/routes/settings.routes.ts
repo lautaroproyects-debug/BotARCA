@@ -16,46 +16,39 @@ router.get('/mail', authenticateToken, requireAdmin, (req: AuthenticatedRequest,
     mail: {
       provider: cfg.provider,
       hasResendKey: !!cfg.resendApiKey,
-      resendKeyMasked: cfg.resendApiKey ? `${cfg.resendApiKey.slice(0, 6)}...${cfg.resendApiKey.slice(-4)}` : '',
       hasBrevoKey: !!cfg.brevoApiKey,
-      brevoKeyMasked: cfg.brevoApiKey ? `${cfg.brevoApiKey.slice(0, 8)}...${cfg.brevoApiKey.slice(-4)}` : '',
       senderEmail: cfg.senderEmail,
       senderName: cfg.senderName,
       adminNotifyEmail: cfg.adminNotifyEmail,
-      hasGroqKey: !!settings.groqApiKey,
-      groqKeyMasked: settings.groqApiKey ? `${settings.groqApiKey.slice(0, 6)}...${settings.groqApiKey.slice(-4)}` : '',
+      hasGroqKey: !!(settings.groqApiKey || process.env.GROQ_API_KEY),
     }
   });
 });
 
 // Guardar configuración de correo y Groq AI (Solo Admin)
 router.post('/mail', authenticateToken, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  const { provider, resendApiKey, brevoApiKey, senderEmail, senderName, adminNotifyEmail, groqApiKey } = req.body || {};
+  // Las claves de Resend, Brevo y Groq viven solo en las variables de entorno de Render
+  const { provider, senderEmail, senderName, adminNotifyEmail } = req.body || {};
   const current = db.getSettings();
 
   // Validación del lado del servidor (el panel también valida, pero no se confía en él)
   const esEmail = (v: any) => v === undefined || v === '' || (typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) && v.length <= 200);
-  const esClave = (v: any) => v === undefined || v === '' || (typeof v === 'string' && v.trim().length <= 300 && !/\s/.test(v.trim()));
   if (provider !== undefined && !['auto', 'resend', 'brevo', 'simulation'].includes(provider)) return res.status(400).json({ success: false, message: 'Proveedor de correo inválido.' });
   if (!esEmail(senderEmail) || !esEmail(adminNotifyEmail)) return res.status(400).json({ success: false, message: 'Hay un email inválido.' });
-  if (!esClave(resendApiKey) || !esClave(brevoApiKey) || !esClave(groqApiKey)) return res.status(400).json({ success: false, message: 'Una de las claves tiene un formato inválido.' });
   if (senderName !== undefined && (typeof senderName !== 'string' || senderName.length > 80)) return res.status(400).json({ success: false, message: 'El nombre del remitente es demasiado largo.' });
 
   const update: any = {};
   if (provider !== undefined) update.mailProvider = provider;
-  if (resendApiKey !== undefined && resendApiKey !== '') update.resendApiKey = resendApiKey.trim();
-  if (brevoApiKey !== undefined && brevoApiKey !== '') update.brevoApiKey = brevoApiKey.trim();
-  if (groqApiKey !== undefined && groqApiKey !== '') update.groqApiKey = groqApiKey.trim();
   if (senderEmail !== undefined) update.mailSenderEmail = senderEmail.trim();
   if (senderName !== undefined) update.mailSenderName = senderName.trim();
   if (adminNotifyEmail !== undefined) update.adminNotifyEmail = adminNotifyEmail.trim();
 
   db.updateSettings(update);
-  logger.info('CONFIG', `Configuración de correo (Brevo/Resend) y Groq AI actualizada por ${req.user!.username}.`);
+  logger.info('CONFIG', `Configuración de correo actualizada por ${req.user!.username}.`);
 
   res.json({
     success: true,
-    message: 'Configuración de notificaciones por email guardada con éxito.',
+    message: 'Configuración de correo guardada.',
   });
 });
 

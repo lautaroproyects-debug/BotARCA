@@ -15,6 +15,8 @@ import { emitirPorWebService, ResultadoWs } from '../engine/ws/wsfeEmisor.js';
 export interface OpcionesEmision {
   /** Para lotes en modo navegador: reutilizar una sesión ya abierta. */
   obtenerSesionNavegador?: (acc: ArcaAccountRecord | undefined, cuit: string) => Promise<ArcaSessionResult>;
+  /** Usuario que emite: el comprobante queda en su repositorio y cuenta para su límite mensual. */
+  usuarioId?: string;
 }
 
 export type ResultadoEmision = ResultadoWs & { via: 'webservice' | 'navegador'; comprobanteId?: string };
@@ -42,7 +44,7 @@ export async function emitirComprobante(datos: FacturaRequest, opciones: Opcione
 
   if (modoDeCuenta(acc) === 'webservice') {
     const r: ResultadoEmision = { ...(await emitirPorWebService(acc!, datosCompletos)), via: 'webservice' };
-    if (r.success) await registrarYEnviar(r, datosCompletos);
+    if (r.success) await registrarYEnviar(r, datosCompletos, opciones.usuarioId);
     return r;
   }
 
@@ -63,7 +65,7 @@ export async function emitirComprobante(datos: FacturaRequest, opciones: Opcione
   }
   const rNav: ResultadoEmision = { ...(await facturacionModule.emitirFactura(sesion, datosCompletos)), via: 'navegador' };
   // El flujo del navegador ya manda su propio mail con el PDF de ARCA: acá solo se registra
-  if (rNav.success) rNav.comprobanteId = comprobantesService.guardarEmitido(datosCompletos, rNav).id;
+  if (rNav.success) rNav.comprobanteId = comprobantesService.guardarEmitido(datosCompletos, rNav, opciones.usuarioId).id;
   return rNav;
 }
 
@@ -79,8 +81,8 @@ export function credencialesNavegador(acc: ArcaAccountRecord | undefined, cuit: 
  * Guarda el comprobante en el repositorio y, si el receptor tiene email, se lo manda.
  * Nunca hace fallar la emisión: el comprobante ya está autorizado en ARCA.
  */
-async function registrarYEnviar(r: ResultadoEmision, datos: FacturaRequest) {
-  const rec = comprobantesService.guardarEmitido(datos, r);
+async function registrarYEnviar(r: ResultadoEmision, datos: FacturaRequest, usuarioId?: string) {
+  const rec = comprobantesService.guardarEmitido(datos, r, usuarioId);
   r.comprobanteId = rec.id;
   if (!datos.receptor.email) return;
   if (r.ambiente === 'homologacion') {

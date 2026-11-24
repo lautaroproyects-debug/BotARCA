@@ -187,6 +187,8 @@ export interface AppDatabase {
   wsaaTickets?: Record<string, { token: string; sign: string; expiracion: string }>;
   /** Límites de uso por usuario que cambió el administrador (lo que no esté usa el valor por defecto) */
   limitesUsuarios?: Record<string, Record<string, number>>;
+  /** CUITs quitados o reemplazados: no se vuelven a cargar desde ARCA_ACCOUNTS ni Supabase */
+  cuentasDescartadas?: string[];
 }
 
 const DB_FILE = path.join(config.paths.dataDir, 'botarca_db.json');
@@ -330,6 +332,10 @@ class DatabaseManager {
         console.error('Error al parsear ARCA_ACCOUNTS:', e);
       }
     }
+
+    // Lo que el usuario quitó o reemplazó no vuelve desde ARCA_ACCOUNTS
+    const descartadas = new Set(loadedData.cuentasDescartadas || []);
+    if (descartadas.size) loadedData.accounts = (loadedData.accounts || []).filter(a => !descartadas.has(a.cuit));
 
     this.save(loadedData);
     return loadedData;
@@ -514,6 +520,10 @@ class DatabaseManager {
         usuarios: [],
       };
       this.data.accounts.push(acc);
+      if ((this.data.cuentasDescartadas || []).includes(cuit)) {
+        this.data.cuentasDescartadas = this.data.cuentasDescartadas!.filter(c => c !== cuit);
+        this.persistirDescartadas();
+      }
     }
     if (datos.razonSocial) acc.razonSocial = datos.razonSocial.trim();
     if (datos.cuitRepresentante !== undefined) acc.cuitRepresentante = datos.cuitRepresentante.replace(/\D/g, '') || undefined;
@@ -582,6 +592,66 @@ class DatabaseManager {
       }, { onConflict: 'cuit' });
     }).catch(() => {});
     this.persistirAccesos();
+  }
+
+  private persistirDescartadas() {
+    const lista = this.data.cuentasDescartadas || [];
+    import('./services/supabase.js').then(async ({ supabase }) => {
+      const client = supabase.getClient();
+      if (!client) return;
+      await client.from('configuraciones').upsert({ id: 'cuentas_descartadas', valor: lista, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    }).catch(() => {});
+  }
+
+  /** Quita un CUIT para siempre: de Supabase y de la lista que se vuelve a cargar al arrancar. */
+  private descartarCuit(cuit: string) {
+    this.data.cuentasDescartadas = Array.from(new Set([...(this.data.cuentasDescartadas || []), cuit]));
+    for (const [u, c] of Object.entries(this.data.cuitActivoPorUsuario || {})) if (c === cuit) delete this.data.cuitActivoPorUsuario![u];
+    this.save();
+    this.persistirDescartadas();
+    this.persistirAccesos();
+    import('./services/supabase.js').then(async ({ supabase }) => {
+      const client = supabase.getClient();
+      if (!client) return;
+      await client.from('cuentas_arca').delete().eq('cuit', cuit);
+      await client.from('configuraciones').delete().in('id', ['diseno_' + cuit, 'ws_cuenta_' + cuit]);
+      await client.from('configuraciones').upsert({ id: 'cuit_activo_usuarios', valor: this.data.cuitActivoPorUsuario || {}, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    }).catch(() => {});
+  }
+
+  /**
+   * Cambia el CUIT de una cuenta (por ejemplo, si se cargó mal). Conserva quién la usa, el diseño
+   * y los datos del emisor; el certificado propio se descarta porque es de un CUIT puntual.
+   */
+  public renombrarCuenta(viejo: string, nuevo: string): { ok: boolean; mensaje: string } {
+    const acc = this.getAccountRecord(viejo);
+    if (!acc) return { ok: false, mensaje: 'No se encontró el CUIT a cambiar.' };
+    if (this.getAccountRecord(nuevo)) return { ok: false, mensaje: 'El CUIT nuevo ya está cargado en el sistema.' };
+    acc.cuit = nuevo;
+    if (acc.ws) {
+      const { certPropioPem, encryptedKeyPropio, csrPendientePem, encryptedKeyPendiente, ultimaPrueba, ...resto } = acc.ws;
+      acc.ws = resto as WsConfigCuenta;
+    }
+    for (const [u, c] of Object.entries(this.data.cuitActivoPorUsuario || {})) if (c === viejo) this.data.cuitActivoPorUsuario![u] = nuevo;
+    if (this.data.credentials?.cuit === viejo) this.data.credentials.cuit = nuevo;
+    for (const q of this.data.queue || []) if (q.cuitEmisor === viejo && q.estado === 'pendiente') q.cuitEmisor = nuevo;
+    this.data.cuentasDescartadas = Array.from(new Set([...(this.data.cuentasDescartadas || []).filter(c => c !== nuevo), viejo]));
+    this.save();
+    this.persistirCuenta(acc);
+    this.persistirDescartadas();
+    this.persistirCola();
+    const diseno = acc.diseno, ws = acc.ws;
+    import('./services/supabase.js').then(async ({ supabase }) => {
+      const client = supabase.getClient();
+      if (!client) return;
+      const ahora = new Date().toISOString();
+      await client.from('cuentas_arca').delete().eq('cuit', viejo);
+      await client.from('configuraciones').delete().in('id', ['diseno_' + viejo, 'ws_cuenta_' + viejo]);
+      if (diseno) await client.from('configuraciones').upsert({ id: 'diseno_' + nuevo, valor: diseno, updated_at: ahora }, { onConflict: 'id' });
+      if (ws) await client.from('configuraciones').upsert({ id: 'ws_cuenta_' + nuevo, valor: ws, updated_at: ahora }, { onConflict: 'id' });
+      await client.from('configuraciones').upsert({ id: 'cuit_activo_usuarios', valor: this.data.cuitActivoPorUsuario || {}, updated_at: ahora }, { onConflict: 'id' });
+    }).catch(() => {});
+    return { ok: true, mensaje: 'CUIT cambiado. Volvé a conectarlo con ARCA: la conexión es propia de cada CUIT.' };
   }
 
   private persistirAccesos() {
@@ -681,6 +751,8 @@ class DatabaseManager {
               ? { ...q, estado: 'error' as const, errorMensaje: 'Se interrumpió por un reinicio del servidor. Fijate en Comprobantes si salió antes de volver a intentarlo.' }
               : q);
           }
+        } else if (row.id === 'cuentas_descartadas' && Array.isArray(row.valor)) {
+          this.data.cuentasDescartadas = Array.from(new Set([...(this.data.cuentasDescartadas || []), ...row.valor.map(String)]));
         } else if (row.id === 'limites_usuarios' && row.valor && typeof row.valor === 'object') {
           this.data.limitesUsuarios = { ...(row.valor || {}), ...(this.data.limitesUsuarios || {}) };
         } else if (row.id === 'cuit_activo_usuarios' && row.valor && typeof row.valor === 'object') {
@@ -693,6 +765,8 @@ class DatabaseManager {
           if (acc && row.valor) acc.ws = { ...(row.valor as WsConfigCuenta), ...(acc.ws || {}) };
         }
       }
+      const descartadas = new Set(this.data.cuentasDescartadas || []);
+      if (descartadas.size) this.data.accounts = (this.data.accounts || []).filter(a => !descartadas.has(a.cuit));
       this.save();
     } catch { /* Supabase es opcional */ }
   }
@@ -781,11 +855,8 @@ class DatabaseManager {
         }
       }
       this.save();
-      try {
-        import('./services/renderPersistence.js').then(({ RenderPersistenceService }) => {
-          RenderPersistenceService.persistAccounts(this.data.accounts).catch(() => {});
-        }).catch(() => {});
-      } catch (e) {}
+      // Antes solo se borraba del archivo local: desde Supabase (o ARCA_ACCOUNTS) volvía al reiniciar
+      this.descartarCuit(cleanCuit);
       return true;
     }
     return false;

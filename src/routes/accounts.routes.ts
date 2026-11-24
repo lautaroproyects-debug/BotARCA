@@ -10,6 +10,16 @@ import { crearEnlace } from '../services/enlacesTemporales.js';
 import { usuarioDe, esAdmin, cuitsVisibles, puedeUsarCuit, cuitActivoDe, exigirAccesoCuit } from '../services/acceso.js';
 import { cuitValido } from '../services/aiParserService.js';
 import { excedeLimite } from '../services/limites.js';
+import { supabase } from '../services/supabase.js';
+
+/** ¿El CUIT ya emitió algo? (local o en Supabase). Un CUIT con comprobantes no se renombra. */
+async function tieneComprobantes(cuit: string): Promise<boolean> {
+  if ((db.data.comprobantes || []).some(c => c.cuitEmisor === cuit)) return true;
+  const client = supabase.getClient();
+  if (!client) return false;
+  const { count, error } = await client.from('comprobantes').select('id', { count: 'exact', head: true }).eq('cuit_emisor', cuit);
+  return !error && (count || 0) > 0;
+}
 
 const router = Router();
 
@@ -33,7 +43,7 @@ router.get('/', (req: Request, res: Response) => {
 // Agregar o actualizar un CUIT propio
 router.post('/', async (req: Request, res: Response) => {
   const usuario = usuarioDe(req)!;
-  const { cuit, claveFiscal, puntoVentaDefault, razonSocial, cuitRepresentante, nombreRepresentante, emailNotificaciones } = req.body || {};
+  const { cuit, claveFiscal, puntoVentaDefault, razonSocial, cuitRepresentante, nombreRepresentante, emailNotificaciones, cuitAnterior } = req.body || {};
   const limpio = String(cuit || '').replace(/\D/g, '');
   if (limpio.length !== 11) return res.status(400).json({ success: false, message: 'El CUIT tiene que tener 11 números.' });
   if (!cuitValido(limpio)) return res.status(400).json({ success: false, message: 'Ese CUIT no es válido: revisá los números.' });
@@ -43,6 +53,21 @@ router.post('/', async (req: Request, res: Response) => {
   if (emailNotificaciones && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(emailNotificaciones).trim())) return res.status(400).json({ success: false, message: 'El email no es válido.' });
   const pv = Number(puntoVentaDefault) || 1;
   if (!Number.isInteger(pv) || pv < 1 || pv > 99998) return res.status(400).json({ success: false, message: 'El punto de venta tiene que ser un número entre 1 y 99998.' });
+
+  // Cambio de CUIT de una cuenta existente (por ejemplo, si se cargó mal)
+  const anterior = String(cuitAnterior || '').replace(/\D/g, '');
+  let renombrado = false;
+  if (anterior && anterior !== limpio) {
+    const acc = db.getAccountRecord(anterior);
+    if (!acc || !puedeUsarCuit(usuario, anterior)) return res.status(404).json({ success: false, message: 'No tenés ese CUIT en tu cuenta.' });
+    if (db.getAccountRecord(limpio)) return res.status(409).json({ success: false, message: 'El CUIT nuevo ya está cargado en el sistema.' });
+    if (await tieneComprobantes(anterior)) {
+      return res.status(409).json({ success: false, message: 'Ese CUIT ya tiene comprobantes emitidos, así que no se puede cambiar. Agregá el CUIT correcto como uno nuevo y, si querés, quitá este.' });
+    }
+    const r = db.renombrarCuenta(anterior, limpio);
+    if (!r.ok) return res.status(400).json({ success: false, message: r.mensaje });
+    renombrado = true;
+  }
 
   // Un CUIT que ya cargó otro usuario no se puede tomar: lo comparte el administrador
   const existente = db.getAccountRecord(limpio);
@@ -55,7 +80,12 @@ router.post('/', async (req: Request, res: Response) => {
   }
   db.guardarCuenta({ cuit: limpio, razonSocial, cuitRepresentante: rep, nombreRepresentante, emailNotificaciones, claveFiscal: claveFiscal || undefined, puntoVentaDefault: pv }, usuario.id);
   if (!db.getCuitActivoUsuario(usuario.id)) db.setCuitActivoUsuario(usuario.id, limpio);
-  res.json({ success: true, message: existente ? 'CUIT actualizado.' : 'CUIT agregado. Ahora configurá su conexión con ARCA.', cuit: limpio, accounts: cuentasDe(req) });
+  res.json({
+    success: true,
+    message: renombrado ? 'CUIT cambiado. Volvé a conectarlo con ARCA: la conexión es propia de cada CUIT.'
+      : existente ? 'CUIT actualizado.' : 'CUIT agregado. Ahora configurá su conexión con ARCA.',
+    cuit: limpio, renombrado, accounts: cuentasDe(req),
+  });
 });
 
 // Elegir con qué CUIT facturo (solo para mi usuario)
